@@ -10,6 +10,7 @@ param(
     # install is not present is reported and skipped; a target that IS present
     # must install cleanly or the whole deployment fails.
     [string[]]$GameDir = @(
+        'E:\SteamLibrary\steamapps\common\Halo The Master Chief Collection\Halo_MCC_VR',
         'N:\SteamLibrary\steamapps\common\Halo The Master Chief Collection\Halo_MCC_VR',
         'N:\XBOX\Halo- The Master Chief Collection\Content\Halo_MCC_VR'
     )

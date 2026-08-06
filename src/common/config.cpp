@@ -349,6 +349,8 @@ static void Clamp()
     g_config.reticle_g = std::clamp(g_config.reticle_g, 0.0f, 1.0f);
     g_config.reticle_b = std::clamp(g_config.reticle_b, 0.0f, 1.0f);
     g_config.gun_scale = std::clamp(g_config.gun_scale, 0.3f, 3.0f);
+    g_config.physical_weapon_melee_speed = std::clamp(
+        g_config.physical_weapon_melee_speed, 0.50f, 4.00f);
     g_config.left_hand_scale = std::clamp(g_config.left_hand_scale, 0.3f, 3.0f);
     g_config.game_brightness = std::clamp(g_config.game_brightness, 0.5f, 2.0f);
     // Free-form: a hand-typed 0.90 stays 0.90. (Until 2026-07-20 this snapped
@@ -593,6 +595,11 @@ void ConfigLoad(const wchar_t* path)
             g_config.reticle_b = (float)atof(val);
         else if (!strcmp(key, "gun_scale"))
             g_config.gun_scale = (float)atof(val);
+        else if (!strcmp(key, "physical_weapon_contact"))
+            g_config.physical_weapon_contact = atoi(val) != 0;
+        else if (!strcmp(key, "physical_weapon_melee_speed"))
+            ParseFloatSetting(
+                key, val, g_config.physical_weapon_melee_speed);
         else if (!strcmp(key, "left_hand_scale"))
             g_config.left_hand_scale = (float)atof(val);
         else if (!strcmp(key, "bullet_snap"))
@@ -974,6 +981,17 @@ void ConfigSave()
     fprintf(f, "# in-game. 1.00 = the size the active game authored the model at.\n");
     fprintf(f, "# (default %.2f, range 0.3 to 3)\n", d.gun_scale);
     fprintf(f, "gun_scale = %.2f\n\n", g_config.gun_scale);
+    fprintf(f, "# Halo 3 solo campaign: let the visible right-hand weapon push\n");
+    fprintf(f, "# movable rigid bodies. Faster contact also invokes the equipped\n");
+    fprintf(f, "# weapon's authored melee damage/effect. 0 = disabled.\n");
+    fprintf(f, "# (default %d)\n", d.physical_weapon_contact ? 1 : 0);
+    fprintf(f, "physical_weapon_contact = %d\n",
+            g_config.physical_weapon_contact ? 1 : 0);
+    fprintf(f, "# Melee speed threshold in metres/second. Slow contact never damages.\n");
+    fprintf(f, "# (default %.2f, range 0.50 to 4.00)\n",
+            d.physical_weapon_melee_speed);
+    fprintf(f, "physical_weapon_melee_speed = %.2f\n\n",
+            g_config.physical_weapon_melee_speed);
     fprintf(f, "# Size of the LEFT hand, and of the second gun when dual-wielding.\n");
     fprintf(f, "# Separate from gun_scale because the left hand is usually empty.\n");
     fprintf(f, "# Set it to the same number as gun_scale for matching hands.\n");

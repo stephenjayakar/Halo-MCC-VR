@@ -25,6 +25,7 @@
 #include "odst_bringup_logic.h"
 #include "sigscan.h"
 #include "odst_vehicle_logic.h"
+#include "physical_contact_logic.h"
 #include "reach_adapter.h"
 #include "reach_chud_logic.h"
 #include "reach_observer_logic.h"
@@ -8710,6 +8711,74 @@ int main()
               !CoopProbeIsInLevelMode(RuntimeMode::Loading) &&
               !CoopProbeIsInLevelMode(RuntimeMode::Unsupported),
             "Co-op probe dumps only when a live level falls to Loading");
+    }
+
+    // Halo 3 physical-contact fallback: continuous capsule sweeps prevent
+    // translation/rotation tunnelling, classification keeps slow pushes
+    // damage-free, and fixed-capacity state debounces each concrete target.
+    {
+        const PhysicalContactHit translation = PhysicalContactSweepCapsule(
+            {0, 0, 0}, {0.5f, 0, 0}, {2, 0, 0}, {2.5f, 0, 0},
+            0.05f, {1.25f, 0, 0}, 0.05f);
+        const PhysicalContactHit rotation = PhysicalContactSweepCapsule(
+            {0, 0, 0}, {1, 0, 0}, {0, 0, 0}, {0, 1, 0},
+            0.05f, {0.5f, 0.5f, 0}, 0.05f);
+        const PhysicalContactHit grazingMiss = PhysicalContactSweepCapsule(
+            {0, 0, 0}, {0.5f, 0, 0}, {2, 0, 0}, {2.5f, 0, 0},
+            0.05f, {1.25f, 0.11f, 0}, 0.05f);
+        Check(translation.hit && rotation.hit && !grazingMiss.hit,
+            "Physical contact continuously sweeps translation and rotation "
+            "without turning a grazing miss into contact");
+
+        Check(PhysicalContactClassify(0.049f, 1.50f) ==
+                  PhysicalContactAction::None &&
+              PhysicalContactClassify(0.05f, 1.50f) ==
+                  PhysicalContactAction::ImpulseOnly &&
+              PhysicalContactClassify(1.49f, 1.50f) ==
+                  PhysicalContactAction::ImpulseOnly &&
+              PhysicalContactClassify(1.50f, 1.50f) ==
+                  PhysicalContactAction::ImpulseAndMelee &&
+              PhysicalContactClassify(
+                  std::numeric_limits<float>::quiet_NaN(), 1.50f) ==
+                  PhysicalContactAction::None,
+            "Tracking noise and non-finite velocity do nothing, slow motion "
+            "pushes only, and melee begins exactly at the configured threshold");
+
+        PhysicalContactDebounce debounce;
+        bool first = false;
+        debounce.BeginSample();
+        PhysicalContactTargetState* target = debounce.Touch(0x12340007, &first);
+        const bool initial = first && target && target->meleeArmed;
+        target->meleeArmed = false;
+        debounce.EndSample();
+        debounce.BeginSample();
+        target = debounce.Touch(0x12340007, &first);
+        const bool held = !first && target && !target->meleeArmed;
+        debounce.EndSample();
+        debounce.BeginSample();
+        debounce.EndSample();
+        debounce.BeginSample();
+        target = debounce.Touch(0x12340007, &first);
+        const bool rearmed = first && target && target->meleeArmed;
+        debounce.EndSample();
+        debounce.Reset(); // weapon/title/tracking change
+        debounce.BeginSample();
+        target = debounce.Touch(0x12340007, &first);
+        const bool resetRearmed = first && target && target->meleeArmed;
+        debounce.EndSample();
+        Check(initial && held && rearmed && resetRearmed,
+            "Per-target contact fires once while overlapping and rearms after "
+            "separation or a weapon/tracking reset");
+
+        Check(PhysicalContactMovableKind(0) &&
+              PhysicalContactMovableKind(2) &&
+              PhysicalContactMovableKind(11) &&
+              !PhysicalContactMovableKind(6) &&
+              !PhysicalContactMovableKind(7) &&
+              PhysicalContactImpulseDeltaMetersPerSecond(0.10f) == 0.05f &&
+              PhysicalContactImpulseDeltaMetersPerSecond(20.0f) == 1.5f,
+            "Capsule fallback pushes movable rigid-body kinds only and clamps "
+            "velocity-scaled impulse strength");
     }
 
     if (g_failures == 0)

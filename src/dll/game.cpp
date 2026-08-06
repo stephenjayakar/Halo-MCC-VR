@@ -36,6 +36,7 @@
 #include "../common/level_load_gate_logic.h"
 #include "../common/odst_bringup_logic.h"
 #include "../common/odst_vehicle_logic.h"
+#include "../common/physical_contact_logic.h"
 #include "../common/scope_logic.h"
 
 #ifndef HALOMCCVR_EXPERIMENTAL_ODST_BRINGUP
@@ -227,6 +228,7 @@ namespace
     float g_gameYawRef = 0;
     float g_headPosRef[3] = {0, 0, 0}; // headset position (m) captured at recenter
     bool Halo3VehicleFpActive();
+    bool ReadEnginePaused(bool& paused);
 
     // C25 optional pitch follow. The camera thread publishes the current
     // rendered hull yaw+pitch; camera, hands, room translation, and aim all
@@ -932,6 +934,37 @@ namespace
     // then translation. The first headset build incorrectly put scale last,
     // shifting every basis read by one float and making weapon pieces diverge.
     struct BoneMatrix { float scale; float rotation[9]; float translation[3]; };
+    struct Halo3VisibleWeaponPosePublication
+    {
+        std::atomic<uint32_t> sequence{0};
+        std::atomic<uint64_t> sampleMs{0};
+        std::atomic<int32_t> weaponHandle{-1};
+        std::atomic<float> basis[9]{};
+        std::atomic<float> position[3]{};
+    };
+    Halo3VisibleWeaponPosePublication g_halo3VisibleWeaponPose;
+
+    bool Halo3ReadVisibleWeaponPose(float basis[9], float position[3],
+                                    uint64_t& sampleMs)
+    {
+        auto& published = g_halo3VisibleWeaponPose;
+        for (int attempt = 0; attempt < 2; ++attempt)
+        {
+            const uint32_t before =
+                published.sequence.load(std::memory_order_acquire);
+            if (before & 1u)
+                continue;
+            sampleMs = published.sampleMs.load(std::memory_order_relaxed);
+            for (int i = 0; i < 9; ++i)
+                basis[i] = published.basis[i].load(std::memory_order_relaxed);
+            for (int i = 0; i < 3; ++i)
+                position[i] =
+                    published.position[i].load(std::memory_order_relaxed);
+            if (published.sequence.load(std::memory_order_acquire) == before)
+                return sampleMs != 0;
+        }
+        return false;
+    }
     static_assert(sizeof(BoneMatrix) == 0x34);
 
     using FpInterpolateFn = bool(__fastcall*)(int view, int id, int slot,
@@ -4296,6 +4329,20 @@ namespace
         out.scale = 1.0f;
         memcpy(out.rotation, mounted, sizeof(mounted));
         memcpy(out.translation, posC, sizeof(posC));
+        if (!left)
+        {
+            auto& published = g_halo3VisibleWeaponPose;
+            published.sequence.fetch_add(1, std::memory_order_acq_rel);
+            published.sampleMs.store(
+                GetTickCount64(), std::memory_order_relaxed);
+            for (int i = 0; i < 9; ++i)
+                published.basis[i].store(
+                    out.rotation[i], std::memory_order_relaxed);
+            for (int i = 0; i < 3; ++i)
+                published.position[i].store(
+                    out.translation[i], std::memory_order_relaxed);
+            published.sequence.fetch_add(1, std::memory_order_release);
+        }
         return true;
     }
 
@@ -5942,6 +5989,24 @@ namespace
     Halo3VehicleTypeFn g_halo3VehicleTypeAccessor = nullptr;
     Halo3InterpolatedNodesFn g_halo3InterpolatedNodes = nullptr;
     Halo3MarkersInternalFn g_halo3MarkersInternal = nullptr;
+    using Halo3ObjectSetVelocityFn = void(__fastcall*)(
+        int32_t objectHandle, float localX, float localY, float localZ);
+    using Halo3NativeMeleeResponseFn = void(__fastcall*)(
+        int32_t unitHandle, uint32_t damageEffectTag, int32_t targetHandle,
+        int32_t meleeType, uint16_t materialIndex,
+        const float* direction, const float* point, const float* normal);
+    using Halo3GameIsCooperativeFn = bool(__fastcall*)();
+    Halo3ObjectSetVelocityFn g_halo3ObjectSetVelocity = nullptr;
+    Halo3NativeMeleeResponseFn g_halo3NativeMeleeResponse = nullptr;
+    Halo3GameIsCooperativeFn g_halo3GameIsCooperative = nullptr;
+    std::atomic<bool> g_halo3PhysicalContactBindings{false};
+    PhysicalContactDebounce g_halo3ContactDebounce;
+    uint64_t g_halo3ContactLastMotionSerial = 0;
+    uint64_t g_halo3ContactLastMeleeMs = 0;
+    int32_t g_halo3ContactWeaponHandle = -1;
+    PhysicalContactVec3 g_halo3ContactPreviousGrip{};
+    PhysicalContactVec3 g_halo3ContactPreviousTip{};
+    bool g_halo3ContactPreviousPoseValid = false;
     enum class Halo3NodeBindingState : uint8_t
     {
         NotInstalled = 0,
@@ -8554,6 +8619,374 @@ namespace
         }
     }
 
+    void Halo3ResetPhysicalContact()
+    {
+        g_halo3ContactDebounce.Reset();
+        g_halo3ContactLastMotionSerial = 0;
+        g_halo3ContactWeaponHandle = -1;
+        g_halo3ContactPreviousPoseValid = false;
+    }
+
+    // Camera-thread-only. Native writes are reached only after the same
+    // validated Halo 3 TLS/object-table path used by the vehicle sampler.
+    void Halo3ProcessPhysicalWeaponContact(uint64_t nowMs)
+    {
+        const uint32_t generation =
+            g_halo3RuntimeGeneration.load(std::memory_order_acquire);
+        bool paused = true;
+        int32_t scene = -1, shot = -1;
+        const bool gate = g_config.physical_weapon_contact && generation &&
+            g_halo3PhysicalContactBindings.load(std::memory_order_acquire) &&
+            g_halo3VehicleBinding.load(std::memory_order_acquire) ==
+                static_cast<uint8_t>(Halo3VehicleBindingState::Installed) &&
+            g_engineTlsIndex && g_enabled.load(std::memory_order_relaxed) &&
+            g_vrAim.load(std::memory_order_relaxed) &&
+            TitleAdapter_GetRuntimeMode() == RuntimeMode::Gameplay &&
+            Halo3VehicleSnapshotState(
+                g_halo3VehicleSnapshot.load(std::memory_order_acquire),
+                generation) == Halo3VehicleState::OnFoot &&
+            ReadEnginePaused(paused) && !paused &&
+            ReadCinematicControl(scene, shot) ==
+                CinematicControlState::PlayerControlled;
+        VrControllerMotionSnapshot motion{};
+        if (!gate || !VR_GetRightControllerMotion(motion) ||
+            !motion.poseValid || !motion.linearVelocityValid ||
+            !motion.sampleMs || nowMs < motion.sampleMs ||
+            nowMs - motion.sampleMs > 100 ||
+            motion.serial == g_halo3ContactLastMotionSerial)
+        {
+            if (!gate || !motion.poseValid ||
+                (motion.sampleMs && nowMs - motion.sampleMs > 100))
+                Halo3ResetPhysicalContact();
+            return;
+        }
+        g_halo3ContactLastMotionSerial = motion.serial;
+
+        float basis[9]{}, position[3]{};
+        uint64_t visiblePoseMs = 0;
+        if (!Halo3ReadVisibleWeaponPose(basis, position, visiblePoseMs) ||
+            nowMs < visiblePoseMs || nowMs - visiblePoseMs > 100)
+        {
+            Halo3ResetPhysicalContact();
+            return;
+        }
+
+        bool faulted = false;
+        __try
+        {
+            auto** slots = reinterpret_cast<void**>(__readgsqword(0x58));
+            auto* tls = slots ? reinterpret_cast<unsigned char*>(
+                slots[*g_engineTlsIndex]) : nullptr;
+            auto* gameOptions = tls
+                ? *reinterpret_cast<unsigned char**>(tls + 0x48) : nullptr;
+            // The official/retail game_is_cooperative body proves +0x10==1 is
+            // campaign. Its player-count result separately rejects co-op.
+            if (!gameOptions || gameOptions[0x10] != 1 ||
+                g_halo3GameIsCooperative())
+            {
+                Halo3ResetPhysicalContact();
+                return;
+            }
+            auto* table = *reinterpret_cast<unsigned char**>(
+                tls + kHalo3TlsObjectTableOffset);
+            if (!table)
+            {
+                Halo3ResetPhysicalContact();
+                return;
+            }
+            OdstDataArrayHeaderView header{};
+            header.nameIsObject =
+                memcmp(table + kOdstDataArrayNameOffset, "object", 7) == 0;
+            header.signature = *reinterpret_cast<const uint32_t*>(
+                table + kOdstDataArraySignatureOffset);
+            header.maximumCount = *reinterpret_cast<const uint32_t*>(
+                table + kOdstDataArrayMaxCountOffset);
+            header.elementSize = *reinterpret_cast<const uint32_t*>(
+                table + kOdstDataArrayElementSizeOffset);
+            header.firstUnallocated = *reinterpret_cast<const uint32_t*>(
+                table + kOdstDataArrayFirstUnallocatedOffset);
+            header.valid = *(table + kOdstDataArrayValidOffset);
+            if (!OdstObjectTableIsWalkable(header))
+            {
+                Halo3ResetPhysicalContact();
+                return;
+            }
+            auto* entries = *reinterpret_cast<unsigned char**>(
+                table + kOdstDataArrayElementsOffset);
+            const int32_t unitHandle = g_halo3PlayerUnitGetter(0);
+            const uint32_t unitIndex =
+                static_cast<uint32_t>(unitHandle) & 0xFFFFu;
+            if (!entries || unitHandle == -1 ||
+                unitIndex >= header.maximumCount)
+            {
+                Halo3ResetPhysicalContact();
+                return;
+            }
+            auto* unitEntry = entries +
+                static_cast<size_t>(unitIndex) *
+                    kHalo3ObjectEntryStride;
+            if (*reinterpret_cast<const uint16_t*>(unitEntry) !=
+                static_cast<uint16_t>(
+                    static_cast<uint32_t>(unitHandle) >> 16))
+            {
+                Halo3ResetPhysicalContact();
+                return;
+            }
+            auto* unitData = *reinterpret_cast<unsigned char**>(
+                unitEntry + kHalo3ObjectEntryDataOffset);
+            const int weaponSlot = unitData
+                ? *reinterpret_cast<const int8_t*>(unitData + 0x262) : -1;
+            const int32_t weaponHandle =
+                unitData && weaponSlot >= 0 && weaponSlot < 4
+                ? *reinterpret_cast<const int32_t*>(
+                      unitData + 0x268 + weaponSlot * 4)
+                : -1;
+            const uint32_t weaponIndex =
+                static_cast<uint32_t>(weaponHandle) & 0xFFFFu;
+            if (weaponHandle == -1 || weaponIndex >= header.maximumCount)
+            {
+                Halo3ResetPhysicalContact();
+                return;
+            }
+            g_halo3VisibleWeaponPose.weaponHandle.store(
+                weaponHandle, std::memory_order_release);
+            auto* weaponEntry = entries +
+                static_cast<size_t>(weaponIndex) *
+                    kHalo3ObjectEntryStride;
+            if (*reinterpret_cast<const uint16_t*>(weaponEntry) !=
+                static_cast<uint16_t>(
+                    static_cast<uint32_t>(weaponHandle) >> 16))
+            {
+                Halo3ResetPhysicalContact();
+                return;
+            }
+            auto* weaponData = *reinterpret_cast<unsigned char**>(
+                weaponEntry + kHalo3ObjectEntryDataOffset);
+            if (!weaponData)
+            {
+                Halo3ResetPhysicalContact();
+                return;
+            }
+
+            const float worldScale = g_worldScale.load(std::memory_order_relaxed);
+            if (!std::isfinite(worldScale) || worldScale < 0.05f ||
+                worldScale > 2.0f)
+            {
+                Halo3ResetPhysicalContact();
+                return;
+            }
+            const float authoredRadius =
+                *reinterpret_cast<const float*>(weaponData + 0x28);
+            const bool authoredBounds = std::isfinite(authoredRadius) &&
+                authoredRadius > 0.01f && authoredRadius < 2.0f;
+            const float capsuleLength = authoredBounds
+                ? std::clamp(authoredRadius * 1.75f, 0.12f, 0.45f)
+                : 0.65f * worldScale;
+            const float capsuleRadius = authoredBounds
+                ? std::clamp(authoredRadius * 0.18f, 0.015f, 0.05f)
+                : 0.06f * worldScale;
+            const PhysicalContactVec3 grip{
+                position[0], position[1], position[2]};
+            const PhysicalContactVec3 forward = PhysicalContactNormalize({
+                basis[0], basis[1], basis[2]});
+            const PhysicalContactVec3 tip = grip + forward * capsuleLength;
+            if (weaponHandle != g_halo3ContactWeaponHandle)
+            {
+                g_halo3ContactDebounce.Reset();
+                g_halo3ContactWeaponHandle = weaponHandle;
+                g_halo3ContactPreviousPoseValid = false;
+            }
+            if (!g_halo3ContactPreviousPoseValid)
+            {
+                g_halo3ContactPreviousGrip = grip;
+                g_halo3ContactPreviousTip = tip;
+                g_halo3ContactPreviousPoseValid = true;
+                return;
+            }
+
+            const float linearSpeed = std::sqrt(
+                motion.linearVelocity[0] * motion.linearVelocity[0] +
+                motion.linearVelocity[1] * motion.linearVelocity[1] +
+                motion.linearVelocity[2] * motion.linearVelocity[2]);
+            const float angularSpeed = motion.angularVelocityValid
+                ? std::sqrt(
+                    motion.angularVelocity[0] * motion.angularVelocity[0] +
+                    motion.angularVelocity[1] * motion.angularVelocity[1] +
+                    motion.angularVelocity[2] * motion.angularVelocity[2])
+                : 0.0f;
+            const float controllerSpeed = linearSpeed +
+                angularSpeed * (capsuleLength / worldScale);
+            const PhysicalContactVec3 movementDirection =
+                PhysicalContactNormalize(tip - g_halo3ContactPreviousTip,
+                                         forward);
+            PhysicalContactHit closest{};
+            int32_t closestHandle = -1;
+            uint8_t closestKind = 0xFF;
+            unsigned char* closestData = nullptr;
+            for (uint32_t index = 0; index < header.firstUnallocated; ++index)
+            {
+                auto* entry = entries +
+                    static_cast<size_t>(index) * kHalo3ObjectEntryStride;
+                const uint16_t identifier =
+                    *reinterpret_cast<const uint16_t*>(entry);
+                if (!OdstObjectEntryIsLive(identifier))
+                    continue;
+                const int32_t handle = static_cast<int32_t>(
+                    (static_cast<uint32_t>(identifier) << 16) | index);
+                if (handle == unitHandle || handle == weaponHandle)
+                    continue;
+                auto* data = *reinterpret_cast<unsigned char**>(
+                    entry + kHalo3ObjectEntryDataOffset);
+                if (!data || *reinterpret_cast<const int32_t*>(
+                                 data + kHalo3ObjectParentOffset) != -1)
+                    continue;
+                const auto* center = reinterpret_cast<const float*>(
+                    data + kHalo3ObjectBoundingCenterOffset);
+                const float radius =
+                    *reinterpret_cast<const float*>(data + 0x28);
+                if (!std::isfinite(radius) || radius <= 0.0f || radius > 50.0f)
+                    continue;
+                const PhysicalContactHit hit = PhysicalContactSweepCapsule(
+                    g_halo3ContactPreviousGrip, g_halo3ContactPreviousTip,
+                    grip, tip, capsuleRadius,
+                    {center[0], center[1], center[2]}, radius);
+                if (hit.hit && (!closest.hit || hit.fraction < closest.fraction))
+                {
+                    closest = hit;
+                    closestHandle = handle;
+                    closestKind = *(entry + kHalo3ObjectEntryKindOffset);
+                    closestData = data;
+                }
+            }
+            g_halo3ContactPreviousGrip = grip;
+            g_halo3ContactPreviousTip = tip;
+            g_halo3ContactDebounce.BeginSample();
+            if (!closest.hit)
+            {
+                g_halo3ContactDebounce.EndSample();
+                return;
+            }
+            bool firstContact = false;
+            PhysicalContactTargetState* contact =
+                g_halo3ContactDebounce.Touch(closestHandle, &firstContact);
+            if (!PhysicalContactMovableKind(closestKind))
+            {
+                g_halo3ContactDebounce.EndSample();
+                return; // closest static object blocks everything behind it
+            }
+            const auto* targetVelocity = reinterpret_cast<const float*>(
+                closestData + 0x74);
+            const PhysicalContactVec3 targetVelocityMeters{
+                targetVelocity[0] / worldScale,
+                targetVelocity[1] / worldScale,
+                targetVelocity[2] / worldScale};
+            if (!PhysicalContactFinite(targetVelocityMeters))
+            {
+                g_halo3ContactDebounce.EndSample();
+                return;
+            }
+            const PhysicalContactVec3 relativeVelocity =
+                movementDirection * controllerSpeed - targetVelocityMeters;
+            const float relativeSpeed = PhysicalContactLength(relativeVelocity);
+            const PhysicalContactVec3 contactDirection =
+                PhysicalContactNormalize(relativeVelocity, movementDirection);
+            const PhysicalContactAction action = PhysicalContactClassify(
+                relativeSpeed, g_config.physical_weapon_melee_speed);
+            if (relativeSpeed < g_config.physical_weapon_melee_speed * 0.5f)
+            {
+                if (!contact->belowHalfSinceMs)
+                    contact->belowHalfSinceMs = nowMs;
+                else if (nowMs - contact->belowHalfSinceMs >= 100)
+                    contact->meleeArmed = true;
+            }
+            else
+                contact->belowHalfSinceMs = 0;
+            if (action == PhysicalContactAction::None)
+            {
+                g_halo3ContactDebounce.EndSample();
+                return;
+            }
+
+            if (firstContact)
+            {
+                PhysicalContactVec3 worldVelocity{
+                    targetVelocity[0], targetVelocity[1], targetVelocity[2]};
+                const float delta =
+                    PhysicalContactImpulseDeltaMetersPerSecond(relativeSpeed) *
+                    worldScale;
+                worldVelocity = worldVelocity + contactDirection * delta;
+                const float maximum = 12.0f * worldScale;
+                const float magnitude = PhysicalContactLength(worldVelocity);
+                if (magnitude > maximum)
+                    worldVelocity = worldVelocity * (maximum / magnitude);
+                const auto* objectForward = reinterpret_cast<const float*>(
+                    closestData + kHalo3ObjectForwardOffset);
+                const auto* objectUp = reinterpret_cast<const float*>(
+                    closestData + kHalo3ObjectUpOffset);
+                const PhysicalContactVec3 f{objectForward[0], objectForward[1],
+                                             objectForward[2]};
+                const PhysicalContactVec3 u{objectUp[0], objectUp[1], objectUp[2]};
+                const PhysicalContactVec3 l{
+                    u.y * f.z - u.z * f.y, u.z * f.x - u.x * f.z,
+                    u.x * f.y - u.y * f.x};
+                if (PhysicalContactFinite(worldVelocity) &&
+                    PhysicalContactFinite(f) && PhysicalContactFinite(u) &&
+                    PhysicalContactFinite(l))
+                {
+                    g_halo3ObjectSetVelocity(
+                        closestHandle,
+                        PhysicalContactDot(worldVelocity, f),
+                        PhysicalContactDot(worldVelocity, l),
+                        PhysicalContactDot(worldVelocity, u));
+                }
+            }
+
+            if (action == PhysicalContactAction::ImpulseAndMelee &&
+                contact->meleeArmed &&
+                nowMs - g_halo3ContactLastMeleeMs >= 250)
+            {
+                uint32_t damageEffect = 0xFFFFFFFFu;
+                unsigned char* unitDefinition = Halo3LoadedTagDefinition(
+                    *reinterpret_cast<const uint16_t*>(unitData));
+                if (unitDefinition)
+                    damageEffect = *reinterpret_cast<const uint32_t*>(
+                        unitDefinition + 0x1B4);
+                unsigned char* weaponDefinition = Halo3LoadedTagDefinition(
+                    *reinterpret_cast<const uint16_t*>(weaponData));
+                if (weaponDefinition &&
+                    (*reinterpret_cast<const uint32_t*>(
+                         weaponDefinition + 0x18C) & (1u << 9)) != 0)
+                    damageEffect = *reinterpret_cast<const uint32_t*>(
+                        weaponDefinition + 0x22C);
+                if ((damageEffect & 0xFFFFu) != 0xFFFFu)
+                {
+                    const float direction[3] = {contactDirection.x,
+                        contactDirection.y, contactDirection.z};
+                    const float point[3] = {closest.point.x, closest.point.y,
+                                            closest.point.z};
+                    const float normal[3] = {closest.normal.x, closest.normal.y,
+                                             closest.normal.z};
+                    g_halo3NativeMeleeResponse(
+                        unitHandle, damageEffect, closestHandle, 0, 0xFFFFu,
+                        direction, point, normal);
+                    contact->meleeArmed = false;
+                    g_halo3ContactLastMeleeMs = nowMs;
+                }
+            }
+            g_halo3ContactDebounce.EndSample();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            faulted = true;
+        }
+        if (faulted)
+        {
+            g_halo3PhysicalContactBindings.store(
+                false, std::memory_order_release);
+            Halo3ResetPhysicalContact();
+        }
+    }
+
     void* __fastcall CamCopyHook(void* dst, void* src)
     {
         VR_NotifyCameraTransform();
@@ -8567,6 +9000,7 @@ namespace
             TitleAdapter_PublishHeartbeat(
                 GameTitle::Halo3, runtimeGeneration, cameraNowMs);
             Halo3SampleVehicleState(cameraNowMs);
+            Halo3ProcessPhysicalWeaponContact(cameraNowMs);
         }
         // Low-frequency timing proof paired with vr.cpp's HMD sample-rate log.
         // The hook normally runs multiple times per presented frame, and every
@@ -12738,6 +13172,22 @@ namespace
         "48 8B 05 ?? ?? ?? ?? 0F B7 C9 8B 54 C8 04 85 D2 75 04 33 D2 EB 0B "
         "48 8B 05 ?? ?? ?? ?? 48 8D 14 90 33 C0 45 33 C0 "
         "48 81 C2 C0 02 00 00 B9 0B 00 00 00 83 3A 00";
+    // Optional physical-contact bindings. Each pattern has exactly one match
+    // in the pinned retail halo3.dll; official H3EK provenance, ABI evidence,
+    // and hashes are recorded in docs/HALO3-PHYSICAL-CONTACT-EVIDENCE.md.
+    const char* kHalo3ObjectSetVelocitySig =
+        "83 F9 FF 0F 84 ?? ?? ?? ?? 48 8B C4 48 81 EC 88 00 00 00 "
+        "8B 15 ?? ?? ?? ?? 0F 29 70 E8 0F 29 78 D8 "
+        "44 0F 29 40 C8 44 0F 28 C3";
+    const char* kHalo3NativeMeleeResponseSig =
+        "48 8B C4 44 89 48 20 44 89 40 18 89 50 10 53 55 56 57 "
+        "41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 "
+        "44 8B 15 ?? ?? ?? ?? 0F 29 70 A8 65 48 8B 04 25 58 00 00 00 "
+        "44 8B F1 B9 38 00 00 00 4A 8B 04 D0";
+    const char* kHalo3GameIsCooperativeSig =
+        "48 83 EC 28 8B 0D ?? ?? ?? ?? 32 D2 65 48 8B 04 25 58 00 00 00 "
+        "41 B8 48 00 00 00 48 8B 04 C8 4A 8B 0C 00 80 79 10 01 "
+        "75 ?? B1 01 E8 ?? ?? ?? ?? 83 F8 01 0F 9F C2 8A C2 48 83 C4 28 C3";
     // C18 native render-node path. halo3.dll+0x1846AC returns the exact
     // interpolated 0x34-byte node bank consumed by both the visible-object
     // renderer (+0x3496F3 caller) and the native marker resolver
@@ -13356,6 +13806,53 @@ namespace
                     (unsigned long long)(markerHit ? markerHit - base : 0),
                     (unsigned long long)
                         kHalo3MarkersInternalExpectedRva);
+            }
+        }
+
+        {
+            g_halo3PhysicalContactBindings.store(
+                false, std::memory_order_release);
+            g_halo3ObjectSetVelocity = nullptr;
+            g_halo3NativeMeleeResponse = nullptr;
+            g_halo3GameIsCooperative = nullptr;
+            const uintptr_t velocityHit =
+                sig::Find(base, size, kHalo3ObjectSetVelocitySig);
+            const uintptr_t meleeHit =
+                sig::Find(base, size, kHalo3NativeMeleeResponseSig);
+            const uintptr_t cooperativeHit =
+                sig::Find(base, size, kHalo3GameIsCooperativeSig);
+            const bool velocityUnique = velocityHit && !sig::Find(
+                velocityHit + 1, base + size - velocityHit - 1,
+                kHalo3ObjectSetVelocitySig);
+            const bool meleeUnique = meleeHit && !sig::Find(
+                meleeHit + 1, base + size - meleeHit - 1,
+                kHalo3NativeMeleeResponseSig);
+            const bool cooperativeUnique = cooperativeHit && !sig::Find(
+                cooperativeHit + 1, base + size - cooperativeHit - 1,
+                kHalo3GameIsCooperativeSig);
+            if (velocityUnique && meleeUnique && cooperativeUnique)
+            {
+                g_halo3ObjectSetVelocity =
+                    reinterpret_cast<Halo3ObjectSetVelocityFn>(velocityHit);
+                g_halo3NativeMeleeResponse =
+                    reinterpret_cast<Halo3NativeMeleeResponseFn>(meleeHit);
+                g_halo3GameIsCooperative =
+                    reinterpret_cast<Halo3GameIsCooperativeFn>(cooperativeHit);
+                g_halo3PhysicalContactBindings.store(
+                    true, std::memory_order_release);
+                LOG("H3 physical contact: optional native bindings installed "
+                    "velocity=+0x%llX melee=+0x%llX solo=+0x%llX [unique]",
+                    (unsigned long long)(velocityHit - base),
+                    (unsigned long long)(meleeHit - base),
+                    (unsigned long long)(cooperativeHit - base));
+            }
+            else
+            {
+                LOG("H3 physical contact: disabled; signature evidence "
+                    "missing/ambiguous (velocity=%d/%d melee=%d/%d solo=%d/%d)",
+                    velocityHit ? 1 : 0, velocityUnique ? 1 : 0,
+                    meleeHit ? 1 : 0, meleeUnique ? 1 : 0,
+                    cooperativeHit ? 1 : 0, cooperativeUnique ? 1 : 0);
             }
         }
 

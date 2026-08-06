@@ -387,6 +387,19 @@ namespace
     bool g_headPoseValid = false;
     XrPosef g_rightAimPose{{0, 0, 0, 1}, {0, 0, 0}};
     bool g_rightAimPoseValid = false;
+    struct ControllerMotionPublication
+    {
+        std::atomic<uint32_t> sequence{0};
+        std::atomic<uint64_t> serial{0};
+        std::atomic<int64_t> xrTime{0};
+        std::atomic<uint64_t> sampleMs{0};
+        std::atomic<uint8_t> flags{0};
+        std::atomic<float> orientation[4]{{0.0f}, {0.0f}, {0.0f}, {1.0f}};
+        std::atomic<float> position[3]{};
+        std::atomic<float> linearVelocity[3]{};
+        std::atomic<float> angularVelocity[3]{};
+    };
+    ControllerMotionPublication g_rightMotion;
     XrPosef g_leftAimPose{{0, 0, 0, 1}, {0, 0, 0}};
     bool g_leftAimPoseValid = false;
     // Render-thread-only filtered copy for the compositor crosshair. Keeping it
@@ -5977,7 +5990,9 @@ float4 ps_scope_linearize(VSOut i):SV_Target { return paint(i.uv,true); }
         get.subactionPath = g_rightHandPath;
         XrActionStatePose state{XR_TYPE_ACTION_STATE_POSE};
         bool valid = false;
+        XrSpaceVelocity velocity{XR_TYPE_SPACE_VELOCITY};
         XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+        location.next = &velocity;
         if (XR_SUCCEEDED(xrGetActionStatePose(g_session, &get, &state)) && state.isActive &&
             XR_SUCCEEDED(xrLocateSpace(g_rightAimSpace, g_localSpace, time, &location)))
         {
@@ -6013,6 +6028,52 @@ float4 ps_scope_linearize(VSOut i):SV_Target { return paint(i.uv,true); }
         if (leftValid)
             g_leftAimPose = leftLocation.pose;
         LeaveCriticalSection(&g_headCs);
+        {
+            auto& publication = g_rightMotion;
+            publication.sequence.fetch_add(1, std::memory_order_acq_rel);
+            const auto finite3 = [](const XrVector3f& value) {
+                return std::isfinite(value.x) && std::isfinite(value.y) &&
+                    std::isfinite(value.z);
+            };
+            const bool linearValid = valid &&
+                (velocity.velocityFlags &
+                 XR_SPACE_VELOCITY_LINEAR_VALID_BIT) != 0 &&
+                finite3(velocity.linearVelocity);
+            const bool angularValid = valid &&
+                (velocity.velocityFlags &
+                 XR_SPACE_VELOCITY_ANGULAR_VALID_BIT) != 0 &&
+                finite3(velocity.angularVelocity);
+            uint8_t flags = valid ? 1u : 0u;
+            flags |= linearValid ? 2u : 0u;
+            flags |= angularValid ? 4u : 0u;
+            publication.flags.store(flags, std::memory_order_relaxed);
+            publication.xrTime.store(
+                static_cast<int64_t>(time), std::memory_order_relaxed);
+            publication.sampleMs.store(
+                valid ? GetTickCount64() : 0, std::memory_order_relaxed);
+            const XrQuaternionf q = valid
+                ? location.pose.orientation : XrQuaternionf{0, 0, 0, 1};
+            const XrVector3f p = valid
+                ? location.pose.position : XrVector3f{0, 0, 0};
+            const XrVector3f linear = linearValid
+                ? velocity.linearVelocity : XrVector3f{0, 0, 0};
+            const XrVector3f angular = angularValid
+                ? velocity.angularVelocity : XrVector3f{0, 0, 0};
+            const float qv[4] = {q.x, q.y, q.z, q.w};
+            const float pv[3] = {p.x, p.y, p.z};
+            const float lv[3] = {linear.x, linear.y, linear.z};
+            const float av[3] = {angular.x, angular.y, angular.z};
+            for (int i = 0; i < 4; ++i)
+                publication.orientation[i].store(qv[i], std::memory_order_relaxed);
+            for (int i = 0; i < 3; ++i)
+            {
+                publication.position[i].store(pv[i], std::memory_order_relaxed);
+                publication.linearVelocity[i].store(lv[i], std::memory_order_relaxed);
+                publication.angularVelocity[i].store(av[i], std::memory_order_relaxed);
+            }
+            publication.serial.fetch_add(1, std::memory_order_relaxed);
+            publication.sequence.fetch_add(1, std::memory_order_release);
+        }
         static bool logged = false;
         if (valid && !logged)
         {
@@ -9724,6 +9785,44 @@ bool VR_GetRightControllerPose(float outQuat[4], float outPos[3])
     }
     LeaveCriticalSection(&g_headCs);
     return ok;
+}
+
+bool VR_GetRightControllerMotion(VrControllerMotionSnapshot& out) noexcept
+{
+    auto& publication = g_rightMotion;
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        const uint32_t before =
+            publication.sequence.load(std::memory_order_acquire);
+        if (before & 1u)
+            continue;
+        VrControllerMotionSnapshot next{};
+        next.serial = publication.serial.load(std::memory_order_relaxed);
+        next.xrTime = publication.xrTime.load(std::memory_order_relaxed);
+        next.sampleMs = publication.sampleMs.load(std::memory_order_relaxed);
+        const uint8_t flags = publication.flags.load(std::memory_order_relaxed);
+        next.poseValid = (flags & 1u) != 0;
+        next.linearVelocityValid = (flags & 2u) != 0;
+        next.angularVelocityValid = (flags & 4u) != 0;
+        for (int i = 0; i < 4; ++i)
+            next.orientation[i] =
+                publication.orientation[i].load(std::memory_order_relaxed);
+        for (int i = 0; i < 3; ++i)
+        {
+            next.position[i] =
+                publication.position[i].load(std::memory_order_relaxed);
+            next.linearVelocity[i] =
+                publication.linearVelocity[i].load(std::memory_order_relaxed);
+            next.angularVelocity[i] =
+                publication.angularVelocity[i].load(std::memory_order_relaxed);
+        }
+        if (publication.sequence.load(std::memory_order_acquire) == before)
+        {
+            out = next;
+            return next.serial != 0;
+        }
+    }
+    return false;
 }
 
 bool VR_GetEyeViewOffset(int eye, float outPosition[3], float outQuat[4])

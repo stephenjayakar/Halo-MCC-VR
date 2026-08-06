@@ -507,6 +507,12 @@ struct Config
     // headset-tuned release default. Home/End adjust live.
     float gun_scale = 0.96f;
 
+    // Opt-in Halo 3 solo-campaign contact. Any tracked swing above the fixed
+    // noise floor can push movable objects; authored melee damage/effects begin
+    // only at the configurable speed threshold.
+    bool physical_weapon_contact = false;
+    float physical_weapon_melee_speed = 1.50f;
+
     // Same trim for the LEFT wrist subtree: the support hand, and the second
     // gun when dual-wielding. Independent of gun_scale because the left hand
     // holds no weapon most of the time. 1.00 = authored size, which is what

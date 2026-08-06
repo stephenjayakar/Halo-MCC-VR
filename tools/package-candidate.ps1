@@ -101,7 +101,7 @@ try {
     }
 
     $createdUtc = [DateTime]::UtcNow
-    $packageId = '{0}-{1}-{2}' -f $commit.Substring(0, 7), 'reach-fp-parity',
+    $packageId = '{0}-{1}-{2}' -f $commit.Substring(0, 7), 'h3-physical-contact',
         $createdUtc.ToString("yyyyMMdd-HHmmssfff'Z'")
     $packageDir = Join-Path $candidateRoot $packageId
     if (Test-Path -LiteralPath $packageDir) {
@@ -156,6 +156,13 @@ try {
         # Reach support is permanent, while player-visible optional features
         # fail open independently and never disarm the working camera core.
         reach_permanent = $true
+        halo3_physical_weapon_contact_compiled = $true
+        halo3_physical_weapon_contact_default_enabled = $false
+        halo3_physical_weapon_collision_shape =
+            'authored-bounds-derived-capsule'
+        halo3_physical_weapon_melee_speed_default_mps = 1.50
+        halo3_physical_weapon_slow_contact_damage = $false
+        halo3_physical_weapon_native_authored_melee = $true
         reach_controller_input_enabled = $true
         reach_render_candidate_compiled = $true
         reach_loaded_image_preflight_enabled = $true

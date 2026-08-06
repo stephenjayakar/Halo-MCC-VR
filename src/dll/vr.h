@@ -155,6 +155,22 @@ bool VR_GetHeadPose(float outQuat[4], float outPos[3]);
 // Latest right-controller aim pose in the same OpenXR local space as the head.
 // This is tracking only; weapon/projectile application is performed by M3 game hooks.
 bool VR_GetRightControllerPose(float outQuat[4], float outPos[3]);
+// Lock-free OpenXR motion sample for Halo 3 physical weapon contact. Velocities
+// are in metres/second and radians/second in local tracking space.
+struct VrControllerMotionSnapshot
+{
+    uint64_t serial = 0;
+    int64_t xrTime = 0;
+    uint64_t sampleMs = 0;
+    bool poseValid = false;
+    bool linearVelocityValid = false;
+    bool angularVelocityValid = false;
+    float orientation[4]{0.0f, 0.0f, 0.0f, 1.0f};
+    float position[3]{};
+    float linearVelocity[3]{};
+    float angularVelocity[3]{};
+};
+bool VR_GetRightControllerMotion(VrControllerMotionSnapshot& out) noexcept;
 // Left controller pose (used by the D-pad gesture; false until tracked).
 bool VR_GetLeftControllerPose(float outQuat[4], float outPos[3]);
 // Called only from Halo's already-validated class-2 CHUD path. The active

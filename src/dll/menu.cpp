@@ -1016,6 +1016,14 @@ namespace
         ImGui::Text("Hand-held weapon");
         changed |= ImGui::SliderFloat("Weapon size", &g_config.gun_scale, 0.3f, 3.0f, "%.2fx");
         ImGui::TextDisabled("Uniform scale of RIGHT hand + weapon about your grip (Home/End in-game).");
+        ImGui::Spacing();
+        changed |= ImGui::Checkbox(
+            "Physical weapon contact (Halo 3 solo)",
+            &g_config.physical_weapon_contact);
+        changed |= ImGui::SliderFloat(
+            "Melee speed", &g_config.physical_weapon_melee_speed,
+            0.50f, 4.00f, "%.2f m/s");
+        ImGui::TextDisabled("All tracked contact pushes movable objects; only fast hits deal authored melee damage.");
         changed |= ImGui::SliderFloat("Left hand size", &g_config.left_hand_scale,
                                       0.3f, 3.0f, "%.2fx");
         ImGui::SameLine();
