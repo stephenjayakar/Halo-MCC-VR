@@ -1018,7 +1018,7 @@ namespace
         ImGui::TextDisabled("Uniform scale of RIGHT hand + weapon about your grip (Home/End in-game).");
         ImGui::Spacing();
         changed |= ImGui::Checkbox(
-            "Physical weapon contact (Halo 3 solo)",
+            "Physical weapon contact (Halo 3 solo/Forge)",
             &g_config.physical_weapon_contact);
         changed |= ImGui::SliderFloat(
             "Melee speed", &g_config.physical_weapon_melee_speed,

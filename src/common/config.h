@@ -507,9 +507,9 @@ struct Config
     // headset-tuned release default. Home/End adjust live.
     float gun_scale = 0.96f;
 
-    // Opt-in Halo 3 solo-campaign contact. Any tracked swing above the fixed
-    // noise floor can push movable objects; authored melee damage/effects begin
-    // only at the configurable speed threshold.
+    // Opt-in Halo 3 solo-campaign/offline-Forge contact. Any tracked swing
+    // above the fixed noise floor can push movable objects; authored melee
+    // damage/effects begin only at the configurable speed threshold.
     bool physical_weapon_contact = false;
     float physical_weapon_melee_speed = 1.50f;
 

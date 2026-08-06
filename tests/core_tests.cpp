@@ -8779,6 +8779,16 @@ int main()
               PhysicalContactImpulseDeltaMetersPerSecond(20.0f) == 1.5f,
             "Capsule fallback pushes movable rigid-body kinds only and clamps "
             "velocity-scaled impulse strength");
+
+        Check(PhysicalContactGameModeAllowed(1, 1, false) &&
+              !PhysicalContactGameModeAllowed(1, 1, true) &&
+              PhysicalContactGameModeAllowed(2, 1, false) &&
+              !PhysicalContactGameModeAllowed(2, 2, false) &&
+              !PhysicalContactGameModeAllowed(2, 3, false) &&
+              !PhysicalContactGameModeAllowed(2, 4, false) &&
+              !PhysicalContactGameModeAllowed(2, 5, false),
+            "Physical contact admits solo campaign and offline local Forge "
+            "while rejecting co-op and every network simulation role");
     }
 
     if (g_failures == 0)

@@ -981,7 +981,7 @@ void ConfigSave()
     fprintf(f, "# in-game. 1.00 = the size the active game authored the model at.\n");
     fprintf(f, "# (default %.2f, range 0.3 to 3)\n", d.gun_scale);
     fprintf(f, "gun_scale = %.2f\n\n", g_config.gun_scale);
-    fprintf(f, "# Halo 3 solo campaign: let the visible right-hand weapon push\n");
+    fprintf(f, "# Halo 3 solo campaign/offline Forge: let the right-hand weapon push\n");
     fprintf(f, "# movable rigid bodies. Faster contact also invokes the equipped\n");
     fprintf(f, "# weapon's authored melee damage/effect. 0 = disabled.\n");
     fprintf(f, "# (default %d)\n", d.physical_weapon_contact ? 1 : 0);

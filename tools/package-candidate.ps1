@@ -158,6 +158,8 @@ try {
         reach_permanent = $true
         halo3_physical_weapon_contact_compiled = $true
         halo3_physical_weapon_contact_default_enabled = $false
+        halo3_physical_weapon_contact_modes =
+            'solo-campaign-or-offline-local-forge'
         halo3_physical_weapon_collision_shape =
             'authored-bounds-derived-capsule'
         halo3_physical_weapon_melee_speed_default_mps = 1.50

@@ -165,6 +165,17 @@ inline float PhysicalContactImpulseDeltaMetersPerSecond(float speed)
     return std::clamp(speed * 0.5f, 0.0f, 1.5f);
 }
 
+// Retail Halo 3 game-options enums: mode 1 campaign, mode 2 multiplayer;
+// simulation 1 is local. Campaign remains solo-only. Multiplayer is admitted
+// only for an offline local session, which provides a safe Forge test range
+// without enabling physical damage for network clients or servers.
+inline bool PhysicalContactGameModeAllowed(
+    uint8_t gameMode, uint8_t gameSimulation, bool cooperative)
+{
+    return (gameMode == 1 && !cooperative) ||
+        (gameMode == 2 && gameSimulation == 1);
+}
+
 struct PhysicalContactTargetState
 {
     int32_t handle = -1;

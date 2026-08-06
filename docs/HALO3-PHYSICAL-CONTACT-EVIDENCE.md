@@ -62,7 +62,9 @@ Contact requires all of the following: the opt-in setting, current Halo 3
 generation, unique native bindings, live validated object table, fresh right
 controller tracking, final visible weapon pose, alive player with a valid held
 weapon, authoritative `Gameplay`, proven on-foot state, unpaused engine,
-player-controlled camera, campaign mode, and one authoritative player. Any
+player-controlled camera, and either campaign mode with one authoritative
+player or multiplayer mode with the exact local/offline simulation role used by
+Forge. Synchronous/distributed client and server roles remain disabled. Any
 failure resets contact state and performs no native write.
 
 The closest object blocks the sweep. Static scenery receives no impulse or
