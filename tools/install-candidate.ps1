@@ -33,6 +33,9 @@ function Get-Sha256([string]$Path) {
 # The mod folder is only valid where a real MCC install sits beside it. For the
 # Store edition the install root is the package's Content folder.
 function Test-InstallRoot([string]$Root) {
+    if (-not (Test-Path -LiteralPath $Root -ErrorAction SilentlyContinue)) {
+        return $false
+    }
     foreach ($exe in @($steamExeName, $storeExeName)) {
         $path = Join-Path $Root (Join-Path 'MCC\Binaries\Win64' $exe)
         if (Test-Path -LiteralPath $path -PathType Leaf) {
@@ -43,6 +46,13 @@ function Test-InstallRoot([string]$Root) {
 }
 
 function Get-EditionLabel([string]$Root) {
+    if (-not (Test-Path -LiteralPath $Root -ErrorAction SilentlyContinue)) {
+        return $(if ($Root -match '(?i)\\XBOX\\|XboxGames') {
+            'store'
+        } else {
+            'steam'
+        })
+    }
     if (Test-Path -LiteralPath (Join-Path $Root 'MicrosoftGame.config') -PathType Leaf) {
         return 'store'
     }
