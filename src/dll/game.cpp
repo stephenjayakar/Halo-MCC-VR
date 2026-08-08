@@ -6057,6 +6057,13 @@ namespace
     std::atomic<uint64_t> g_halo3ContactImpulses{0};
     std::atomic<uint64_t> g_halo3ContactMelees{0};
     std::atomic<float> g_halo3ContactSpeed{0.0f};
+    std::atomic<int32_t> g_halo3ContactCommandHandle{-1};
+    std::atomic<float> g_halo3ContactCommandVelocity[3]{};
+    std::atomic<uint32_t> g_halo3ContactCommandGeneration{0};
+    std::atomic<uint64_t> g_halo3ContactCommandSampleMs{0};
+    std::atomic<uint64_t> g_halo3ContactCommandSerial{0};
+    std::atomic<uint64_t> g_halo3ContactAppliedSerial{0};
+    std::atomic<uint32_t> g_halo3ContactCommandStatus{0};
     std::atomic<bool> g_halo3ContactDebugRig{false};
     std::atomic<int32_t> g_halo3ContactDebugAimTarget{-1};
     std::atomic<uint32_t> g_halo3ContactDebugAimKind{0xFFFFFFFFu};
@@ -8940,6 +8947,17 @@ namespace
                                     g_halo3ContactDebugCurrentPosition[axis]
                                         .store(debugPosition[axis],
                                                std::memory_order_relaxed);
+                            const auto* debugVelocity =
+                                reinterpret_cast<const float*>(
+                                    debugData + 0x74);
+                            const PhysicalContactVec3 velocity{
+                                debugVelocity[0], debugVelocity[1],
+                                debugVelocity[2]};
+                            if (PhysicalContactFinite(velocity))
+                                for (int axis = 0; axis < 3; ++axis)
+                                    g_halo3ContactDebugVelocity[axis].store(
+                                        debugVelocity[axis],
+                                        std::memory_order_relaxed);
                         }
                     }
                 }
@@ -9387,26 +9405,25 @@ namespace
                     worldVelocity = worldVelocity * (maximum / magnitude);
                 if (PhysicalContactFinite(worldVelocity))
                 {
-                    const float requestedVelocity[3] = {
-                        worldVelocity.x, worldVelocity.y, worldVelocity.z};
-                    g_halo3ObjectSetVelocities(
-                        closestHandle, requestedVelocity, nullptr);
-                    if (debugRig)
-                    {
-                        const auto* observedVelocity =
-                            reinterpret_cast<const float*>(
-                                closestData + 0x74);
-                        for (int axis = 0; axis < 3; ++axis)
-                            g_halo3ContactDebugVelocity[axis].store(
-                                observedVelocity[axis],
-                                std::memory_order_relaxed);
-                    }
-                    g_halo3ContactImpulses.fetch_add(
-                        1, std::memory_order_relaxed);
-                    g_halo3ContactStage.store(
-                        static_cast<uint32_t>(
-                            Halo3PhysicalContactStage::Impulse),
-                        std::memory_order_relaxed);
+                    g_halo3ContactCommandHandle.store(
+                        closestHandle, std::memory_order_relaxed);
+                    g_halo3ContactCommandVelocity[0].store(
+                        worldVelocity.x, std::memory_order_relaxed);
+                    g_halo3ContactCommandVelocity[1].store(
+                        worldVelocity.y, std::memory_order_relaxed);
+                    g_halo3ContactCommandVelocity[2].store(
+                        worldVelocity.z, std::memory_order_relaxed);
+                    g_halo3ContactCommandGeneration.store(
+                        generation, std::memory_order_relaxed);
+                    g_halo3ContactCommandSampleMs.store(
+                        nowMs, std::memory_order_relaxed);
+                    const uint64_t serial =
+                        g_halo3ContactCommandSerial.load(
+                            std::memory_order_relaxed) + 1;
+                    g_halo3ContactCommandStatus.store(
+                        1, std::memory_order_relaxed); // published
+                    g_halo3ContactCommandSerial.store(
+                        serial ? serial : 1, std::memory_order_release);
                 }
             }
 
@@ -9484,7 +9501,8 @@ namespace
         const char* stageName = stage < std::size(kStageNames)
             ? kStageNames[stage] : "invalid";
         LOG("H3 physical contact status: stage=%s eligible=%u speed=%.2fm/s "
-            "sweeps=%llu hits=%llu impulses=%llu melees=%llu",
+            "sweeps=%llu hits=%llu impulses=%llu melees=%llu "
+            "command=%llu applied=%llu commandStatus=%u",
             stageName,
             g_halo3ContactEligibleObjects.load(std::memory_order_relaxed),
             g_halo3ContactSpeed.load(std::memory_order_relaxed),
@@ -9495,7 +9513,12 @@ namespace
             (unsigned long long)g_halo3ContactImpulses.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactMelees.load(
-                std::memory_order_relaxed));
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactCommandSerial.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactAppliedSerial.load(
+                std::memory_order_relaxed),
+            g_halo3ContactCommandStatus.load(std::memory_order_relaxed));
         if (g_halo3ContactDebugRig.load(std::memory_order_acquire))
         {
             const int32_t target =
@@ -14131,6 +14154,12 @@ namespace
             contactDebugEnabled, std::memory_order_release);
         g_halo3ContactDebugTarget.store(-1, std::memory_order_release);
         g_halo3ContactDebugGameOptions.store(0, std::memory_order_release);
+        g_halo3ContactCommandHandle.store(-1, std::memory_order_relaxed);
+        g_halo3ContactCommandGeneration.store(0, std::memory_order_relaxed);
+        g_halo3ContactCommandSampleMs.store(0, std::memory_order_relaxed);
+        g_halo3ContactCommandSerial.store(0, std::memory_order_release);
+        g_halo3ContactAppliedSerial.store(0, std::memory_order_release);
+        g_halo3ContactCommandStatus.store(0, std::memory_order_relaxed);
         for (int axis = 0; axis < 3; ++axis)
         {
             g_halo3ContactDebugInitialPosition[axis].store(
@@ -32841,6 +32870,86 @@ Halo3VehicleStateSnapshot Game_Halo3VehicleState()
     out.seatIndex = Halo3VehicleSnapshotSeat(snapshot, generation);
     out.typeValid = out.vehicleType >= 0;
     return out;
+}
+
+void Game_Halo3ConsumePhysicalContactCommand()
+{
+    if (TitleAdapter_GetActiveTitle() != GameTitle::Halo3 ||
+        !g_halo3PhysicalContactBindings.load(std::memory_order_acquire))
+        return;
+
+    const uint64_t serial =
+        g_halo3ContactCommandSerial.load(std::memory_order_acquire);
+    if (!serial || serial == g_halo3ContactAppliedSerial.load(
+                              std::memory_order_relaxed))
+        return;
+
+    const uint32_t generation =
+        g_halo3ContactCommandGeneration.load(std::memory_order_relaxed);
+    const uint64_t sampleMs =
+        g_halo3ContactCommandSampleMs.load(std::memory_order_relaxed);
+    const uint64_t nowMs = GetTickCount64();
+    const int32_t handle =
+        g_halo3ContactCommandHandle.load(std::memory_order_relaxed);
+    float velocity[3]{};
+    for (int axis = 0; axis < 3; ++axis)
+        velocity[axis] = g_halo3ContactCommandVelocity[axis].load(
+            std::memory_order_relaxed);
+    if (!generation || generation !=
+            g_halo3RuntimeGeneration.load(std::memory_order_acquire))
+    {
+        g_halo3ContactCommandStatus.store(2, std::memory_order_relaxed);
+        return;
+    }
+    // The vehicle/input snapshots already use 500 ms as the title-session
+    // staleness bound. Match that proven lifecycle bound here; the first
+    // XInput poll after a Forge load can occur more than 100 ms after contact.
+    if (!sampleMs || nowMs < sampleMs || nowMs - sampleMs > 500)
+    {
+        g_halo3ContactCommandStatus.store(3, std::memory_order_relaxed);
+        return;
+    }
+    if (handle == -1 || !std::isfinite(velocity[0]) ||
+        !std::isfinite(velocity[1]) || !std::isfinite(velocity[2]) ||
+        !g_halo3ObjectSetVelocities)
+    {
+        g_halo3ContactCommandStatus.store(4, std::memory_order_relaxed);
+        return;
+    }
+    if (serial != g_halo3ContactCommandSerial.load(std::memory_order_acquire))
+        return;
+    uint64_t applied =
+        g_halo3ContactAppliedSerial.load(std::memory_order_relaxed);
+    if (applied == serial ||
+        !g_halo3ContactAppliedSerial.compare_exchange_strong(
+            applied, serial, std::memory_order_acq_rel,
+            std::memory_order_relaxed))
+        return;
+    g_halo3ContactCommandStatus.store(5, std::memory_order_relaxed);
+
+    bool faulted = false;
+    __try
+    {
+        g_halo3ObjectSetVelocities(handle, velocity, nullptr);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        faulted = true;
+    }
+    if (faulted)
+    {
+        g_halo3ContactCommandStatus.store(7, std::memory_order_relaxed);
+        g_halo3ContactStage.store(
+            static_cast<uint32_t>(Halo3PhysicalContactStage::Faulted),
+            std::memory_order_relaxed);
+        g_halo3PhysicalContactBindings.store(false, std::memory_order_release);
+        return;
+    }
+    g_halo3ContactCommandStatus.store(6, std::memory_order_relaxed);
+    g_halo3ContactImpulses.fetch_add(1, std::memory_order_relaxed);
+    g_halo3ContactStage.store(
+        static_cast<uint32_t>(Halo3PhysicalContactStage::Impulse),
+        std::memory_order_relaxed);
 }
 
 void Game_GunScale(int dir)
