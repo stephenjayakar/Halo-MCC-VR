@@ -5991,19 +5991,38 @@ namespace
     Halo3MarkersInternalFn g_halo3MarkersInternal = nullptr;
     using Halo3ObjectSetVelocityFn = void(__fastcall*)(
         int32_t objectHandle, float localX, float localY, float localZ);
+    struct Halo3CollisionResult
+    {
+        int32_t type;
+        float fraction;
+        float point[3];
+        unsigned char unknown14[0x18];
+        float normal[3];
+        unsigned char unknown38[0x08];
+        int32_t objectHandle;
+        unsigned char unknown44[0x24];
+    };
+    static_assert(sizeof(Halo3CollisionResult) == 0x68);
+    static_assert(offsetof(Halo3CollisionResult, normal) == 0x2C);
+    static_assert(offsetof(Halo3CollisionResult, objectHandle) == 0x40);
+    using Halo3CollisionTestVectorFn = bool(__fastcall*)(
+        uint64_t flags, bool secondaryOption, const float* point,
+        const float* vector, int32_t ignoreObject1, int32_t ignoreObject2,
+        int32_t ignoreObject3, Halo3CollisionResult* result);
     using Halo3NativeMeleeResponseFn = void(__fastcall*)(
         int32_t unitHandle, uint32_t damageEffectTag, int32_t targetHandle,
         int32_t meleeType, uint16_t materialIndex,
         const float* direction, const float* point, const float* normal);
     using Halo3GameIsCooperativeFn = bool(__fastcall*)();
     Halo3ObjectSetVelocityFn g_halo3ObjectSetVelocity = nullptr;
+    Halo3CollisionTestVectorFn g_halo3CollisionTestVector = nullptr;
     Halo3NativeMeleeResponseFn g_halo3NativeMeleeResponse = nullptr;
     Halo3GameIsCooperativeFn g_halo3GameIsCooperative = nullptr;
     std::atomic<bool> g_halo3PhysicalContactBindings{false};
     // Runtime acceptance rejected the bounds-sphere proxy: it remained in
     // near-continuous false contact and did not move Forge or campaign props.
     // Keep the failed implementation inert while preserving it for evidence.
-    constexpr bool kEnableHalo3PhysicalContactCandidate = false;
+    constexpr bool kEnableHalo3PhysicalContactCandidate = true;
     PhysicalContactDebounce g_halo3ContactDebounce;
     uint64_t g_halo3ContactLastMotionSerial = 0;
     uint64_t g_halo3ContactLastMeleeMs = 0;
@@ -8852,11 +8871,8 @@ namespace
             const bool authoredBounds = std::isfinite(authoredRadius) &&
                 authoredRadius > 0.01f && authoredRadius < 2.0f;
             const float capsuleLength = authoredBounds
-                ? std::clamp(authoredRadius * 1.75f, 0.12f, 0.45f)
+                ? std::clamp(authoredRadius * 1.75f, 0.30f, 0.75f)
                 : 0.65f * worldScale;
-            const float capsuleRadius = authoredBounds
-                ? std::clamp(authoredRadius * 0.18f, 0.015f, 0.05f)
-                : 0.06f * worldScale;
             const PhysicalContactVec3 grip{
                 position[0], position[1], position[2]};
             const PhysicalContactVec3 forward = PhysicalContactNormalize({
@@ -8891,51 +8907,68 @@ namespace
             const PhysicalContactVec3 movementDirection =
                 PhysicalContactNormalize(tip - g_halo3ContactPreviousTip,
                                          forward);
+            const PhysicalContactVec3 previousMid =
+                (g_halo3ContactPreviousGrip + g_halo3ContactPreviousTip) * 0.5f;
+            const PhysicalContactVec3 currentMid = (grip + tip) * 0.5f;
+            const std::array<std::pair<PhysicalContactVec3,
+                                       PhysicalContactVec3>, 5> sweeps{{
+                {g_halo3ContactPreviousGrip, grip},
+                {previousMid, currentMid},
+                {g_halo3ContactPreviousTip, tip},
+                {g_halo3ContactPreviousGrip, g_halo3ContactPreviousTip},
+                {grip, tip},
+            }};
             PhysicalContactHit closest{};
+            int32_t closestType = -1;
             int32_t closestHandle = -1;
-            uint8_t closestKind = 0xFF;
-            unsigned char* closestData = nullptr;
-            uint32_t eligibleObjects = 0;
-            for (uint32_t index = 0; index < header.firstUnallocated; ++index)
+            // collision_flags: structure; object_flags: all objects. The
+            // engine resolves authored BSP/instance/object geometry and returns
+            // the first blocking surface for each bounded weapon sample.
+            constexpr uint64_t kContactCollisionFlags =
+                1ull | (1ull << 32);
+            for (const auto& sweep : sweeps)
             {
-                auto* entry = entries +
-                    static_cast<size_t>(index) * kHalo3ObjectEntryStride;
-                const uint16_t identifier =
-                    *reinterpret_cast<const uint16_t*>(entry);
-                if (!OdstObjectEntryIsLive(identifier))
+                const PhysicalContactVec3 vector = sweep.second - sweep.first;
+                if (!PhysicalContactFinite(sweep.first) ||
+                    !PhysicalContactFinite(vector) ||
+                    PhysicalContactLengthSquared(vector) <= 1.0e-10f)
                     continue;
-                const int32_t handle = static_cast<int32_t>(
-                    (static_cast<uint32_t>(identifier) << 16) | index);
-                if (handle == unitHandle || handle == weaponHandle)
+                const float point[3] = {
+                    sweep.first.x, sweep.first.y, sweep.first.z};
+                const float delta[3] = {vector.x, vector.y, vector.z};
+                Halo3CollisionResult native{};
+                native.type = -1;
+                native.fraction = 1.0f;
+                if (!g_halo3CollisionTestVector(
+                        kContactCollisionFlags, false, point, delta,
+                        unitHandle, weaponHandle, -1, &native) ||
+                    native.type < 0 || native.type > 4 ||
+                    !std::isfinite(native.fraction) ||
+                    native.fraction < 0.0f || native.fraction > 1.0f)
                     continue;
-                auto* data = *reinterpret_cast<unsigned char**>(
-                    entry + kHalo3ObjectEntryDataOffset);
-                if (!data || *reinterpret_cast<const int32_t*>(
-                                 data + kHalo3ObjectParentOffset) != -1)
+                const PhysicalContactVec3 hitPoint{
+                    native.point[0], native.point[1], native.point[2]};
+                const PhysicalContactVec3 hitNormal{
+                    native.normal[0], native.normal[1], native.normal[2]};
+                if (!PhysicalContactFinite(hitPoint) ||
+                    !PhysicalContactFinite(hitNormal))
                     continue;
-                const auto* center = reinterpret_cast<const float*>(
-                    data + kHalo3ObjectBoundingCenterOffset);
-                const float radius =
-                    *reinterpret_cast<const float*>(data + 0x28);
-                if (!std::isfinite(radius) || radius <= 0.0f || radius > 50.0f)
-                    continue;
-                ++eligibleObjects;
-                const PhysicalContactHit hit = PhysicalContactSweepCapsule(
-                    g_halo3ContactPreviousGrip, g_halo3ContactPreviousTip,
-                    grip, tip, capsuleRadius,
-                    {center[0], center[1], center[2]}, radius);
-                if (hit.hit && (!closest.hit || hit.fraction < closest.fraction))
+                if (!closest.hit || native.fraction < closest.fraction)
                 {
-                    closest = hit;
-                    closestHandle = handle;
-                    closestKind = *(entry + kHalo3ObjectEntryKindOffset);
-                    closestData = data;
+                    closest.hit = true;
+                    closest.fraction = native.fraction;
+                    closest.point = hitPoint;
+                    closest.normal = PhysicalContactNormalize(
+                        hitNormal, movementDirection * -1.0f);
+                    closestType = native.type;
+                    closestHandle = native.type == 4
+                        ? native.objectHandle : -1;
                 }
             }
             g_halo3ContactPreviousGrip = grip;
             g_halo3ContactPreviousTip = tip;
             g_halo3ContactEligibleObjects.store(
-                eligibleObjects, std::memory_order_relaxed);
+                closestType == 4 ? 1u : 0u, std::memory_order_relaxed);
             g_halo3ContactSweeps.fetch_add(1, std::memory_order_relaxed);
             g_halo3ContactStage.store(
                 static_cast<uint32_t>(Halo3PhysicalContactStage::Sweeping),
@@ -8946,19 +8979,44 @@ namespace
                 g_halo3ContactDebounce.EndSample();
                 return;
             }
-            bool firstContact = false;
-            PhysicalContactTargetState* contact =
-                g_halo3ContactDebounce.Touch(closestHandle, &firstContact);
             g_halo3ContactHits.fetch_add(1, std::memory_order_relaxed);
-            if (!PhysicalContactMovableKind(closestKind))
+            if (closestType != 4 || closestHandle == -1)
             {
                 g_halo3ContactStage.store(
                     static_cast<uint32_t>(
                         Halo3PhysicalContactStage::StaticBlock),
                     std::memory_order_relaxed);
                 g_halo3ContactDebounce.EndSample();
-                return; // closest static object blocks everything behind it
+                return; // exact static/instanced surface blocks this sweep
             }
+            const uint32_t closestIndex =
+                static_cast<uint32_t>(closestHandle) & 0xFFFFu;
+            if (closestHandle == unitHandle || closestHandle == weaponHandle ||
+                closestIndex >= header.maximumCount)
+            {
+                g_halo3ContactDebounce.EndSample();
+                return;
+            }
+            auto* closestEntry = entries +
+                static_cast<size_t>(closestIndex) * kHalo3ObjectEntryStride;
+            if (*reinterpret_cast<const uint16_t*>(closestEntry) !=
+                static_cast<uint16_t>(
+                    static_cast<uint32_t>(closestHandle) >> 16))
+            {
+                g_halo3ContactDebounce.EndSample();
+                return;
+            }
+            auto* closestData = *reinterpret_cast<unsigned char**>(
+                closestEntry + kHalo3ObjectEntryDataOffset);
+            if (!closestData || *reinterpret_cast<const int32_t*>(
+                                    closestData + kHalo3ObjectParentOffset) != -1)
+            {
+                g_halo3ContactDebounce.EndSample();
+                return;
+            }
+            bool firstContact = false;
+            PhysicalContactTargetState* contact =
+                g_halo3ContactDebounce.Touch(closestHandle, &firstContact);
             const auto* targetVelocity = reinterpret_cast<const float*>(
                 closestData + 0x74);
             const PhysicalContactVec3 targetVelocityMeters{
@@ -9037,6 +9095,7 @@ namespace
             }
 
             if (action == PhysicalContactAction::ImpulseAndMelee &&
+                g_halo3NativeMeleeResponse &&
                 contact->meleeArmed &&
                 nowMs - g_halo3ContactLastMeleeMs >= 250)
             {
@@ -13315,6 +13374,14 @@ namespace
         "83 F9 FF 0F 84 ?? ?? ?? ?? 48 8B C4 48 81 EC 88 00 00 00 "
         "8B 15 ?? ?? ?? ?? 0F 29 70 E8 0F 29 78 D8 "
         "44 0F 29 40 C8 44 0F 28 C3";
+    // collision_test_vector_internal (+0x1FD748). Official H3EK's public
+    // wrapper and this homolog prove the eight-argument ABI and 0x68-byte
+    // result, including plane normal +0x2C and object handle +0x40.
+    const char* kHalo3CollisionTestVectorSig =
+        "48 8B C4 4C 89 40 18 88 50 10 48 89 48 08 55 53 56 57 "
+        "41 54 41 55 41 56 41 57 48 8D A8 18 BB FF FF "
+        "B8 A8 45 00 00 E8 ?? ?? ?? ?? 48 2B E0 "
+        "8B 9D F0 44 00 00 45 33 C0";
     const char* kHalo3NativeMeleeResponseSig =
         "48 8B C4 44 89 48 20 44 89 40 18 89 50 10 53 55 56 57 "
         "41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 "
@@ -13949,10 +14016,13 @@ namespace
             g_halo3PhysicalContactBindings.store(
                 false, std::memory_order_release);
             g_halo3ObjectSetVelocity = nullptr;
+            g_halo3CollisionTestVector = nullptr;
             g_halo3NativeMeleeResponse = nullptr;
             g_halo3GameIsCooperative = nullptr;
             const uintptr_t velocityHit =
                 sig::Find(base, size, kHalo3ObjectSetVelocitySig);
+            const uintptr_t collisionHit =
+                sig::Find(base, size, kHalo3CollisionTestVectorSig);
             const uintptr_t meleeHit =
                 sig::Find(base, size, kHalo3NativeMeleeResponseSig);
             const uintptr_t cooperativeHit =
@@ -13960,34 +14030,44 @@ namespace
             const bool velocityUnique = velocityHit && !sig::Find(
                 velocityHit + 1, base + size - velocityHit - 1,
                 kHalo3ObjectSetVelocitySig);
+            const bool collisionUnique = collisionHit && !sig::Find(
+                collisionHit + 1, base + size - collisionHit - 1,
+                kHalo3CollisionTestVectorSig);
             const bool meleeUnique = meleeHit && !sig::Find(
                 meleeHit + 1, base + size - meleeHit - 1,
                 kHalo3NativeMeleeResponseSig);
             const bool cooperativeUnique = cooperativeHit && !sig::Find(
                 cooperativeHit + 1, base + size - cooperativeHit - 1,
                 kHalo3GameIsCooperativeSig);
-            if (velocityUnique && meleeUnique && cooperativeUnique)
+            if (velocityUnique && collisionUnique && cooperativeUnique)
             {
                 g_halo3ObjectSetVelocity =
                     reinterpret_cast<Halo3ObjectSetVelocityFn>(velocityHit);
-                g_halo3NativeMeleeResponse =
-                    reinterpret_cast<Halo3NativeMeleeResponseFn>(meleeHit);
+                g_halo3CollisionTestVector =
+                    reinterpret_cast<Halo3CollisionTestVectorFn>(collisionHit);
+                // The old melee candidate called unit_melee_effects, which
+                // cannot apply native damage. Keep it fail-closed until the
+                // actual authored melee-damage entry point is proven.
+                g_halo3NativeMeleeResponse = nullptr;
                 g_halo3GameIsCooperative =
                     reinterpret_cast<Halo3GameIsCooperativeFn>(cooperativeHit);
                 g_halo3PhysicalContactBindings.store(
                     true, std::memory_order_release);
                 LOG("H3 physical contact: optional native bindings installed "
-                    "velocity=+0x%llX melee=+0x%llX solo=+0x%llX [unique]",
+                    "collision=+0x%llX velocity=+0x%llX solo=+0x%llX "
+                    "[unique]; melee stock (effects-only candidate=%d/%d)",
+                    (unsigned long long)(collisionHit - base),
                     (unsigned long long)(velocityHit - base),
-                    (unsigned long long)(meleeHit - base),
-                    (unsigned long long)(cooperativeHit - base));
+                    (unsigned long long)(cooperativeHit - base),
+                    meleeHit ? 1 : 0, meleeUnique ? 1 : 0);
             }
             else
             {
                 LOG("H3 physical contact: disabled; signature evidence "
-                    "missing/ambiguous (velocity=%d/%d melee=%d/%d solo=%d/%d)",
+                    "missing/ambiguous (collision=%d/%d velocity=%d/%d "
+                    "solo=%d/%d)",
+                    collisionHit ? 1 : 0, collisionUnique ? 1 : 0,
                     velocityHit ? 1 : 0, velocityUnique ? 1 : 0,
-                    meleeHit ? 1 : 0, meleeUnique ? 1 : 0,
                     cooperativeHit ? 1 : 0, cooperativeUnique ? 1 : 0);
             }
         }

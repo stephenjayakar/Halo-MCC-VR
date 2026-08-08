@@ -18,43 +18,46 @@ render, input, ODST, or Reach paths.
 
 | Purpose | Official H3EK RVA | Retail RVA | Retail match count | Evidence |
 | --- | ---: | ---: | ---: | --- |
-| generic swept collision core | `0x652A10` | closest homolog `0x1FD748` | not bound | H3EK assertions include `_collision_result_object`; the large `0x14C3` body and private result layout are not safe to call without symbols for every retail field |
+| `collision_test_vector_internal` | `0x652A10` | `0x1FD748` | 1 | the official public wrapper at `0x6529D0` proves the eight-argument core ABI; official callers and the structurally identical retail prologue prove the 0x68-byte result fields used here: type `+0x00`, fraction `+0x04`, point `+0x08`, plane normal `+0x2C`, and object handle `+0x40` |
 | `object_set_velocity` native | `0xAD8050` | `0x39BAD0` | 1 | the official script wrapper at `0x7A88F0` and retail wrapper at `0x1E380C` call their respective native with object handle plus three local velocity floats |
-| native melee contact response | `0xA63390` | `0x35A194` | 1 | structurally matched official/retail bodies; callers pass unit, authored damage-effect datum, exact target handle, melee type, material, direction, point, and normal |
+| `unit_melee_effects` (rejected for damage) | `0xA63390` | `0x35A194` | 1 | official disassembly proves the eight arguments and authored effect selection, but the body only emits the melee contact effects; it is not a damage-applying entry point and remains unbound |
 | `game_is_cooperative` native | `0xCFB7D0` | `0x0F000C` | 1 | official/retail script wrappers call the native; its body first requires game-options byte `+0x10 == 1` (campaign), then returns whether the authoritative player count is greater than one |
 
 The retail signatures embedded in `game.cpp` wildcard only relocation/call
 displacements. An independent offline rescan of the pinned retail image found
-one match for each complete pattern at the RVAs above.
+one match for each complete pattern at the RVAs above. The collision pattern's
+single file-offset match is `0x1FCB48`, which maps to RVA `0x1FD748`.
 
 The active held weapon is read through the already-proven Halo 3 object table:
 the player unit's current weapon slot is `unit+0x262`, handles begin at
 `unit+0x268`, object definition datum is `object+0x00`, and bounds are
-`object+0x1C/+0x28`. The ordinary authored melee effect is the unit definition's
-`+0x1B4` datum. When weapon-definition flag bit 9 at `+0x18C` is set, the weapon
-override at `+0x22C` is used; this preserves energy-sword and gravity-hammer
-authored contact effects. No grip, trigger, animation, or lunge input is
-synthesized.
+`object+0x1C/+0x28`. The earlier `+0x1B4/+0x22C` damage-effect selection was not
+proven by the native body and is rejected. `unit_melee_effects` actually reads
+weapon-definition fields `+0x8C` and conditionally `+0x49C`; because effects
+alone do not satisfy native melee damage, high-speed contact stays stock until
+the damage-applying path is separately established. No grip, trigger,
+animation, or lunge input is synthesized.
 
 ## Collision-shape decision
 
-Triangle-accurate collision was attempted first by identifying H3EK's native
-swept-collision core. It is rejected for this candidate because the function's
-private query/result ABI is large, the retail homolog cannot be proven field for
-field from available symbols, and no immutable first-person triangle stream can
-be prepared without entering unproven renderer/tag ownership. Calling it would
-violate the project's fail-closed retail-binding contract.
+Candidate `a644d2c` used a bounds-derived capsule against every object's broad
+bounding sphere. The 2026-08-06 campaign runtime rejected it: roughly 95% of
+sweeps reported a hit, almost all stopped at `static-block`, and neither Forge
+nor campaign testing produced visible object movement. The hit distribution
+proves that broad spheres are not a usable surface-contact proxy. Commit
+`2f4940b` disables that failed behavior before the replacement candidate.
 
-The selected fallback is therefore a bounds-derived capsule. Its length and
-radius are clamped from the held weapon object's authored bounding radius; an
-explicit 0.65 m by 0.06 m capsule is used only when those bounds are invalid.
-The prior and current grip, midpoint, tip, and capsule spines are swept against
-validated object bounding spheres. This is bounded, allocation-free, lock-free,
-and contains no logging, signature scan, file access, or GPU readback in the
-camera callback. The exact final visible right-wrist transform is published by
-the first-person palette path through a bounded atomic snapshot. OpenXR pose,
-linear/angular velocity, timestamp, and serial use a separate bounded atomic
-snapshot.
+The replacement uses Halo 3's native swept-vector collision query. Five fixed,
+allocation-free samples cover previous-to-current grip, midpoint, and tip plus
+the previous and current weapon spines. Each sample resolves the engine's exact
+authored BSP, instanced-geometry, or object surface and returns the first blocker;
+the query ignores the player unit and held weapon. The weapon extent remains a
+bounded proxy derived from the held weapon's authored radius (0.30–0.75 world
+units, with a 0.65-unit invalid-bounds fallback), but targets are no longer
+approximated by bounding spheres. The exact final visible right-wrist transform
+is published by the first-person palette path through a bounded atomic snapshot.
+OpenXR pose, linear/angular velocity, timestamp, and serial use a separate
+bounded atomic snapshot.
 
 ## Runtime safety and behavior
 
@@ -67,15 +70,16 @@ player or multiplayer mode with the exact local/offline simulation role used by
 Forge. Synchronous/distributed client and server roles remain disabled. Any
 failure resets contact state and performs no native write.
 
-The closest object blocks the sweep. Static scenery receives no impulse or
-damage. Player, held weapon, attached/first-person-only objects, stale handles,
-and invalid values are rejected. Movable object kinds receive a native velocity
-update once per continuous contact above 0.05 m/s; the velocity delta is
-proportional to swing speed and clamped. At the configured threshold (default
-1.50 m/s), that same exact target additionally receives one native authored
-melee response. Separation rearms a target, the below-half-threshold dwell is
-100 ms, and the global melee cooldown is 250 ms. Existing grip melee and all
-normal input paths remain unchanged.
+The closest native surface blocks its sample. BSP and instanced geometry receive
+no impulse or damage. Player, held weapon, attached/first-person-only objects,
+stale handles, and invalid values are rejected. Every exact object hit is passed
+to the native velocity setter once per continuous contact above 0.05 m/s; the
+native is deliberately allowed to decide whether that object owns a movable
+rigid body, avoiding a brittle object-kind whitelist that excluded Forge
+scenery and machines. The velocity delta is proportional to swing speed and
+clamped. The high-speed melee threshold/debounce remains present but fail-closed
+for this collision/rigid-body candidate because the previously bound native was
+effects-only. Existing grip melee and all normal input paths remain unchanged.
 
 ## Verification boundary
 
