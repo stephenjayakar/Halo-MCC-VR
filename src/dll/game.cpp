@@ -8973,69 +8973,10 @@ namespace
             const float capsuleLength = authoredBounds
                 ? std::clamp(authoredRadius * 1.75f, 0.30f, 0.75f)
                 : 0.65f * worldScale;
-            PhysicalContactVec3 grip{
+            const PhysicalContactVec3 grip{
                 position[0], position[1], position[2]};
-            PhysicalContactVec3 forward = PhysicalContactNormalize({
+            const PhysicalContactVec3 forward = PhysicalContactNormalize({
                 basis[0], basis[1], basis[2]});
-            if (debugRig)
-            {
-                const PhysicalContactVec3 camera{
-                    g_baseCamX.load(std::memory_order_relaxed),
-                    g_baseCamY.load(std::memory_order_relaxed),
-                    g_baseCamZ.load(std::memory_order_relaxed)};
-                PhysicalContactVec3 target{};
-                float targetRadius = 0.25f;
-                float closestDistanceSquared = 1.0e30f;
-                bool targetFound = false;
-                const uint32_t limit = std::min(
-                    header.firstUnallocated, header.maximumCount);
-                for (uint32_t index = 0; index < limit; ++index)
-                {
-                    auto* entry = entries + static_cast<size_t>(index) *
-                        kHalo3ObjectEntryStride;
-                    const uint16_t salt =
-                        *reinterpret_cast<const uint16_t*>(entry);
-                    const int32_t handle = static_cast<int32_t>(
-                        (uint32_t{salt} << 16) | index);
-                    const uint8_t kind = *(entry +
-                        kHalo3ObjectEntryKindOffset);
-                    if (handle == unitHandle || handle == weaponHandle ||
-                        !PhysicalContactMovableKind(kind))
-                        continue;
-                    auto* data = *reinterpret_cast<unsigned char**>(
-                        entry + kHalo3ObjectEntryDataOffset);
-                    if (!data || *reinterpret_cast<const int32_t*>(
-                                     data + kHalo3ObjectParentOffset) != -1)
-                        continue;
-                    const auto* objectPosition =
-                        reinterpret_cast<const float*>(
-                            data + kHalo3ObjectPositionOffset);
-                    const PhysicalContactVec3 candidate{
-                        objectPosition[0], objectPosition[1],
-                        objectPosition[2]};
-                    if (!PhysicalContactFinite(candidate))
-                        continue;
-                    const float distanceSquared =
-                        PhysicalContactLengthSquared(candidate - camera);
-                    if (!std::isfinite(distanceSquared) ||
-                        distanceSquared < 0.25f ||
-                        distanceSquared >= closestDistanceSquared)
-                        continue;
-                    closestDistanceSquared = distanceSquared;
-                    target = candidate;
-                    const float radius = *reinterpret_cast<const float*>(
-                        data + 0x28);
-                    targetRadius = std::isfinite(radius) && radius > 0.05f &&
-                        radius < 5.0f ? radius : 0.25f;
-                    targetFound = true;
-                }
-                if (targetFound)
-                {
-                    forward = PhysicalContactNormalize(target - camera,
-                                                       forward);
-                    grip = target - forward * (targetRadius + 0.10f);
-                }
-            }
             const PhysicalContactVec3 tip = grip + forward * capsuleLength;
             if (weaponHandle != g_halo3ContactWeaponHandle)
             {

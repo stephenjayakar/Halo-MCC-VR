@@ -96,12 +96,3 @@ change, and capsule fallback. The cumulative Release build and complete `ctest`
 suite must pass before packaging. Headset acceptance (specific weapons,
 materials, enemies, loose weapons/crates, walls, pause/loading/death, and rapid
 motion) remains intentionally pending; the feature therefore defaults off.
-
-The opt-in `HALOMCCVR_H3_CONTACT_DEBUG_RIG=1` validation path can run without
-a headset. It keeps the normal configuration, signature, title, player,
-on-foot, pause, cinematic, object-table, collision, debounce, and native
-velocity paths. Because synthetic desktop input cannot steer MCC's raw-input
-player, the rig selects the nearest unparented movable-kind object from the
-already-validated table solely to aim its synthetic weapon pose. A successful
-test still requires the normal exact collision query to resolve that object and
-the normal native velocity setter to produce a measured position change.
