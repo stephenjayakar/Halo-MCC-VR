@@ -66,9 +66,14 @@ generation, unique native bindings, live validated object table, fresh right
 controller tracking, final visible weapon pose, alive player with a valid held
 weapon, authoritative `Gameplay`, proven on-foot state, unpaused engine,
 player-controlled camera, and either campaign mode with one authoritative
-player or multiplayer mode with the exact local/offline simulation role used by
-Forge. Synchronous/distributed client and server roles remain disabled. Any
-failure resets contact state and performs no native write.
+player or multiplayer mode with the exact authoritative role used by Forge.
+Candidate `b82fbaa`, running Steam Halo 3 Construct Forge through the
+anti-cheat-disabled launcher on 2026-08-08, measured the retail game-options
+bytes as mode `2`, simulation `5`, cooperative `0`. The official simulation
+enum names `5` as `distributed-server`; the earlier `simulation == 1` local
+assumption was false and prevented every Forge sweep. Synchronous and
+distributed client roles remain disabled. Any failure resets contact state and
+performs no native write.
 
 The closest native surface blocks its sample. BSP and instanced geometry receive
 no impulse or damage. Player, held weapon, attached/first-person-only objects,

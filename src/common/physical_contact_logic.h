@@ -165,15 +165,16 @@ inline float PhysicalContactImpulseDeltaMetersPerSecond(float speed)
     return std::clamp(speed * 0.5f, 0.0f, 1.5f);
 }
 
-// Retail Halo 3 game-options enums: mode 1 campaign, mode 2 multiplayer;
-// simulation 1 is local. Campaign remains solo-only. Multiplayer is admitted
-// only for an offline local session, which provides a safe Forge test range
-// without enabling physical damage for network clients or servers.
+// Retail Halo 3 game-options enums: mode 1 campaign, mode 2 multiplayer.
+// Halo 3 MCC's solo Forge host reports simulation 5 (distributed server), not
+// simulation 1 (local). Admit the authoritative Forge host and reject every
+// client and synchronous role. The feature remains opt-in and the launcher is
+// the anti-cheat-disabled mod launcher.
 inline bool PhysicalContactGameModeAllowed(
     uint8_t gameMode, uint8_t gameSimulation, bool cooperative)
 {
     return (gameMode == 1 && !cooperative) ||
-        (gameMode == 2 && gameSimulation == 1);
+        (gameMode == 2 && gameSimulation == 5);
 }
 
 struct PhysicalContactTargetState

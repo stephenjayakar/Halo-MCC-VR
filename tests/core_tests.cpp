@@ -8782,13 +8782,13 @@ int main()
 
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&
-              PhysicalContactGameModeAllowed(2, 1, false) &&
+              !PhysicalContactGameModeAllowed(2, 1, false) &&
               !PhysicalContactGameModeAllowed(2, 2, false) &&
               !PhysicalContactGameModeAllowed(2, 3, false) &&
               !PhysicalContactGameModeAllowed(2, 4, false) &&
-              !PhysicalContactGameModeAllowed(2, 5, false),
-            "Physical contact admits solo campaign and offline local Forge "
-            "while rejecting co-op and every network simulation role");
+              PhysicalContactGameModeAllowed(2, 5, false),
+            "Physical contact admits solo campaign and the authoritative "
+            "Halo 3 MCC Forge host while rejecting co-op and clients");
     }
 
     if (g_failures == 0)

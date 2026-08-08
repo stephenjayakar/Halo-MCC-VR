@@ -8793,8 +8793,8 @@ namespace
             auto* gameOptions = tls
                 ? *reinterpret_cast<unsigned char**>(tls + 0x48) : nullptr;
             // The official/retail game predicates prove +0x10 is game mode and
-            // +0x11 is simulation role. Admit solo campaign or local/offline
-            // multiplayer (the Forge test range); every network role stays off.
+            // +0x11 is simulation role. Admit solo campaign or Halo 3 MCC's
+            // authoritative Forge host; every client role stays off.
             const bool cooperative = gameOptions && gameOptions[0x10] == 1
                 ? g_halo3GameIsCooperative() : false;
             if (debugRig)
