@@ -9157,8 +9157,14 @@ namespace
             // collision_test_vector_internal proves _collision_test_objects_bit
             // belongs to object_flags. Therefore high bit zero must be ORed
             // with the type mask: 0x7FFF.
-            constexpr uint64_t kContactCollisionFlags =
-                1ull | (uint64_t{0x7FFF} << 32);
+            constexpr uint64_t kContactObjectFlags =
+                uint64_t{0x7FFF} << 32;
+            // The validation target is normally resting on map structure. Its
+            // opt-in headless probe isolates the object branch so a coplanar
+            // floor cannot win the closest-hit race. Production retains the
+            // structure bit and therefore still blocks contact through walls.
+            const uint64_t contactCollisionFlags = kContactObjectFlags |
+                (debugRig ? 0ull : 1ull);
             for (const auto& sweep : sweeps)
             {
                 const PhysicalContactVec3 vector = sweep.second - sweep.first;
@@ -9173,7 +9179,7 @@ namespace
                 native.type = -1;
                 native.fraction = 1.0f;
                 if (!g_halo3CollisionTestVector(
-                        kContactCollisionFlags, false, point, delta,
+                        contactCollisionFlags, false, point, delta,
                         unitHandle, weaponHandle, -1, &native) ||
                     native.type < 0 || native.type > 4 ||
                     !std::isfinite(native.fraction) ||
