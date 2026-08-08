@@ -6056,6 +6056,8 @@ namespace
     std::atomic<bool> g_halo3ContactDebugRig{false};
     std::atomic<int32_t> g_halo3ContactDebugTarget{-1};
     std::atomic<uint32_t> g_halo3ContactDebugGameOptions{0};
+    std::atomic<uint64_t> g_halo3ContactDebugObjectCensus{0};
+    std::atomic<uint32_t> g_halo3ContactDebugObjectKinds{0};
     std::atomic<float> g_halo3ContactDebugInitialPosition[3]{};
     std::atomic<float> g_halo3ContactDebugCurrentPosition[3]{};
     std::atomic<float> g_halo3ContactDebugVelocity[3]{};
@@ -8852,6 +8854,58 @@ namespace
                 table + kOdstDataArrayElementsOffset);
             if (debugRig && entries)
             {
+                uint32_t live = 0;
+                uint32_t finite = 0;
+                uint32_t root = 0;
+                uint32_t rootMovable = 0;
+                uint32_t kinds = 0;
+                const uint32_t limit = std::min(
+                    header.firstUnallocated, header.maximumCount);
+                for (uint32_t index = 0; index < limit; ++index)
+                {
+                    auto* entry = entries + static_cast<size_t>(index) *
+                        kHalo3ObjectEntryStride;
+                    if (!OdstObjectEntryIsLive(
+                            *reinterpret_cast<const uint16_t*>(entry)))
+                        continue;
+                    ++live;
+                    const uint8_t kind = *(entry +
+                        kHalo3ObjectEntryKindOffset);
+                    if (kind < 32)
+                        kinds |= uint32_t{1} << kind;
+                    auto* data = *reinterpret_cast<unsigned char**>(
+                        entry + kHalo3ObjectEntryDataOffset);
+                    if (!data)
+                        continue;
+                    const auto* objectPosition =
+                        reinterpret_cast<const float*>(
+                            data + kHalo3ObjectPositionOffset);
+                    const PhysicalContactVec3 candidate{
+                        objectPosition[0], objectPosition[1],
+                        objectPosition[2]};
+                    if (!PhysicalContactFinite(candidate))
+                        continue;
+                    ++finite;
+                    if (*reinterpret_cast<const int32_t*>(
+                            data + kHalo3ObjectParentOffset) != -1)
+                        continue;
+                    ++root;
+                    if (PhysicalContactMovableKind(kind))
+                        ++rootMovable;
+                }
+                const uint64_t census =
+                    (uint64_t{limit & 0xFFFu}) |
+                    (uint64_t{live & 0xFFFu} << 12) |
+                    (uint64_t{finite & 0xFFFu} << 24) |
+                    (uint64_t{root & 0xFFFu} << 36) |
+                    (uint64_t{rootMovable & 0xFFFu} << 48);
+                g_halo3ContactDebugObjectCensus.store(
+                    census, std::memory_order_relaxed);
+                g_halo3ContactDebugObjectKinds.store(
+                    kinds, std::memory_order_relaxed);
+            }
+            if (debugRig && entries)
+            {
                 const int32_t debugHandle =
                     g_halo3ContactDebugTarget.load(std::memory_order_relaxed);
                 const uint32_t debugIndex =
@@ -9346,6 +9400,18 @@ namespace
                     std::memory_order_relaxed) >> 16) & 1u,
                 g_halo3ContactDebugGameOptions.load(
                     std::memory_order_relaxed) >> 31);
+            const uint64_t census =
+                g_halo3ContactDebugObjectCensus.load(
+                    std::memory_order_relaxed);
+            LOG("H3 physical contact DEBUG CENSUS: limit=%u live=%u "
+                "finite=%u root=%u rootMovable=%u kinds=0x%08X",
+                static_cast<uint32_t>(census & 0xFFFu),
+                static_cast<uint32_t>((census >> 12) & 0xFFFu),
+                static_cast<uint32_t>((census >> 24) & 0xFFFu),
+                static_cast<uint32_t>((census >> 36) & 0xFFFu),
+                static_cast<uint32_t>((census >> 48) & 0xFFFu),
+                g_halo3ContactDebugObjectKinds.load(
+                    std::memory_order_relaxed));
         }
     }
 
