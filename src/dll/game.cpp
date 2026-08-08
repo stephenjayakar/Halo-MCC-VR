@@ -5991,6 +5991,9 @@ namespace
     Halo3MarkersInternalFn g_halo3MarkersInternal = nullptr;
     using Halo3ObjectSetVelocityFn = void(__fastcall*)(
         int32_t objectHandle, float localX, float localY, float localZ);
+    using Halo3ObjectSetVelocitiesFn = void(__fastcall*)(
+        int32_t objectHandle, const float* worldLinearVelocity,
+        const float* worldAngularVelocity);
     struct Halo3CollisionResult
     {
         int32_t type;
@@ -6015,6 +6018,7 @@ namespace
         const float* direction, const float* point, const float* normal);
     using Halo3GameIsCooperativeFn = bool(__fastcall*)();
     Halo3ObjectSetVelocityFn g_halo3ObjectSetVelocity = nullptr;
+    Halo3ObjectSetVelocitiesFn g_halo3ObjectSetVelocities = nullptr;
     Halo3CollisionTestVectorFn g_halo3CollisionTestVector = nullptr;
     Halo3NativeMeleeResponseFn g_halo3NativeMeleeResponse = nullptr;
     Halo3GameIsCooperativeFn g_halo3GameIsCooperative = nullptr;
@@ -9381,25 +9385,12 @@ namespace
                 const float magnitude = PhysicalContactLength(worldVelocity);
                 if (magnitude > maximum)
                     worldVelocity = worldVelocity * (maximum / magnitude);
-                const auto* objectForward = reinterpret_cast<const float*>(
-                    closestData + kHalo3ObjectForwardOffset);
-                const auto* objectUp = reinterpret_cast<const float*>(
-                    closestData + kHalo3ObjectUpOffset);
-                const PhysicalContactVec3 f{objectForward[0], objectForward[1],
-                                             objectForward[2]};
-                const PhysicalContactVec3 u{objectUp[0], objectUp[1], objectUp[2]};
-                const PhysicalContactVec3 l{
-                    u.y * f.z - u.z * f.y, u.z * f.x - u.x * f.z,
-                    u.x * f.y - u.y * f.x};
-                if (PhysicalContactFinite(worldVelocity) &&
-                    PhysicalContactFinite(f) && PhysicalContactFinite(u) &&
-                    PhysicalContactFinite(l))
+                if (PhysicalContactFinite(worldVelocity))
                 {
-                    g_halo3ObjectSetVelocity(
-                        closestHandle,
-                        PhysicalContactDot(worldVelocity, f),
-                        PhysicalContactDot(worldVelocity, l),
-                        PhysicalContactDot(worldVelocity, u));
+                    const float requestedVelocity[3] = {
+                        worldVelocity.x, worldVelocity.y, worldVelocity.z};
+                    g_halo3ObjectSetVelocities(
+                        closestHandle, requestedVelocity, nullptr);
                     if (debugRig)
                     {
                         const auto* observedVelocity =
@@ -13759,6 +13750,12 @@ namespace
         "83 F9 FF 0F 84 ?? ?? ?? ?? 48 8B C4 48 81 EC 88 00 00 00 "
         "8B 15 ?? ?? ?? ?? 0F 29 70 E8 0F 29 78 D8 "
         "44 0F 29 40 C8 44 0F 28 C3";
+    // object_set_velocities (+0x3411A4), the world-space physics/network
+    // routine called by object_set_velocity after its local-to-world transform.
+    const char* kHalo3ObjectSetVelocitiesSig =
+        "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 45 33 C9 "
+        "49 8B F8 48 8B F2 8B D9 E8 ?? ?? ?? ?? 41 B1 01 4C 8B C7 "
+        "48 8B D6 8B CB E8 ?? ?? ?? ??";
     // collision_test_vector_internal (+0x1FD748). Official H3EK's public
     // wrapper and this homolog prove the eight-argument ABI and 0x68-byte
     // result, including plane normal +0x2C and object handle +0x40.
@@ -14424,11 +14421,14 @@ namespace
             g_halo3PhysicalContactBindings.store(
                 false, std::memory_order_release);
             g_halo3ObjectSetVelocity = nullptr;
+            g_halo3ObjectSetVelocities = nullptr;
             g_halo3CollisionTestVector = nullptr;
             g_halo3NativeMeleeResponse = nullptr;
             g_halo3GameIsCooperative = nullptr;
             const uintptr_t velocityHit =
                 sig::Find(base, size, kHalo3ObjectSetVelocitySig);
+            const uintptr_t velocitiesHit =
+                sig::Find(base, size, kHalo3ObjectSetVelocitiesSig);
             const uintptr_t collisionHit =
                 sig::Find(base, size, kHalo3CollisionTestVectorSig);
             const uintptr_t meleeHit =
@@ -14438,6 +14438,9 @@ namespace
             const bool velocityUnique = velocityHit && !sig::Find(
                 velocityHit + 1, base + size - velocityHit - 1,
                 kHalo3ObjectSetVelocitySig);
+            const bool velocitiesUnique = velocitiesHit && !sig::Find(
+                velocitiesHit + 1, base + size - velocitiesHit - 1,
+                kHalo3ObjectSetVelocitiesSig);
             const bool collisionUnique = collisionHit && !sig::Find(
                 collisionHit + 1, base + size - collisionHit - 1,
                 kHalo3CollisionTestVectorSig);
@@ -14447,10 +14450,13 @@ namespace
             const bool cooperativeUnique = cooperativeHit && !sig::Find(
                 cooperativeHit + 1, base + size - cooperativeHit - 1,
                 kHalo3GameIsCooperativeSig);
-            if (velocityUnique && collisionUnique && cooperativeUnique)
+            if (velocityUnique && velocitiesUnique && collisionUnique &&
+                cooperativeUnique)
             {
                 g_halo3ObjectSetVelocity =
                     reinterpret_cast<Halo3ObjectSetVelocityFn>(velocityHit);
+                g_halo3ObjectSetVelocities =
+                    reinterpret_cast<Halo3ObjectSetVelocitiesFn>(velocitiesHit);
                 g_halo3CollisionTestVector =
                     reinterpret_cast<Halo3CollisionTestVectorFn>(collisionHit);
                 // The old melee candidate called unit_melee_effects, which
@@ -14462,10 +14468,12 @@ namespace
                 g_halo3PhysicalContactBindings.store(
                     true, std::memory_order_release);
                 LOG("H3 physical contact: optional native bindings installed "
-                    "collision=+0x%llX velocity=+0x%llX solo=+0x%llX "
+                    "collision=+0x%llX velocity=+0x%llX world=+0x%llX "
+                    "solo=+0x%llX "
                     "[unique]; melee stock (effects-only candidate=%d/%d)",
                     (unsigned long long)(collisionHit - base),
                     (unsigned long long)(velocityHit - base),
+                    (unsigned long long)(velocitiesHit - base),
                     (unsigned long long)(cooperativeHit - base),
                     meleeHit ? 1 : 0, meleeUnique ? 1 : 0);
             }
@@ -14473,9 +14481,11 @@ namespace
             {
                 LOG("H3 physical contact: disabled; signature evidence "
                     "missing/ambiguous (collision=%d/%d velocity=%d/%d "
+                    "world=%d/%d "
                     "solo=%d/%d)",
                     collisionHit ? 1 : 0, collisionUnique ? 1 : 0,
                     velocityHit ? 1 : 0, velocityUnique ? 1 : 0,
+                    velocitiesHit ? 1 : 0, velocitiesUnique ? 1 : 0,
                     cooperativeHit ? 1 : 0, cooperativeUnique ? 1 : 0);
             }
         }
