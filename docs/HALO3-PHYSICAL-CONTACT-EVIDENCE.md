@@ -1,6 +1,6 @@
 # Halo 3 physical weapon contact evidence
 
-Date: 2026-08-06
+Date: 2026-08-08
 
 ## Pinned binaries
 
@@ -21,6 +21,7 @@ render, input, ODST, or Reach paths.
 | `collision_test_vector_internal` | `0x652A10` | `0x1FD748` | 1 | the official public wrapper at `0x6529D0` proves the eight-argument core ABI; official callers and the structurally identical retail prologue prove the 0x68-byte result fields used here: type `+0x00`, fraction `+0x04`, point `+0x08`, plane normal `+0x2C`, and object handle `+0x40` |
 | `object_set_velocity` native | `0xAD8050` | `0x39BAD0` | 1 | the official script wrapper at `0x7A88F0` and retail wrapper at `0x1E380C` call their respective native with object handle plus three local velocity floats |
 | `object_set_velocities` world native | `0xA4EAA0` | `0x3411A4` | 1 | both `object_set_velocity` bodies transform the three local floats into a world vector, then call this routine with object handle, world-linear pointer, and null angular pointer; contact already owns a validated, clamped world vector and uses this lower authoritative physics/network path directly |
+| `objects_update` simulation owner | `0xA52920` | `0x34067C` | 1 | retained H3EK `objects.cpp` assertion metadata identifies the body containing the `object_update_absolute_index` transaction; the retail homolog preserves the TLS object table, active-object loops, `object_update_absolute_index` writes, and update-in-progress byte, and the complete runtime signature is unique |
 | `unit_melee_effects` (rejected for damage) | `0xA63390` | `0x35A194` | 1 | official disassembly proves the eight arguments and authored effect selection, but the body only emits the melee contact effects; it is not a damage-applying entry point and remains unbound |
 | `game_is_cooperative` native | `0xCFB7D0` | `0x0F000C` | 1 | official/retail script wrappers call the native; its body first requires game-options byte `+0x10 == 1` (campaign), then returns whether the authoritative player count is greater than one |
 
@@ -97,16 +98,50 @@ assumption was false and prevented every Forge sweep. Synchronous and
 distributed client roles remain disabled. Any failure resets contact state and
 performs no native write.
 
+Collision remains on the camera callback, but object mutation does not. The
+camera callback publishes a bounded atomic command containing the validated
+target handle, world velocity, generation, timestamp, and serial. The unique
+`objects_update` hook consumes that command immediately before the authoritative
+object update. The hook performs no allocation, logging, file I/O, locking, or
+signature scanning and always calls the original update routine.
+
 The closest native surface blocks its sample. BSP and instanced geometry receive
 no impulse or damage. Player, held weapon, attached/first-person-only objects,
-stale handles, and invalid values are rejected. Every exact object hit is passed
-to the native velocity setter once per continuous contact above 0.05 m/s; the
-native is deliberately allowed to decide whether that object owns a movable
-rigid body, avoiding a brittle object-kind whitelist that excluded Forge
-scenery and machines. The velocity delta is proportional to swing speed and
-clamped. The high-speed melee threshold/debounce remains present but fail-closed
-for this collision/rigid-body candidate because the previously bound native was
+stale handles, and invalid values are rejected. Every exact object hit publishes
+one native velocity command per continuous contact above 0.05 m/s; the
+simulation owner validates and applies it before object update. The native is
+deliberately allowed to decide whether that object owns a movable rigid body,
+avoiding a brittle object-kind whitelist that excluded Forge scenery and
+machines. The velocity delta is proportional to swing speed and clamped. The
+high-speed melee threshold/debounce remains present but fail-closed for this
+collision/rigid-body candidate because the previously bound native was
 effects-only. Existing grip melee and all normal input paths remain unchanged.
+
+## Forge runtime proof
+
+Steam Halo 3 Construct Forge was run through the anti-cheat-disabled launcher
+with the repository's headless OpenXR test runtime and the opt-in contact debug
+rig. The D3D11 OpenXR path rejected the synthetic adapter with `XrResult(-9)`,
+so stereo correctly disarmed while the isolated contact rig continued in the
+flat game. This is a diagnostic-only configuration and does not bypass Easy
+Anti-Cheat.
+
+Candidate `1da8395` reported an applied command whose value predated the
+camera-thread publish and was reverted. Candidate `24b0acd` moved the call to
+the XInput thread, where the native setter raised a structured exception, and
+was reverted. Candidate `0eccdbdc29b1cab8ffdf1f3af1612c17e91a648d` installed
+the unique `objects_update` hook with MinHook status `0/0`. In authoritative
+Forge mode (`game=2`, `simulation=5`, `cooperative=0`, `options=1`), the rig
+selected the exact loose kind-2 weapon handle `0xE27C000D`. A slow `0.43 m/s`
+contact published and applied one native impulse (`command=1`, `applied=1`,
+`commandStatus=2`) without a melee event or fault. Readback moved the target
+center from `(-1.844, -0.857, 3.116)` to `(-1.841, -0.860, 3.116)`, a measured
+displacement of `0.004` world units. The preserved log is
+`out/debug-openxr/0eccdbd-forge-success-slow.log`.
+
+This proves headless Forge rigid-body interaction for the slow-contact path. It
+does not constitute headset acceptance and does not prove the still fail-closed
+high-speed native melee path.
 
 ## Verification boundary
 
