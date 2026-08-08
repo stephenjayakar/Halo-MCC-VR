@@ -6055,6 +6055,7 @@ namespace
     std::atomic<float> g_halo3ContactSpeed{0.0f};
     std::atomic<bool> g_halo3ContactDebugRig{false};
     std::atomic<int32_t> g_halo3ContactDebugAimTarget{-1};
+    std::atomic<uint32_t> g_halo3ContactDebugAimKind{0xFFFFFFFFu};
     std::atomic<int32_t> g_halo3ContactDebugTarget{-1};
     std::atomic<uint32_t> g_halo3ContactDebugGameOptions{0};
     std::atomic<uint64_t> g_halo3ContactDebugObjectCensus{0};
@@ -9042,6 +9043,8 @@ namespace
                 float targetRadius = 0.25f;
                 float closestDistanceSquared = 1.0e30f;
                 int32_t aimTarget = -1;
+                uint8_t aimKind = 0xFF;
+                int targetPriority = -1;
                 const uint32_t limit = std::min(
                     header.firstUnallocated, header.maximumCount);
                 for (uint32_t index = 0; index < limit; ++index)
@@ -9064,20 +9067,26 @@ namespace
                     if (!data || *reinterpret_cast<const int32_t*>(
                                      data + kHalo3ObjectParentOffset) != -1)
                         continue;
-                    const auto* objectPosition =
+                    const auto* objectCenter =
                         reinterpret_cast<const float*>(
-                            data + kHalo3ObjectPositionOffset);
+                            data + kHalo3ObjectBoundingCenterOffset);
                     const PhysicalContactVec3 candidate{
-                        objectPosition[0], objectPosition[1],
-                        objectPosition[2]};
+                        objectCenter[0], objectCenter[1], objectCenter[2]};
                     if (!PhysicalContactFinite(candidate))
                         continue;
                     const float distanceSquared =
                         PhysicalContactLengthSquared(candidate - camera);
+                    // Forge acceptance is specifically a loose weapon. Prefer
+                    // kind 2 and use another movable root only when the map has
+                    // no weapon datum at all.
+                    const int priority = kind == 2 ? 1 : 0;
                     if (!std::isfinite(distanceSquared) ||
                         distanceSquared < 0.25f ||
-                        distanceSquared >= closestDistanceSquared)
+                        priority < targetPriority ||
+                        (priority == targetPriority &&
+                         distanceSquared >= closestDistanceSquared))
                         continue;
+                    targetPriority = priority;
                     closestDistanceSquared = distanceSquared;
                     target = candidate;
                     const float radius = *reinterpret_cast<const float*>(
@@ -9085,9 +9094,12 @@ namespace
                     targetRadius = std::isfinite(radius) && radius > 0.05f &&
                         radius < 5.0f ? radius : 0.25f;
                     aimTarget = handle;
+                    aimKind = kind;
                 }
                 g_halo3ContactDebugAimTarget.store(
                     aimTarget, std::memory_order_relaxed);
+                g_halo3ContactDebugAimKind.store(
+                    aimKind, std::memory_order_relaxed);
                 if (aimTarget != -1)
                 {
                     forward = PhysicalContactNormalize(target - camera,
@@ -9450,13 +9462,16 @@ namespace
             const float dy = current[1] - initial[1];
             const float dz = current[2] - initial[2];
             const float moved = std::sqrt(dx * dx + dy * dy + dz * dz);
-            LOG("H3 physical contact DEBUG RIG: aim=0x%08X target=0x%08X "
+            LOG("H3 physical contact DEBUG RIG: aim=0x%08X kind=%u "
+                "target=0x%08X "
                 "start=(%.3f %.3f %.3f) now=(%.3f %.3f %.3f) "
                 "moved=%.3f velocity=(%.3f %.3f %.3f) game=%u sim=%u "
                 "cooperative=%u options=%u",
                 static_cast<uint32_t>(
                     g_halo3ContactDebugAimTarget.load(
                         std::memory_order_relaxed)),
+                g_halo3ContactDebugAimKind.load(
+                    std::memory_order_relaxed),
                 static_cast<uint32_t>(target),
                 initial[0], initial[1], initial[2],
                 current[0], current[1], current[2], moved,
