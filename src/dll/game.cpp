@@ -6000,6 +6000,10 @@ namespace
     Halo3NativeMeleeResponseFn g_halo3NativeMeleeResponse = nullptr;
     Halo3GameIsCooperativeFn g_halo3GameIsCooperative = nullptr;
     std::atomic<bool> g_halo3PhysicalContactBindings{false};
+    // Runtime acceptance rejected the bounds-sphere proxy: it remained in
+    // near-continuous false contact and did not move Forge or campaign props.
+    // Keep the failed implementation inert while preserving it for evidence.
+    constexpr bool kEnableHalo3PhysicalContactCandidate = false;
     PhysicalContactDebounce g_halo3ContactDebounce;
     uint64_t g_halo3ContactLastMotionSerial = 0;
     uint64_t g_halo3ContactLastMeleeMs = 0;
@@ -8658,7 +8662,8 @@ namespace
             g_halo3RuntimeGeneration.load(std::memory_order_acquire);
         bool paused = true;
         int32_t scene = -1, shot = -1;
-        const bool gate = g_config.physical_weapon_contact && generation &&
+        const bool gate = kEnableHalo3PhysicalContactCandidate &&
+            g_config.physical_weapon_contact && generation &&
             g_halo3PhysicalContactBindings.load(std::memory_order_acquire) &&
             g_halo3VehicleBinding.load(std::memory_order_acquire) ==
                 static_cast<uint8_t>(Halo3VehicleBindingState::Installed) &&
