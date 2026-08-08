@@ -6054,6 +6054,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactMelees{0};
     std::atomic<float> g_halo3ContactSpeed{0.0f};
     std::atomic<bool> g_halo3ContactDebugRig{false};
+    std::atomic<int32_t> g_halo3ContactDebugAimTarget{-1};
     std::atomic<int32_t> g_halo3ContactDebugTarget{-1};
     std::atomic<uint32_t> g_halo3ContactDebugGameOptions{0};
     std::atomic<uint64_t> g_halo3ContactDebugObjectCensus{0};
@@ -9027,10 +9028,73 @@ namespace
             const float capsuleLength = authoredBounds
                 ? std::clamp(authoredRadius * 1.75f, 0.30f, 0.75f)
                 : 0.65f * worldScale;
-            const PhysicalContactVec3 grip{
+            PhysicalContactVec3 grip{
                 position[0], position[1], position[2]};
-            const PhysicalContactVec3 forward = PhysicalContactNormalize({
+            PhysicalContactVec3 forward = PhysicalContactNormalize({
                 basis[0], basis[1], basis[2]});
+            if (debugRig)
+            {
+                const PhysicalContactVec3 camera{
+                    g_baseCamX.load(std::memory_order_relaxed),
+                    g_baseCamY.load(std::memory_order_relaxed),
+                    g_baseCamZ.load(std::memory_order_relaxed)};
+                PhysicalContactVec3 target{};
+                float targetRadius = 0.25f;
+                float closestDistanceSquared = 1.0e30f;
+                int32_t aimTarget = -1;
+                const uint32_t limit = std::min(
+                    header.firstUnallocated, header.maximumCount);
+                for (uint32_t index = 0; index < limit; ++index)
+                {
+                    auto* entry = entries + static_cast<size_t>(index) *
+                        kHalo3ObjectEntryStride;
+                    const uint16_t identifier =
+                        *reinterpret_cast<const uint16_t*>(entry);
+                    if (!OdstObjectEntryIsLive(identifier))
+                        continue;
+                    const int32_t handle = static_cast<int32_t>(
+                        (uint32_t{identifier} << 16) | index);
+                    const uint8_t kind = *(entry +
+                        kHalo3ObjectEntryKindOffset);
+                    if (handle == unitHandle || handle == weaponHandle ||
+                        !PhysicalContactMovableKind(kind))
+                        continue;
+                    auto* data = *reinterpret_cast<unsigned char**>(
+                        entry + kHalo3ObjectEntryDataOffset);
+                    if (!data || *reinterpret_cast<const int32_t*>(
+                                     data + kHalo3ObjectParentOffset) != -1)
+                        continue;
+                    const auto* objectPosition =
+                        reinterpret_cast<const float*>(
+                            data + kHalo3ObjectPositionOffset);
+                    const PhysicalContactVec3 candidate{
+                        objectPosition[0], objectPosition[1],
+                        objectPosition[2]};
+                    if (!PhysicalContactFinite(candidate))
+                        continue;
+                    const float distanceSquared =
+                        PhysicalContactLengthSquared(candidate - camera);
+                    if (!std::isfinite(distanceSquared) ||
+                        distanceSquared < 0.25f ||
+                        distanceSquared >= closestDistanceSquared)
+                        continue;
+                    closestDistanceSquared = distanceSquared;
+                    target = candidate;
+                    const float radius = *reinterpret_cast<const float*>(
+                        data + 0x28);
+                    targetRadius = std::isfinite(radius) && radius > 0.05f &&
+                        radius < 5.0f ? radius : 0.25f;
+                    aimTarget = handle;
+                }
+                g_halo3ContactDebugAimTarget.store(
+                    aimTarget, std::memory_order_relaxed);
+                if (aimTarget != -1)
+                {
+                    forward = PhysicalContactNormalize(target - camera,
+                                                       forward);
+                    grip = target - forward * (targetRadius + 0.10f);
+                }
+            }
             const PhysicalContactVec3 tip = grip + forward * capsuleLength;
             if (weaponHandle != g_halo3ContactWeaponHandle)
             {
@@ -9075,11 +9139,13 @@ namespace
             PhysicalContactHit closest{};
             int32_t closestType = -1;
             int32_t closestHandle = -1;
-            // collision_flags: structure; object_flags: all objects. The
-            // engine resolves authored BSP/instance/object geometry and returns
-            // the first blocking surface for each bounded weapon sample.
+            // collision_flags: structure; object_flags: every object type.
+            // H3EK's generated flag initializer at +0x14060 proves the all-
+            // object mask is 0x7FFE. High bit zero is one object type, not an
+            // "all objects" switch; the first exact-query candidate therefore
+            // missed loose Forge props.
             constexpr uint64_t kContactCollisionFlags =
-                1ull | (1ull << 32);
+                1ull | (uint64_t{0x7FFE} << 32);
             for (const auto& sweep : sweeps)
             {
                 const PhysicalContactVec3 vector = sweep.second - sweep.first;
@@ -9384,10 +9450,13 @@ namespace
             const float dy = current[1] - initial[1];
             const float dz = current[2] - initial[2];
             const float moved = std::sqrt(dx * dx + dy * dy + dz * dz);
-            LOG("H3 physical contact DEBUG RIG: target=0x%08X "
+            LOG("H3 physical contact DEBUG RIG: aim=0x%08X target=0x%08X "
                 "start=(%.3f %.3f %.3f) now=(%.3f %.3f %.3f) "
                 "moved=%.3f velocity=(%.3f %.3f %.3f) game=%u sim=%u "
                 "cooperative=%u options=%u",
+                static_cast<uint32_t>(
+                    g_halo3ContactDebugAimTarget.load(
+                        std::memory_order_relaxed)),
                 static_cast<uint32_t>(target),
                 initial[0], initial[1], initial[2],
                 current[0], current[1], current[2], moved,

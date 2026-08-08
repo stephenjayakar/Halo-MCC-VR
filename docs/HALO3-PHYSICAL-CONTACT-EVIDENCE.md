@@ -38,6 +38,15 @@ alone do not satisfy native melee damage, high-speed contact stays stock until
 the damage-applying path is separately established. No grip, trigger,
 animation, or lunge input is synthesized.
 
+The collision query's first argument packs two 32-bit flag sets: collision
+flags in the low dword and object-type flags in the high dword. The official
+H3EK generated initializer at `0x140014060` writes low `0` and high `0x7FFE`
+for its all-object set. Other generated initializers independently validate the
+split by modifying each dword and rejecting collision bits above 21 or object
+bits above 14. The first native-query candidate incorrectly used high `1`,
+which selects one object type rather than all objects. Physical contact now
+combines structure bit `1` with the proven high `0x7FFE` mask.
+
 ## Collision-shape decision
 
 Candidate `a644d2c` used a bounds-derived capsule against every object's broad
