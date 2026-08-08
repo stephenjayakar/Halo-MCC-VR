@@ -60,14 +60,22 @@ nor campaign testing produced visible object movement. The hit distribution
 proves that broad spheres are not a usable surface-contact proxy. Commit
 `2f4940b` disables that failed behavior before the replacement candidate.
 
-The replacement uses Halo 3's native swept-vector collision query. Five fixed,
+The replacement uses Halo 3's native swept-vector collision query for exact BSP
+and instanced-geometry blockers. Five fixed,
 allocation-free samples cover previous-to-current grip, midpoint, and tip plus
 the previous and current weapon spines. Each sample resolves the engine's exact
-authored BSP, instanced-geometry, or object surface and returns the first blocker;
+authored static surface and returns the first blocker;
 the query ignores the player unit and held weapon. The weapon extent remains a
 bounded proxy derived from the held weapon's authored radius (0.30–0.75 world
 units, with a 0.65-unit invalid-bounds fallback), but targets are no longer
-approximated by bounding spheres. The exact final visible right-wrist transform
+approximated by bounding spheres in the native branch. The live 2026-08-08 Forge
+probe proved that branch returns BSP hits but does not expose a loose kind-2
+weapon's rigid-body surface. Movable root objects therefore use the approved
+bounds-derived capsule fallback, restricted to physics-capable object kinds; an
+earlier exact native structure hit still wins unless the proxy begins at the
+same surface, such as a weapon resting on a floor. Unlike rejected candidate
+`a644d2c`, scenery and machine bounds are not treated as interactive surfaces.
+The exact final visible right-wrist transform
 is published by the first-person palette path through a bounded atomic snapshot.
 OpenXR pose, linear/angular velocity, timestamp, and serial use a separate
 bounded atomic snapshot.

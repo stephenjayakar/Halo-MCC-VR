@@ -9151,6 +9151,7 @@ namespace
             PhysicalContactHit closest{};
             int32_t closestType = -1;
             int32_t closestHandle = -1;
+            uint32_t eligibleObjects = 0;
             // collision_flags: structure; object_flags: object-query enable
             // plus every object type. H3EK's generated +0x14060 initializer
             // proves the type mask is 0x7FFE, while the official assertion in
@@ -9204,10 +9205,63 @@ namespace
                         ? native.objectHandle : -1;
                 }
             }
+            // Halo 3's vector query resolves BSP and authored model collision,
+            // but the live Forge probe proves loose weapon rigid bodies expose
+            // no surface through that API. Use the already-tested bounded
+            // capsule fallback only for root object kinds that can own physics;
+            // the exact native structure result above still wins whenever it
+            // lies earlier along the same sweep.
+            const float contactRadius = std::clamp(
+                authoredRadius * 0.20f, 0.03f, 0.10f);
+            const int32_t debugAimTarget =
+                g_halo3ContactDebugAimTarget.load(std::memory_order_relaxed);
+            const uint32_t limit = std::min(
+                header.firstUnallocated, header.maximumCount);
+            for (uint32_t index = 0; index < limit; ++index)
+            {
+                auto* entry = entries + static_cast<size_t>(index) *
+                    kHalo3ObjectEntryStride;
+                const uint16_t identifier =
+                    *reinterpret_cast<const uint16_t*>(entry);
+                if (!OdstObjectEntryIsLive(identifier))
+                    continue;
+                const int32_t handle = static_cast<int32_t>(
+                    (uint32_t{identifier} << 16) | index);
+                const uint8_t kind = *(entry + kHalo3ObjectEntryKindOffset);
+                if (handle == unitHandle || handle == weaponHandle ||
+                    (debugRig && handle != debugAimTarget) ||
+                    !PhysicalContactMovableKind(kind))
+                    continue;
+                auto* data = *reinterpret_cast<unsigned char**>(
+                    entry + kHalo3ObjectEntryDataOffset);
+                if (!data || *reinterpret_cast<const int32_t*>(
+                                 data + kHalo3ObjectParentOffset) != -1)
+                    continue;
+                const auto* center = reinterpret_cast<const float*>(
+                    data + kHalo3ObjectBoundingCenterOffset);
+                const float radius =
+                    *reinterpret_cast<const float*>(data + 0x28);
+                const PhysicalContactVec3 targetCenter{
+                    center[0], center[1], center[2]};
+                if (!PhysicalContactFinite(targetCenter) ||
+                    !std::isfinite(radius) || radius <= 0.01f ||
+                    radius > 5.0f)
+                    continue;
+                ++eligibleObjects;
+                const PhysicalContactHit proxy = PhysicalContactSweepCapsule(
+                    g_halo3ContactPreviousGrip, g_halo3ContactPreviousTip,
+                    grip, tip, contactRadius, targetCenter, radius);
+                if (!proxy.hit ||
+                    (closest.hit && proxy.fraction > closest.fraction + 0.001f))
+                    continue;
+                closest = proxy;
+                closestType = 4;
+                closestHandle = handle;
+            }
             g_halo3ContactPreviousGrip = grip;
             g_halo3ContactPreviousTip = tip;
             g_halo3ContactEligibleObjects.store(
-                closestType == 4 ? 1u : 0u, std::memory_order_relaxed);
+                eligibleObjects, std::memory_order_relaxed);
             g_halo3ContactSweeps.fetch_add(1, std::memory_order_relaxed);
             g_halo3ContactStage.store(
                 static_cast<uint32_t>(Halo3PhysicalContactStage::Sweeping),
