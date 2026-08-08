@@ -43,13 +43,13 @@ flags in the low dword and object-type flags in the high dword. The official
 H3EK generated initializer at `0x140014060` writes low `0` and high `0x7FFE`
 for its all-object set. Other generated initializers independently validate the
 split by modifying each dword and rejecting collision bits above 21 or object
-bits above 14. The executable's official enum metadata names low bit 0
-`_collision_test_structure_bit` and low bit 3
-`_collision_test_objects_bit`; its initializer at `0x140014040` emits low
-`0x9`, independently proving that both enable bits are required. The first
-native-query candidate incorrectly used high `1`, selecting one object type,
-then the first mask correction still omitted the low object-enable bit.
-Physical contact now combines low `0x9` with the proven high `0x7FFE` mask.
+bits above 14. Most importantly, the official assertion text inside
+`collision_test_vector_internal` reads
+`TEST_FLAG(flags.object_flags, _collision_test_objects_bit)`: the master
+object-query enable belongs to the high object-flags dword. Thus high `1`
+enables object queries but selects no object types, while high `0x7FFE`
+selects every type but does not enable object queries. Physical contact uses
+low structure bit `1` and high `0x7FFF` (master enable OR all type bits).
 
 ## Collision-shape decision
 

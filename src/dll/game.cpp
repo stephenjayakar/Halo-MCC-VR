@@ -9151,13 +9151,14 @@ namespace
             PhysicalContactHit closest{};
             int32_t closestType = -1;
             int32_t closestHandle = -1;
-            // collision_flags: structure + objects; object_flags: every type.
-            // H3EK's generated flag initializer at +0x14060 proves the all-
-            // object mask is 0x7FFE. Its official enum metadata and generated
-            // +0x14040 initializer prove low bit 3 is the object-query enable;
-            // object type flags alone do not turn object tests on.
+            // collision_flags: structure; object_flags: object-query enable
+            // plus every object type. H3EK's generated +0x14060 initializer
+            // proves the type mask is 0x7FFE, while the official assertion in
+            // collision_test_vector_internal proves _collision_test_objects_bit
+            // belongs to object_flags. Therefore high bit zero must be ORed
+            // with the type mask: 0x7FFF.
             constexpr uint64_t kContactCollisionFlags =
-                0x9ull | (uint64_t{0x7FFE} << 32);
+                1ull | (uint64_t{0x7FFF} << 32);
             for (const auto& sweep : sweeps)
             {
                 const PhysicalContactVec3 vector = sweep.second - sweep.first;
