@@ -6053,6 +6053,11 @@ namespace
     std::atomic<uint64_t> g_halo3ContactImpulses{0};
     std::atomic<uint64_t> g_halo3ContactMelees{0};
     std::atomic<float> g_halo3ContactSpeed{0.0f};
+    std::atomic<bool> g_halo3ContactDebugRig{false};
+    std::atomic<int32_t> g_halo3ContactDebugTarget{-1};
+    std::atomic<float> g_halo3ContactDebugInitialPosition[3]{};
+    std::atomic<float> g_halo3ContactDebugCurrentPosition[3]{};
+    std::atomic<float> g_halo3ContactDebugVelocity[3]{};
     enum class Halo3NodeBindingState : uint8_t
     {
         NotInstalled = 0,
@@ -8679,6 +8684,8 @@ namespace
     {
         const uint32_t generation =
             g_halo3RuntimeGeneration.load(std::memory_order_acquire);
+        const bool debugRig =
+            g_halo3ContactDebugRig.load(std::memory_order_acquire);
         bool paused = true;
         int32_t scene = -1, shot = -1;
         const bool gate = kEnableHalo3PhysicalContactCandidate &&
@@ -8687,7 +8694,7 @@ namespace
             g_halo3VehicleBinding.load(std::memory_order_acquire) ==
                 static_cast<uint8_t>(Halo3VehicleBindingState::Installed) &&
             g_engineTlsIndex && g_enabled.load(std::memory_order_relaxed) &&
-            g_vrAim.load(std::memory_order_relaxed) &&
+            (debugRig || g_vrAim.load(std::memory_order_relaxed)) &&
             TitleAdapter_GetRuntimeMode() == RuntimeMode::Gameplay &&
             Halo3VehicleSnapshotState(
                 g_halo3VehicleSnapshot.load(std::memory_order_acquire),
@@ -8696,7 +8703,23 @@ namespace
             ReadCinematicControl(scene, shot) ==
                 CinematicControlState::PlayerControlled;
         VrControllerMotionSnapshot motion{};
-        if (!gate || !VR_GetRightControllerMotion(motion) ||
+        bool haveMotion = false;
+        if (debugRig && gate)
+        {
+            const float phase = static_cast<float>(nowMs % 10472u) *
+                (6.28318530718f / 10472.0f);
+            const float speed = 0.90f * std::fabs(std::cos(phase));
+            motion.poseValid = true;
+            motion.linearVelocityValid = true;
+            motion.angularVelocityValid = true;
+            motion.linearVelocity[0] = speed;
+            motion.sampleMs = nowMs;
+            motion.serial = nowMs;
+            haveMotion = true;
+        }
+        else if (gate)
+            haveMotion = VR_GetRightControllerMotion(motion);
+        if (!gate || !haveMotion ||
             !motion.poseValid || !motion.linearVelocityValid ||
             !motion.sampleMs || nowMs < motion.sampleMs ||
             nowMs - motion.sampleMs > 100 ||
@@ -8717,9 +8740,35 @@ namespace
         g_halo3ContactLastMotionSerial = motion.serial;
 
         float basis[9]{}, position[3]{};
-        uint64_t visiblePoseMs = 0;
-        if (!Halo3ReadVisibleWeaponPose(basis, position, visiblePoseMs) ||
-            nowMs < visiblePoseMs || nowMs - visiblePoseMs > 100)
+        uint64_t visiblePoseMs = nowMs;
+        bool haveVisiblePose = false;
+        if (debugRig && g_baseCamValid.load(std::memory_order_acquire))
+        {
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                basis[axis] = g_camFwd[axis].load(std::memory_order_relaxed);
+                basis[6 + axis] =
+                    g_camUp[axis].load(std::memory_order_relaxed);
+            }
+            basis[3] = basis[7] * basis[2] - basis[8] * basis[1];
+            basis[4] = basis[8] * basis[0] - basis[6] * basis[2];
+            basis[5] = basis[6] * basis[1] - basis[7] * basis[0];
+            const float phase = static_cast<float>(nowMs % 10472u) *
+                (6.28318530718f / 10472.0f);
+            const float reach = 1.75f + 1.50f * std::sin(phase);
+            const float camera[3] = {
+                g_baseCamX.load(std::memory_order_relaxed),
+                g_baseCamY.load(std::memory_order_relaxed),
+                g_baseCamZ.load(std::memory_order_relaxed)};
+            for (int axis = 0; axis < 3; ++axis)
+                position[axis] = camera[axis] + basis[axis] * reach;
+            haveVisiblePose = true;
+        }
+        else
+            haveVisiblePose = Halo3ReadVisibleWeaponPose(
+                basis, position, visiblePoseMs);
+        if (!haveVisiblePose || nowMs < visiblePoseMs ||
+            nowMs - visiblePoseMs > 100)
         {
             g_halo3ContactStage.store(
                 static_cast<uint32_t>(Halo3PhysicalContactStage::VisiblePose),
@@ -8784,6 +8833,40 @@ namespace
             }
             auto* entries = *reinterpret_cast<unsigned char**>(
                 table + kOdstDataArrayElementsOffset);
+            if (debugRig && entries)
+            {
+                const int32_t debugHandle =
+                    g_halo3ContactDebugTarget.load(std::memory_order_relaxed);
+                const uint32_t debugIndex =
+                    static_cast<uint32_t>(debugHandle) & 0xFFFFu;
+                if (debugHandle != -1 && debugIndex < header.maximumCount)
+                {
+                    auto* debugEntry = entries +
+                        static_cast<size_t>(debugIndex) *
+                            kHalo3ObjectEntryStride;
+                    if (*reinterpret_cast<const uint16_t*>(debugEntry) ==
+                        static_cast<uint16_t>(
+                            static_cast<uint32_t>(debugHandle) >> 16))
+                    {
+                        auto* debugData = *reinterpret_cast<unsigned char**>(
+                            debugEntry + kHalo3ObjectEntryDataOffset);
+                        if (debugData)
+                        {
+                            const auto* debugPosition =
+                                reinterpret_cast<const float*>(
+                                    debugData + kHalo3ObjectPositionOffset);
+                            const PhysicalContactVec3 value{
+                                debugPosition[0], debugPosition[1],
+                                debugPosition[2]};
+                            if (PhysicalContactFinite(value))
+                                for (int axis = 0; axis < 3; ++axis)
+                                    g_halo3ContactDebugCurrentPosition[axis]
+                                        .store(debugPosition[axis],
+                                               std::memory_order_relaxed);
+                        }
+                    }
+                }
+            }
             const int32_t unitHandle = g_halo3PlayerUnitGetter(0);
             const uint32_t unitIndex =
                 static_cast<uint32_t>(unitHandle) & 0xFFFFu;
@@ -9056,6 +9139,28 @@ namespace
 
             if (firstContact)
             {
+                if (debugRig &&
+                    g_halo3ContactDebugTarget.load(
+                        std::memory_order_relaxed) != closestHandle)
+                {
+                    const auto* objectPosition =
+                        reinterpret_cast<const float*>(
+                            closestData + kHalo3ObjectPositionOffset);
+                    const PhysicalContactVec3 initial{
+                        objectPosition[0], objectPosition[1], objectPosition[2]};
+                    if (PhysicalContactFinite(initial))
+                    {
+                        for (int axis = 0; axis < 3; ++axis)
+                        {
+                            g_halo3ContactDebugInitialPosition[axis].store(
+                                objectPosition[axis], std::memory_order_relaxed);
+                            g_halo3ContactDebugCurrentPosition[axis].store(
+                                objectPosition[axis], std::memory_order_relaxed);
+                        }
+                        g_halo3ContactDebugTarget.store(
+                            closestHandle, std::memory_order_release);
+                    }
+                }
                 PhysicalContactVec3 worldVelocity{
                     targetVelocity[0], targetVelocity[1], targetVelocity[2]};
                 const float delta =
@@ -9085,6 +9190,16 @@ namespace
                         PhysicalContactDot(worldVelocity, f),
                         PhysicalContactDot(worldVelocity, l),
                         PhysicalContactDot(worldVelocity, u));
+                    if (debugRig)
+                    {
+                        const auto* observedVelocity =
+                            reinterpret_cast<const float*>(
+                                closestData + 0x74);
+                        for (int axis = 0; axis < 3; ++axis)
+                            g_halo3ContactDebugVelocity[axis].store(
+                                observedVelocity[axis],
+                                std::memory_order_relaxed);
+                    }
                     g_halo3ContactImpulses.fetch_add(
                         1, std::memory_order_relaxed);
                     g_halo3ContactStage.store(
@@ -9180,6 +9295,32 @@ namespace
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactMelees.load(
                 std::memory_order_relaxed));
+        if (g_halo3ContactDebugRig.load(std::memory_order_acquire))
+        {
+            const int32_t target =
+                g_halo3ContactDebugTarget.load(std::memory_order_acquire);
+            float initial[3]{}, current[3]{}, velocity[3]{};
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                initial[axis] = g_halo3ContactDebugInitialPosition[axis].load(
+                    std::memory_order_relaxed);
+                current[axis] = g_halo3ContactDebugCurrentPosition[axis].load(
+                    std::memory_order_relaxed);
+                velocity[axis] = g_halo3ContactDebugVelocity[axis].load(
+                    std::memory_order_relaxed);
+            }
+            const float dx = current[0] - initial[0];
+            const float dy = current[1] - initial[1];
+            const float dz = current[2] - initial[2];
+            const float moved = std::sqrt(dx * dx + dy * dy + dz * dz);
+            LOG("H3 physical contact DEBUG RIG: target=0x%08X "
+                "start=(%.3f %.3f %.3f) now=(%.3f %.3f %.3f) "
+                "moved=%.3f velocity=(%.3f %.3f %.3f)",
+                static_cast<uint32_t>(target),
+                initial[0], initial[1], initial[2],
+                current[0], current[1], current[2], moved,
+                velocity[0], velocity[1], velocity[2]);
+        }
     }
 
     void* __fastcall CamCopyHook(void* dst, void* src)
@@ -13738,6 +13879,28 @@ namespace
     {
         if (!runtimeGeneration)
             return false;
+        wchar_t contactDebugValue[8]{};
+        const DWORD contactDebugLength = GetEnvironmentVariableW(
+            L"HALOMCCVR_H3_CONTACT_DEBUG_RIG", contactDebugValue,
+            static_cast<DWORD>(std::size(contactDebugValue)));
+        const bool contactDebugEnabled = contactDebugLength > 0 &&
+            contactDebugLength < std::size(contactDebugValue) &&
+            contactDebugValue[0] != L'0';
+        g_halo3ContactDebugRig.store(
+            contactDebugEnabled, std::memory_order_release);
+        g_halo3ContactDebugTarget.store(-1, std::memory_order_release);
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            g_halo3ContactDebugInitialPosition[axis].store(
+                0.0f, std::memory_order_relaxed);
+            g_halo3ContactDebugCurrentPosition[axis].store(
+                0.0f, std::memory_order_relaxed);
+            g_halo3ContactDebugVelocity[axis].store(
+                0.0f, std::memory_order_relaxed);
+        }
+        if (contactDebugEnabled)
+            LOG("H3 physical contact DEBUG RIG enabled by environment; "
+                "synthetic center-ray motion and object-state readback active");
         LocateNativePauseFlag(base, size);
         LocateCinematicState(base, size);
         uintptr_t hit = sig::Find(base, size, kCamCopySig);
