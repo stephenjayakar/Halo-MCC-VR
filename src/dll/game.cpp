@@ -8696,7 +8696,12 @@ namespace
             g_engineTlsIndex &&
             (debugRig || g_enabled.load(std::memory_order_relaxed)) &&
             (debugRig || g_vrAim.load(std::memory_order_relaxed)) &&
-            TitleAdapter_GetRuntimeMode() == RuntimeMode::Gameplay &&
+            // The opt-in validation rig runs from this live Halo 3 camera
+            // callback even when a headless OpenXR runtime cannot arm stereo.
+            // Production contact still requires the authoritative gameplay
+            // mode publication.
+            (debugRig ||
+             TitleAdapter_GetRuntimeMode() == RuntimeMode::Gameplay) &&
             Halo3VehicleSnapshotState(
                 g_halo3VehicleSnapshot.load(std::memory_order_acquire),
                 generation) == Halo3VehicleState::OnFoot &&
