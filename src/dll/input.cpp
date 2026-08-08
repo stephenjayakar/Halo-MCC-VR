@@ -386,10 +386,7 @@ namespace
     template <int Slot>
     DWORD WINAPI GetStateHook(DWORD user, XINPUT_STATE* state)
     {
-        const DWORD result = g_origGetState[Slot](user, state);
-        if (user == 0)
-            Game_Halo3ConsumePhysicalContactCommand();
-        return ProcessGetState(result, user, state);
+        return ProcessGetState(g_origGetState[Slot](user, state), user, state);
     }
 
     DWORD(WINAPI* const g_hooks[6])(DWORD, XINPUT_STATE*) = {

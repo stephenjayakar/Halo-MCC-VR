@@ -132,10 +132,6 @@ struct Halo3VehicleStateSnapshot
     int seatIndex = -1;     // seat block index on the DIRECT parent tag
 };
 Halo3VehicleStateSnapshot Game_Halo3VehicleState();
-// Applies at most one pending Halo 3 physical-contact velocity command from
-// MCC's XInput/update thread. The camera hook only publishes the bounded
-// command; native object mutation is thread-affine and must not run there.
-void Game_Halo3ConsumePhysicalContactCommand();
 // C9 virtual steering wheel (Halo 3 look-steered ground driver seats only; a
 // no-op in every other seat, title and camera mode). Call once per XInput poll
 // with THAT poll's pad, before the buttons are built — passing the same sample
