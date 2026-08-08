@@ -6055,6 +6055,7 @@ namespace
     std::atomic<float> g_halo3ContactSpeed{0.0f};
     std::atomic<bool> g_halo3ContactDebugRig{false};
     std::atomic<int32_t> g_halo3ContactDebugTarget{-1};
+    std::atomic<uint32_t> g_halo3ContactDebugGameOptions{0};
     std::atomic<float> g_halo3ContactDebugInitialPosition[3]{};
     std::atomic<float> g_halo3ContactDebugCurrentPosition[3]{};
     std::atomic<float> g_halo3ContactDebugVelocity[3]{};
@@ -8796,6 +8797,16 @@ namespace
             // multiplayer (the Forge test range); every network role stays off.
             const bool cooperative = gameOptions && gameOptions[0x10] == 1
                 ? g_halo3GameIsCooperative() : false;
+            if (debugRig)
+            {
+                const uint32_t options = gameOptions
+                    ? (0x80000000u | gameOptions[0x10] |
+                       (uint32_t{gameOptions[0x11]} << 8) |
+                       (cooperative ? 0x00010000u : 0u))
+                    : 0u;
+                g_halo3ContactDebugGameOptions.store(
+                    options, std::memory_order_relaxed);
+            }
             if (!gameOptions || !PhysicalContactGameModeAllowed(
                     gameOptions[0x10], gameOptions[0x11], cooperative))
             {
@@ -9321,11 +9332,20 @@ namespace
             const float moved = std::sqrt(dx * dx + dy * dy + dz * dz);
             LOG("H3 physical contact DEBUG RIG: target=0x%08X "
                 "start=(%.3f %.3f %.3f) now=(%.3f %.3f %.3f) "
-                "moved=%.3f velocity=(%.3f %.3f %.3f)",
+                "moved=%.3f velocity=(%.3f %.3f %.3f) game=%u sim=%u "
+                "cooperative=%u options=%u",
                 static_cast<uint32_t>(target),
                 initial[0], initial[1], initial[2],
                 current[0], current[1], current[2], moved,
-                velocity[0], velocity[1], velocity[2]);
+                velocity[0], velocity[1], velocity[2],
+                g_halo3ContactDebugGameOptions.load(
+                    std::memory_order_relaxed) & 0xFFu,
+                (g_halo3ContactDebugGameOptions.load(
+                    std::memory_order_relaxed) >> 8) & 0xFFu,
+                (g_halo3ContactDebugGameOptions.load(
+                    std::memory_order_relaxed) >> 16) & 1u,
+                g_halo3ContactDebugGameOptions.load(
+                    std::memory_order_relaxed) >> 31);
         }
     }
 
@@ -13902,6 +13922,7 @@ namespace
         g_halo3ContactDebugRig.store(
             contactDebugEnabled, std::memory_order_release);
         g_halo3ContactDebugTarget.store(-1, std::memory_order_release);
+        g_halo3ContactDebugGameOptions.store(0, std::memory_order_release);
         for (int axis = 0; axis < 3; ++axis)
         {
             g_halo3ContactDebugInitialPosition[axis].store(
