@@ -8693,7 +8693,8 @@ namespace
             g_halo3PhysicalContactBindings.load(std::memory_order_acquire) &&
             g_halo3VehicleBinding.load(std::memory_order_acquire) ==
                 static_cast<uint8_t>(Halo3VehicleBindingState::Installed) &&
-            g_engineTlsIndex && g_enabled.load(std::memory_order_relaxed) &&
+            g_engineTlsIndex &&
+            (debugRig || g_enabled.load(std::memory_order_relaxed)) &&
             (debugRig || g_vrAim.load(std::memory_order_relaxed)) &&
             TitleAdapter_GetRuntimeMode() == RuntimeMode::Gameplay &&
             Halo3VehicleSnapshotState(
@@ -9429,13 +9430,19 @@ namespace
             g_aimFwdX.store(fwd[0]); g_aimFwdY.store(fwd[1]); g_aimFwdZ.store(fwd[2]);
             g_aimSeen = true;
         }
-        if (g_enabled.load())
+        const bool vrEnabled = g_enabled.load(std::memory_order_relaxed);
+        const bool debugRig =
+            g_halo3ContactDebugRig.load(std::memory_order_acquire);
+        if (vrEnabled || debugRig)
         {
             // C9: turn the shared yaw reference with the hull BEFORE anything
             // consumes it this frame, and republish who owns steering — the
             // turn stick below and the aim author both branch on it.
-            Halo3ApplySeatYawFollow();
-            ApplyVrTurn();
+            if (vrEnabled)
+            {
+                Halo3ApplySeatYawFollow();
+                ApplyVrTurn();
+            }
             if (src)
             {
                 // Snapshot the engine-owned locomotion/body origin before
@@ -9452,7 +9459,8 @@ namespace
             // first-person bone frame is head-camera-relative, and splitting
             // the two frames made the hand-anchored weapon visibly pick up
             // both head and aim motion. Do not scope this write again.
-            const bool rollStableFollowApplied = ApplyHeadLook(src);
+            const bool rollStableFollowApplied =
+                vrEnabled ? ApplyHeadLook(src) : false;
             if (src)
             {
                 // Post-head-look camera position (includes leaning): the
