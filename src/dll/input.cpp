@@ -57,7 +57,8 @@ namespace
         const bool enabled = length == 1 && value[0] == L'1';
         g_debugKeyboardPad.store(enabled);
         if (enabled)
-            LOG("debug input: keyboard-to-gamepad bridge enabled");
+            LOG("debug input: keyboard-to-gamepad bridge enabled "
+                "(isolated F13-F19 controls available)");
     }
 
     bool MergeDebugKeyboardPad(XINPUT_STATE* state)
@@ -68,13 +69,24 @@ namespace
         const auto down = [](int key) {
             return (GetAsyncKeyState(key) & 0x8000) != 0;
         };
-        if (down(VK_UP)) buttons |= XINPUT_GAMEPAD_DPAD_UP;
-        if (down(VK_DOWN)) buttons |= XINPUT_GAMEPAD_DPAD_DOWN;
-        if (down(VK_LEFT)) buttons |= XINPUT_GAMEPAD_DPAD_LEFT;
-        if (down(VK_RIGHT)) buttons |= XINPUT_GAMEPAD_DPAD_RIGHT;
-        if (down(VK_RETURN) || down(VK_SPACE)) buttons |= XINPUT_GAMEPAD_A;
-        if (down(VK_ESCAPE) || down(VK_BACK)) buttons |= XINPUT_GAMEPAD_B;
-        if (down(VK_TAB)) buttons |= XINPUT_GAMEPAD_START;
+        // Arrow/Enter remain convenient for manual desktop use. F13-F19 are
+        // isolated automation controls: MCC has no native binding for them,
+        // so one injected key becomes exactly one XInput button instead of a
+        // keyboard navigation event plus a second gamepad navigation event.
+        if (down(VK_UP) || down(VK_F13))
+            buttons |= XINPUT_GAMEPAD_DPAD_UP;
+        if (down(VK_DOWN) || down(VK_F14))
+            buttons |= XINPUT_GAMEPAD_DPAD_DOWN;
+        if (down(VK_LEFT) || down(VK_F15))
+            buttons |= XINPUT_GAMEPAD_DPAD_LEFT;
+        if (down(VK_RIGHT) || down(VK_F16))
+            buttons |= XINPUT_GAMEPAD_DPAD_RIGHT;
+        if (down(VK_RETURN) || down(VK_SPACE) || down(VK_F17))
+            buttons |= XINPUT_GAMEPAD_A;
+        if (down(VK_ESCAPE) || down(VK_BACK) || down(VK_F18))
+            buttons |= XINPUT_GAMEPAD_B;
+        if (down(VK_TAB) || down(VK_F19))
+            buttons |= XINPUT_GAMEPAD_START;
         state->Gamepad.wButtons |= buttons;
         return buttons != 0;
     }
