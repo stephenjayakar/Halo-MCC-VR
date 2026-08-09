@@ -9091,6 +9091,19 @@ int main()
             "produce bounded inelastic momentum, reject invalid or tangential "
             "input, and correct reversed normals");
 
+        Check(!PhysicalContactMotionTypeIsDynamic(0) &&
+              PhysicalContactMotionTypeIsDynamic(1) &&
+              PhysicalContactMotionTypeIsDynamic(2) &&
+              PhysicalContactMotionTypeIsDynamic(3) &&
+              PhysicalContactMotionTypeIsDynamic(4) &&
+              PhysicalContactMotionTypeIsDynamic(5) &&
+              !PhysicalContactMotionTypeIsDynamic(6) &&
+              !PhysicalContactMotionTypeIsDynamic(7) &&
+              PhysicalContactMotionTypeIsDynamic(8) &&
+              !PhysicalContactMotionTypeIsDynamic(9),
+            "Only official Havok dynamic motion types accept physical-contact "
+            "impulses; invalid, keyframed, and fixed bodies do not");
+
         const PhysicalContactConstraintImpulse sustainedGentle =
             PhysicalContactSustainedImpulse(
                 2.76f, 0.382f, {0.20f, 0, 0}, {-1, 0, 0},

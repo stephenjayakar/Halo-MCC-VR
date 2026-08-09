@@ -86,6 +86,16 @@ reports `0.002`, or about `500 kg`, while a loose object reports `2.615`, or
 about `0.382 kg`. Missing, stale, non-root, invalid, or non-finite mass data
 rejects only that contact command.
 
+The same official point-impulse wrapper at `0x480803` passes
+`bodyWrapper + 0xF0` as the `hkpRigidBody`. Official motion construction and
+the getter at `0x06E430` prove the one-byte motion type at body `+0x10`:
+values `1` through `5` and `8` are dynamic motion classes, `6` is keyframed,
+and `7` is fixed. Keyframed and fixed bodies can retain authored inverse-mass
+data even though an impulse cannot move them. The contact response therefore
+requires a dynamic target motion type before publishing a point impulse. Native
+melee remains independent. The automated Forge rig uses the same check so a
+fixed weapon spawn cannot masquerade as a loose test prop.
+
 The rejected response used one bounded inelastic collision impulse. In the
 headset it felt like a hit instead of continuous contact. It also had no
 tangential force, so it could not scoop or carry a light object.
@@ -270,11 +280,12 @@ tangential speed determine the bounded contact constraint. Classification maps
 the exact current weapon contact point into
 the previous full visible transform. This includes translation, pitch, yaw,
 roll, and scale over the exact bounded timestamp delta. It subtracts target
-surface velocity from the two native accessors,
-including `angular x (contact-center)`, so a rotational tip strike can count as
-melee and a target moving with the weapon does not inflate relative speed. At or
-above the configured threshold, an independently debounced
-command selects the equipped weapon's native melee tags, builds native damage
+surface velocity from the two native accessors, including
+`angular x (contact-center)`, for the sustained physics response. Melee uses
+the weapon contact point's own measured speed. A fast-moving or rotating target
+can therefore produce a physical response but cannot turn a slow hand into a
+melee. At or above the configured weapon-speed threshold, an independently
+debounced command selects the equipped weapon's native melee tags, builds native damage
 ownership for the player, applies damage to that exact target, and invokes the
 stock effects/response wrapper. Missing or ambiguous melee signatures leave
 only high-speed damage stock while slow rigid-body contact continues; a runtime

@@ -6305,6 +6305,7 @@ namespace
     std::atomic<uint32_t> g_halo3ContactWeaponShapeSource{0};
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
+    std::atomic<uint32_t> g_halo3ContactTargetMotionType{0};
     std::atomic<float> g_halo3ContactPenetrationMeters{0.0f};
     std::atomic<float> g_halo3ContactNormalImpulse{0.0f};
     std::atomic<float> g_halo3ContactTangentImpulse{0.0f};
@@ -7189,7 +7190,8 @@ namespace
 
     bool Halo3ContactMassForObjectData(
         const unsigned char* objectData, void*& component,
-        int32_t& bodyIndex, float& massKilograms)
+        int32_t& bodyIndex, float& massKilograms,
+        uint8_t* motionType = nullptr)
     {
         component = nullptr;
         bodyIndex = -1;
@@ -7225,6 +7227,11 @@ namespace
             0x50);
         if (!bodyWrapper)
             return false;
+        // H3EK havok_component_apply_point_impulse passes bodyWrapper + 0xF0
+        // as the hkpRigidBody. Its hkpMotion getter reads type at +0x10.
+        const uint8_t resolvedMotionType = *(bodyWrapper + 0x100);
+        if (resolvedMotionType > 8)
+            return false;
         const float inverseMass = *reinterpret_cast<const float*>(
             bodyWrapper + 0x1DC);
         const float mass = PhysicalContactMassFromInverseMass(inverseMass);
@@ -7233,6 +7240,8 @@ namespace
         component = resolved;
         bodyIndex = resolvedBodyIndex;
         massKilograms = mass;
+        if (motionType)
+            *motionType = resolvedMotionType;
         return true;
     }
 
@@ -9615,6 +9624,7 @@ namespace
         g_halo3ContactPreviousWallPoseValid = false;
         g_halo3ContactWeaponMass.store(0.0f, std::memory_order_relaxed);
         g_halo3ContactTargetMass.store(0.0f, std::memory_order_relaxed);
+        g_halo3ContactTargetMotionType.store(0, std::memory_order_relaxed);
         g_halo3ContactPenetrationMeters.store(
             0.0f, std::memory_order_relaxed);
         g_halo3ContactNormalImpulse.store(0.0f, std::memory_order_relaxed);
@@ -10451,6 +10461,15 @@ namespace
                     if (!data || *reinterpret_cast<const int32_t*>(
                                      data + kHalo3ObjectParentOffset) != -1)
                         continue;
+                    void* debugComponent = nullptr;
+                    int32_t debugBodyIndex = -1;
+                    float debugMass = 0.0f;
+                    uint8_t debugMotionType = 0;
+                    if (!Halo3ContactMassForObjectData(
+                            data, debugComponent, debugBodyIndex, debugMass,
+                            &debugMotionType) ||
+                        !PhysicalContactMotionTypeIsDynamic(debugMotionType))
+                        continue;
                     const auto* objectCenter =
                         reinterpret_cast<const float*>(
                             data + kHalo3ObjectBoundingCenterOffset);
@@ -11253,14 +11272,17 @@ namespace
             int32_t targetBodyIndex = -1;
             float weaponMass = 0.0f;
             float targetMass = 0.0f;
+            uint8_t targetMotionType = 0;
             const bool haveNativeMasses = Halo3ContactMassForObjectData(
                     weaponData, weaponComponent, weaponBodyIndex,
                     weaponMass) &&
                 Halo3ContactMassForObjectData(
                     closestData, targetComponent, targetBodyIndex,
-                    targetMass);
+                    targetMass, &targetMotionType);
+            const bool targetIsDynamic = haveNativeMasses &&
+                PhysicalContactMotionTypeIsDynamic(targetMotionType);
             const PhysicalContactConstraintImpulse constraintImpulse =
-                haveNativeMasses
+                targetIsDynamic
                 ? PhysicalContactSustainedImpulse(
                       weaponMass, targetMass, relativeVelocity,
                       closest.normal, closestPenetrationMeters, dt,
@@ -11271,6 +11293,9 @@ namespace
                 std::memory_order_relaxed);
             g_halo3ContactTargetMass.store(
                 haveNativeMasses ? targetMass : 0.0f,
+                std::memory_order_relaxed);
+            g_halo3ContactTargetMotionType.store(
+                haveNativeMasses ? targetMotionType : 0,
                 std::memory_order_relaxed);
             g_halo3ContactPenetrationMeters.store(
                 closestPenetrationMeters, std::memory_order_relaxed);
@@ -11383,6 +11408,7 @@ namespace
             "command=%llu applied=%llu commandStatus=%u meleeStatus=%u "
             "damage=0x%08X response=0x%08X rawMaterial=%u material=%u "
             "target=0x%08X kind=%u weaponMass=%.3f targetMass=%.3f "
+            "targetMotion=%u "
             "depth=%.4fm normalImpulse=%.5f tangentImpulse=%.5f "
             "authoredShapeHits=%llu animatedBodyHits=%llu "
             "unsupportedShapes=%llu "
@@ -11421,6 +11447,7 @@ namespace
             g_halo3ContactTargetKind.load(std::memory_order_relaxed),
             g_halo3ContactWeaponMass.load(std::memory_order_relaxed),
             g_halo3ContactTargetMass.load(std::memory_order_relaxed),
+            g_halo3ContactTargetMotionType.load(std::memory_order_relaxed),
             g_halo3ContactPenetrationMeters.load(
                 std::memory_order_relaxed),
             g_halo3ContactNormalImpulse.load(std::memory_order_relaxed),

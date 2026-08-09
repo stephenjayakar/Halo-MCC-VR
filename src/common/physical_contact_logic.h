@@ -1038,6 +1038,14 @@ inline float PhysicalContactMassFromInverseMass(float inverseMass)
         ? mass : 0.0f;
 }
 
+// Official H3EK's hkpMotion constructors and getter prove the byte values.
+// Keyframed and fixed bodies have authored mass data but do not respond to a
+// native impulse, so they must not enter the movable-body response.
+inline bool PhysicalContactMotionTypeIsDynamic(uint8_t motionType)
+{
+    return (motionType >= 1 && motionType <= 5) || motionType == 8;
+}
+
 // A bounded inelastic collision response. Native Halo masses decide how much
 // momentum the held weapon transfers. The engine's point-impulse function then
 // uses the target's authored mass and inertia to produce linear and angular
