@@ -9077,6 +9077,20 @@ int main()
             PhysicalContactWallOffsetForRay(
                 {}, {2.0f, 0, 0},
                 std::numeric_limits<float>::quiet_NaN(), 0.10f);
+        const std::array<PhysicalContactWallPlane, 2> cornerPlanes{{
+            {{2.0f, 2.0f, 0}, {1.0f, 2.0f, 0}, {-1.0f, 0, 0}, 0.10f},
+            {{2.0f, 2.0f, 0}, {2.0f, 1.0f, 0}, {0, -1.0f, 0}, 0.10f},
+        }};
+        const PhysicalContactWallConstraint wallCorner =
+            PhysicalContactSolveWallPlanes(
+                cornerPlanes.data(), cornerPlanes.size(), 3.0f);
+        const PhysicalContactWallConstraint wallCornerClamped =
+            PhysicalContactSolveWallPlanes(
+                cornerPlanes.data(), cornerPlanes.size(), 1.0f);
+        const PhysicalContactWallPlane invalidPlane{
+            {2.0f, 0, 0}, {1.0f, 0, 0}, {}, 0.10f};
+        const PhysicalContactWallConstraint invalidPlaneResult =
+            PhysicalContactSolveWallPlanes(&invalidPlane, 1, 3.0f);
         const PhysicalContactVec3 wallEngage =
             PhysicalContactUpdateWallOffset(
                 {-0.10f, 0, 0}, wallTip.offset, true, 0.01f, 0.5f);
@@ -9097,12 +9111,20 @@ int main()
               std::fabs(wallDiagonal.offset.y + 1.65f) < 1.0e-6f &&
               std::fabs(wallDiagonal.offset.z + 2.20f) < 1.0e-6f &&
               !wallClear.constrained && !wallInvalid.constrained &&
+              wallCorner.constrained &&
+              std::fabs(wallCorner.offset.x + 1.10f) < 1.0e-6f &&
+              std::fabs(wallCorner.offset.y + 1.10f) < 1.0e-6f &&
+              wallCornerClamped.constrained &&
+              std::fabs(wallCornerClamped.setbackWorldUnits - 1.0f) <
+                  1.0e-6f &&
+              !invalidPlaneResult.constrained &&
               std::fabs(wallEngage.x + 0.60f) < 1.0e-6f &&
               std::fabs(wallRelease.x + 0.325f) < 1.0e-6f &&
               PhysicalContactLengthSquared(wallReleased) < 1.0e-10f &&
               PhysicalContactLengthSquared(wallBadTiming) < 1.0e-10f,
-            "Wall contact keeps grip and tip rigid, includes surface clearance, "
-            "engages immediately, releases smoothly, and rejects invalid data");
+            "Wall contact solves exact rigid surface planes and corners, "
+            "includes clearance, engages immediately, releases smoothly, "
+            "clamps travel, and rejects invalid data");
 
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&

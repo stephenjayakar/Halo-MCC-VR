@@ -377,6 +377,16 @@ measures velocity at the matching current weapon support point and applies the
 native point impulse at the exact target support surface. Pure tests distinguish
 a swept plane from existing overlap and verify normal retention and cleanup.
 
+The earlier wall candidate traced only the grip and a bounds-derived tip. That
+did not represent the visible authored solid. The exact wall candidate traces
+every authored convex vertex from the camera through Halo 3's native structure
+query. It keeps each returned surface point and normal. The normal is oriented
+toward the camera-side free space. A bounded four-pass plane solver finds one
+rigid translation that clears all hit planes, including corners. Each child uses
+its exact authored rounded radius plus `5 mm` visual clearance. Release remains
+bounded at `1.5 m/s`. The 44-tag census proves every held weapon uses at most
+20 vertices. Runtime storage allows 64 vertices without allocation.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

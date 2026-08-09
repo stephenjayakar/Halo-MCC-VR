@@ -6259,6 +6259,9 @@ namespace
     std::atomic<float> g_halo3ContactSpeed{0.0f};
     std::atomic<uint64_t> g_halo3ContactWallBlocks{0};
     std::atomic<float> g_halo3ContactWallSetbackMeters{0.0f};
+    std::atomic<uint64_t> g_halo3ContactWallRays{0};
+    std::atomic<uint32_t> g_halo3ContactWallVertices{0};
+    std::atomic<uint32_t> g_halo3ContactWallPlanes{0};
     std::atomic<uint64_t> g_halo3ContactAuthoredShapeHits{0};
     std::atomic<uint64_t> g_halo3ContactUnsupportedShapes{0};
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
@@ -9277,6 +9280,8 @@ namespace
         Halo3PublishWeaponWallOffset({}, 0);
         g_halo3ContactWallSetbackMeters.store(0.0f,
                                                std::memory_order_relaxed);
+        g_halo3ContactWallVertices.store(0, std::memory_order_relaxed);
+        g_halo3ContactWallPlanes.store(0, std::memory_order_relaxed);
     }
 
     // Authoritative Halo 3 simulation thread. H3EK's objects_update body owns
@@ -10037,9 +10042,6 @@ namespace
             const float capsuleLength = authoredBounds
                 ? std::clamp(authoredRadius * 1.75f, 0.30f, 0.75f)
                 : 0.65f * worldScale;
-            const float contactRadius = authoredBounds
-                ? std::clamp(authoredRadius * 0.20f, 0.03f, 0.10f)
-                : std::clamp(0.06f * worldScale, 0.03f, 0.10f);
             PhysicalContactVec3 grip{
                 position[0], position[1], position[2]};
             PhysicalContactVec3 forward = PhysicalContactNormalize({
@@ -10168,42 +10170,81 @@ namespace
                     g_camX.load(std::memory_order_relaxed),
                     g_camY.load(std::memory_order_relaxed),
                     g_camZ.load(std::memory_order_relaxed)};
-                const PhysicalContactVec3 unconstrainedGrip =
-                    grip - g_halo3ContactWallOffset;
-                const PhysicalContactVec3 unconstrainedTip =
-                    tip - g_halo3ContactWallOffset;
-                PhysicalContactWallConstraint requested{};
-                const std::array<PhysicalContactVec3, 2> wallPoints{
-                    unconstrainedGrip, unconstrainedTip};
-                for (const PhysicalContactVec3 wallPoint : wallPoints)
+                PhysicalContactTransform unconstrainedWeaponTransform =
+                    weaponTransform;
+                unconstrainedWeaponTransform.position =
+                    weaponTransform.position - g_halo3ContactWallOffset;
+                std::array<PhysicalContactWallPlane, 64> wallPlanes{};
+                size_t wallPlaneCount = 0;
+                size_t wallVertexCount = 0;
+                for (uint16_t childIndex = 0;
+                     childIndex < weaponShape.childCount; ++childIndex)
+                    wallVertexCount +=
+                        weaponShape.children[childIndex].vertexCount;
+                g_halo3ContactWallVertices.store(
+                    static_cast<uint32_t>(wallVertexCount),
+                    std::memory_order_relaxed);
+                if (PhysicalContactFinite(camera) && wallVertexCount <= 64)
                 {
-                    const PhysicalContactVec3 ray = wallPoint - camera;
-                    if (!PhysicalContactFinite(camera) ||
-                        !PhysicalContactFinite(ray) ||
-                        PhysicalContactLengthSquared(ray) <= 1.0e-10f)
-                        continue;
-                    const float point[3] = {camera.x, camera.y, camera.z};
-                    const float delta[3] = {ray.x, ray.y, ray.z};
-                    Halo3CollisionResult native{};
-                    native.type = -1;
-                    native.fraction = 1.0f;
-                    if (!g_halo3CollisionTestVector(
-                            1ull, false, point, delta, unitHandle,
-                            weaponHandle, -1, &native) ||
-                        native.type < 0 || native.type >= 4 ||
-                        !std::isfinite(native.fraction) ||
-                        native.fraction < 0.0f || native.fraction > 1.0f)
-                        continue;
-                    const PhysicalContactWallConstraint candidate =
-                        PhysicalContactWallOffsetForRay(
-                            camera, wallPoint, native.fraction,
-                            contactRadius);
-                    if (candidate.constrained &&
-                        (!requested.constrained ||
-                         candidate.setbackWorldUnits >
-                             requested.setbackWorldUnits))
-                        requested = candidate;
+                    for (uint16_t childIndex = 0;
+                         childIndex < weaponShape.childCount; ++childIndex)
+                    {
+                        const PhysicalContactConvexShape& child =
+                            weaponShape.children[childIndex];
+                        const float clearance =
+                            child.radius * unconstrainedWeaponTransform.scale +
+                            0.005f * worldScale;
+                        for (uint16_t vertexIndex = 0;
+                             vertexIndex < child.vertexCount; ++vertexIndex)
+                        {
+                            const PhysicalContactVec3 wallPoint =
+                                PhysicalContactTransformPoint(
+                                    unconstrainedWeaponTransform,
+                                    child.vertices[vertexIndex]);
+                            const PhysicalContactVec3 ray = wallPoint - camera;
+                            if (!PhysicalContactFinite(ray) ||
+                                PhysicalContactLengthSquared(ray) <= 1.0e-10f)
+                                continue;
+                            const float point[3] = {
+                                camera.x, camera.y, camera.z};
+                            const float delta[3] = {ray.x, ray.y, ray.z};
+                            Halo3CollisionResult native{};
+                            native.type = -1;
+                            native.fraction = 1.0f;
+                            g_halo3ContactWallRays.fetch_add(
+                                1, std::memory_order_relaxed);
+                            if (!g_halo3CollisionTestVector(
+                                    1ull, false, point, delta, unitHandle,
+                                    weaponHandle, -1, &native) ||
+                                native.type < 0 || native.type >= 4 ||
+                                !std::isfinite(native.fraction) ||
+                                native.fraction < 0.0f ||
+                                native.fraction > 1.0f)
+                                continue;
+                            const PhysicalContactVec3 surfacePoint =
+                                camera + ray * native.fraction;
+                            PhysicalContactVec3 normal =
+                                PhysicalContactNormalize(
+                                    {native.normal[0], native.normal[1],
+                                     native.normal[2]},
+                                    camera - surfacePoint);
+                            if (!PhysicalContactFinite(surfacePoint) ||
+                                !PhysicalContactFinite(normal))
+                                continue;
+                            if (PhysicalContactDot(
+                                    camera - surfacePoint, normal) < 0.0f)
+                                normal = normal * -1.0f;
+                            wallPlanes[wallPlaneCount++] = {
+                                wallPoint, surfacePoint, normal, clearance};
+                        }
+                    }
                 }
+                g_halo3ContactWallPlanes.store(
+                    static_cast<uint32_t>(wallPlaneCount),
+                    std::memory_order_relaxed);
+                const PhysicalContactWallConstraint requested =
+                    PhysicalContactSolveWallPlanes(
+                        wallPlanes.data(), wallPlaneCount, worldScale);
                 const float wallDt = g_halo3ContactWallUpdateMs &&
                         nowMs > g_halo3ContactWallUpdateMs
                     ? std::min(
@@ -10230,6 +10271,10 @@ namespace
             {
                 g_halo3ContactWallOffset = {};
                 g_halo3ContactWallUpdateMs = 0;
+                g_halo3ContactWallVertices.store(
+                    0, std::memory_order_relaxed);
+                g_halo3ContactWallPlanes.store(
+                    0, std::memory_order_relaxed);
                 Halo3PublishWeaponWallOffset({}, 0);
             }
             if (weaponHandle != g_halo3ContactWeaponHandle)
@@ -10737,7 +10782,8 @@ namespace
             "damage=0x%08X response=0x%08X rawMaterial=%u material=%u "
             "weaponMass=%.3f targetMass=%.3f "
             "authoredShapeHits=%llu unsupportedShapes=%llu "
-            "wallBlocks=%llu wallSetback=%.3fm",
+            "wallBlocks=%llu wallSetback=%.3fm wallRays=%llu "
+            "wallVertices=%u wallPlanes=%u",
             stageName,
             g_halo3ContactEligibleObjects.load(std::memory_order_relaxed),
             g_halo3ContactSpeed.load(std::memory_order_relaxed),
@@ -10772,7 +10818,11 @@ namespace
             (unsigned long long)g_halo3ContactWallBlocks.load(
                 std::memory_order_relaxed),
             g_halo3ContactWallSetbackMeters.load(
-                std::memory_order_relaxed));
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactWallRays.load(
+                std::memory_order_relaxed),
+            g_halo3ContactWallVertices.load(std::memory_order_relaxed),
+            g_halo3ContactWallPlanes.load(std::memory_order_relaxed));
         if (g_halo3ContactDebugRig.load(std::memory_order_acquire))
         {
             const int32_t target =

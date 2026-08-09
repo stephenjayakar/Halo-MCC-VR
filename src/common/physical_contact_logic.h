@@ -627,6 +627,72 @@ struct PhysicalContactWallConstraint
     PhysicalContactVec3 offset{};
 };
 
+struct PhysicalContactWallPlane
+{
+    PhysicalContactVec3 weaponPoint{};
+    PhysicalContactVec3 surfacePoint{};
+    PhysicalContactVec3 freeSideNormal{1.0f, 0.0f, 0.0f};
+    float clearanceWorldUnits = 0.0f;
+};
+
+// Project one rigid translation against every exact static surface plane.
+// All normals face the camera-side free space. Four bounded passes resolve
+// corners without moving separate weapon vertices by different amounts.
+inline PhysicalContactWallConstraint PhysicalContactSolveWallPlanes(
+    const PhysicalContactWallPlane* planes, size_t planeCount,
+    float maximumOffsetWorldUnits)
+{
+    PhysicalContactWallConstraint result{};
+    if (!planes || !planeCount || planeCount > 64 ||
+        !std::isfinite(maximumOffsetWorldUnits) ||
+        maximumOffsetWorldUnits <= 0.0f)
+        return result;
+
+    PhysicalContactVec3 offset{};
+    bool constrained = false;
+    for (int pass = 0; pass < 4; ++pass)
+    {
+        bool changed = false;
+        for (size_t i = 0; i < planeCount; ++i)
+        {
+            const PhysicalContactWallPlane& plane = planes[i];
+            if (!PhysicalContactFinite(plane.weaponPoint) ||
+                !PhysicalContactFinite(plane.surfacePoint) ||
+                !PhysicalContactFinite(plane.freeSideNormal) ||
+                !std::isfinite(plane.clearanceWorldUnits) ||
+                plane.clearanceWorldUnits < 0.0f)
+                return {};
+            const PhysicalContactVec3 normal = PhysicalContactNormalize(
+                plane.freeSideNormal, {});
+            if (PhysicalContactLengthSquared(normal) <= 1.0e-12f)
+                return {};
+            const float signedClearance = PhysicalContactDot(
+                plane.weaponPoint + offset - plane.surfacePoint, normal);
+            const float deficit =
+                plane.clearanceWorldUnits - signedClearance;
+            if (!std::isfinite(deficit))
+                return {};
+            if (deficit > 1.0e-5f)
+            {
+                offset = offset + normal * deficit;
+                changed = true;
+                constrained = true;
+            }
+        }
+        if (!changed)
+            break;
+    }
+    const float length = PhysicalContactLength(offset);
+    if (!constrained || !std::isfinite(length) || length <= 1.0e-5f)
+        return result;
+    if (length > maximumOffsetWorldUnits)
+        offset = offset * (maximumOffsetWorldUnits / length);
+    result.constrained = PhysicalContactFinite(offset);
+    result.offset = offset;
+    result.setbackWorldUnits = PhysicalContactLength(offset);
+    return result;
+}
+
 // Convert a native camera-to-weapon structure hit into one rigid translation
 // for the whole visible weapon. The clearance is measured back from the hit
 // along the same camera ray, so a blocked tip is pulled toward the player's
