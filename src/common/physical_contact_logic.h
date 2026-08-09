@@ -678,7 +678,7 @@ inline PhysicalContactWallConstraint PhysicalContactSolveWallPlanes(
     float maximumOffsetWorldUnits)
 {
     PhysicalContactWallConstraint result{};
-    if (!planes || !planeCount || planeCount > 64 ||
+    if (!planes || !planeCount || planeCount > 256 ||
         !std::isfinite(maximumOffsetWorldUnits) ||
         maximumOffsetWorldUnits <= 0.0f)
         return result;

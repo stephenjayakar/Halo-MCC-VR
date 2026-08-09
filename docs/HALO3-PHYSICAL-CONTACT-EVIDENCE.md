@@ -198,12 +198,37 @@ boxes, two pills, one sphere, and four lists. The largest list has four box
 children. Every active held-weapon root therefore fits the bounded compound
 reader. Unsupported multi-body data cannot silently become approximate contact.
 
+The user's 2026-08-09 headset test rejected the physics hull as the visible
+contact solid. The assault-rifle example explains the mismatch. Its rounded
+physics hull has four vertices. Its separate authored collision model has 20
+vertices, 36 edges, and 18 surfaces. The physics hull remains authoritative for
+mass and inertia. It is not detailed enough for visible contact.
+
+The replacement reads the held weapon's authored collision model. Official
+H3EK `guerilla.exe` field tables prove the loaded model collision datum at
+`+0x1C`, collision regions block at `+0x20`, region stride `0x10`, permutation
+stride `0x28`, BSP stride `0x64`, BSP vertex block at `+0x58/+0x5C`, and vertex
+stride `0x10`. Official XML exports cover 43 available weapon collision tags.
+They contain 1,454 vertices across one to three BSPs per tag. The largest tag
+has 117 vertices. Every region has one unambiguous permutation. These bounds
+fit fixed storage.
+
+Each collision BSP becomes one authored convex child. This is the approved
+convex fallback. The official world-shape query allocates a temporary phantom
+for every call, so triangle-accurate native queries are unsafe in the camera
+hot path. A missing, ambiguous, invalid, oversized, or custom collision tag
+falls back loudly to the existing authored physics shape. Runtime telemetry
+reports `shapeSource=1` for the detailed collision model and `shapeSource=2`
+for the physics fallback.
+
 The earlier wrist-target publication was runtime-rejected because the desired IK
 wrist is not necessarily the transform Halo ultimately skins. The replacement
 publishes only after the final visible-palette consumer returns. It accepts a
 bounded right-wrist-descendant render model with at most 16 validated nodes
 (covering the H3EK ordinary weapon, sword, and hammer first-person models) and
-publishes that model's finite final root and scale through an atomic snapshot.
+publishes every finite final node, root, and scale through an atomic snapshot.
+Collision BSPs bound to moving render nodes are baked into root-local space
+from that exact final palette before the continuous sweep.
 This is the same matrix space as the visible weapon pixels, not a
 controller/wrist estimate.
 OpenXR pose, linear/angular velocity, timestamp, and serial use a separate

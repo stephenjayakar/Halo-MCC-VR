@@ -936,12 +936,15 @@ namespace
     struct BoneMatrix { float scale; float rotation[9]; float translation[3]; };
     struct Halo3VisibleWeaponPosePublication
     {
+        static constexpr int kMaximumNodes = 16;
         std::atomic<uint32_t> sequence{0};
         std::atomic<uint64_t> sampleMs{0};
         std::atomic<int32_t> weaponHandle{-1};
+        std::atomic<uint32_t> nodeCount{0};
         std::atomic<float> scale{1.0f};
         std::atomic<float> basis[9]{};
         std::atomic<float> position[3]{};
+        std::atomic<float> nodes[kMaximumNodes][13]{};
     };
     Halo3VisibleWeaponPosePublication g_halo3VisibleWeaponPose;
     struct Halo3WeaponWallPublication
@@ -990,8 +993,9 @@ namespace
     // publishing its root; a missing tag binding simply withholds contact.
     unsigned char* Halo3LoadedTagDefinition(uint32_t datum);
 
-    bool Halo3ReadVisibleWeaponPose(float basis[9], float position[3],
-                                    float& scale, uint64_t& sampleMs)
+    bool Halo3ReadVisibleWeaponPose(
+        float basis[9], float position[3], float& scale, uint64_t& sampleMs,
+        BoneMatrix* nodes = nullptr, uint32_t* nodeCount = nullptr)
     {
         auto& published = g_halo3VisibleWeaponPose;
         for (int attempt = 0; attempt < 2; ++attempt)
@@ -1001,12 +1005,28 @@ namespace
             if (before & 1u)
                 continue;
             sampleMs = published.sampleMs.load(std::memory_order_relaxed);
+            const uint32_t count = published.nodeCount.load(
+                std::memory_order_relaxed);
             scale = published.scale.load(std::memory_order_relaxed);
             for (int i = 0; i < 9; ++i)
                 basis[i] = published.basis[i].load(std::memory_order_relaxed);
             for (int i = 0; i < 3; ++i)
                 position[i] =
                     published.position[i].load(std::memory_order_relaxed);
+            if (nodes && nodeCount)
+            {
+                if (!count || count >
+                        Halo3VisibleWeaponPosePublication::kMaximumNodes)
+                    continue;
+                for (uint32_t node = 0; node < count; ++node)
+                {
+                    float* values = reinterpret_cast<float*>(&nodes[node]);
+                    for (int value = 0; value < 13; ++value)
+                        values[value] = published.nodes[node][value].load(
+                            std::memory_order_relaxed);
+                }
+                *nodeCount = count;
+            }
             if (published.sequence.load(std::memory_order_acquire) == before)
                 return sampleMs != 0;
         }
@@ -5209,6 +5229,9 @@ namespace
                 published.sequence.fetch_add(1, std::memory_order_acq_rel);
                 published.sampleMs.store(
                     GetTickCount64(), std::memory_order_relaxed);
+                published.nodeCount.store(
+                    static_cast<uint32_t>(renderNodeCount),
+                    std::memory_order_relaxed);
                 published.scale.store(
                     visibleRoot.scale, std::memory_order_relaxed);
                 for (int i = 0; i < 9; ++i)
@@ -5217,6 +5240,14 @@ namespace
                 for (int i = 0; i < 3; ++i)
                     published.position[i].store(
                         visibleRoot.translation[i], std::memory_order_relaxed);
+                for (int node = 0; node < renderNodeCount; ++node)
+                {
+                    const float* values = reinterpret_cast<const float*>(
+                        &destination[node]);
+                    for (int value = 0; value < 13; ++value)
+                        published.nodes[node][value].store(
+                            values[value], std::memory_order_relaxed);
+                }
                 published.sequence.fetch_add(1, std::memory_order_release);
             }
         }
@@ -6270,6 +6301,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactAnimatedBodyHits{0};
     std::atomic<uint64_t> g_halo3ContactUnsupportedShapes{0};
     std::atomic<uint32_t> g_halo3ContactNativeSamples{0};
+    std::atomic<uint32_t> g_halo3ContactWeaponShapeSource{0};
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<float> g_halo3ContactPenetrationMeters{0.0f};
@@ -6942,6 +6974,139 @@ namespace
         output = {};
         return Halo3ContactCompoundFromHavokShape(shape, output) &&
             PhysicalContactCompoundValid(output);
+    }
+
+    PhysicalContactTransform Halo3ContactTransformFromBone(
+        const BoneMatrix& bone)
+    {
+        PhysicalContactTransform result{};
+        result.scale = bone.scale;
+        result.forward = {
+            bone.rotation[0], bone.rotation[1], bone.rotation[2]};
+        result.left = {
+            bone.rotation[3], bone.rotation[4], bone.rotation[5]};
+        result.up = {
+            bone.rotation[6], bone.rotation[7], bone.rotation[8]};
+        result.position = {
+            bone.translation[0], bone.translation[1], bone.translation[2]};
+        return result;
+    }
+
+    // Official H3EK collision-model field tables prove the loaded layouts:
+    // model collision datum +0x1C; collision regions block +0x20; 0x10-byte
+    // region; 0x28-byte permutation; 0x64-byte BSP; and the BSP vertex block
+    // at +0x58/+0x5C with 0x10-byte vertices. Bake every root-visible BSP into
+    // node-zero local space. The final visible palette supplies animated node
+    // transforms, so the contact solid occupies the same space as its pixels.
+    bool Halo3ContactVisibleCollisionShape(
+        const unsigned char* objectData, const BoneMatrix* visibleNodes,
+        uint32_t visibleNodeCount,
+        const PhysicalContactTransform& visibleRoot,
+        PhysicalContactCompoundShape& output)
+    {
+        output = {};
+        if (!objectData || !visibleNodes || !visibleNodeCount ||
+            visibleNodeCount >
+                Halo3VisibleWeaponPosePublication::kMaximumNodes ||
+            !PhysicalContactTransformFinite(visibleRoot))
+            return false;
+        const uint32_t objectDatum =
+            *reinterpret_cast<const uint32_t*>(objectData);
+        const unsigned char* objectDef =
+            Halo3LoadedTagDefinition(objectDatum);
+        const uint32_t modelDatum = objectDef
+            ? *reinterpret_cast<const uint32_t*>(objectDef + 0x40)
+            : 0xFFFFFFFFu;
+        const unsigned char* modelDef =
+            Halo3LoadedTagDefinition(modelDatum);
+        const uint32_t collisionDatum = modelDef
+            ? *reinterpret_cast<const uint32_t*>(modelDef + 0x1C)
+            : 0xFFFFFFFFu;
+        const unsigned char* collisionDef =
+            Halo3LoadedTagDefinition(collisionDatum);
+        void** baseSlot = g_halo3TagDataBase;
+        const auto* tagBase = baseSlot
+            ? static_cast<const unsigned char*>(*baseSlot) : nullptr;
+        if (!collisionDef || !tagBase)
+            return false;
+
+        const int32_t regionCount =
+            *reinterpret_cast<const int32_t*>(collisionDef + 0x20);
+        const uint32_t regionAddress =
+            *reinterpret_cast<const uint32_t*>(collisionDef + 0x24);
+        if (regionCount <= 0 || regionCount > 32 || !regionAddress)
+            return false;
+        const auto* regions = tagBase +
+            static_cast<size_t>(regionAddress) * 4;
+        for (int32_t regionIndex = 0;
+             regionIndex < regionCount; ++regionIndex)
+        {
+            const auto* region = regions +
+                static_cast<size_t>(regionIndex) * 0x10;
+            const int32_t permutationCount =
+                *reinterpret_cast<const int32_t*>(region + 0x04);
+            const uint32_t permutationAddress =
+                *reinterpret_cast<const uint32_t*>(region + 0x08);
+            // Every official held-weapon collision tag has one permutation.
+            // A custom ambiguous tag falls back to its authored physics shape.
+            if (permutationCount != 1 || !permutationAddress)
+                return false;
+            const auto* permutation = tagBase +
+                static_cast<size_t>(permutationAddress) * 4;
+            const int32_t bspCount =
+                *reinterpret_cast<const int32_t*>(permutation + 0x04);
+            const uint32_t bspAddress =
+                *reinterpret_cast<const uint32_t*>(permutation + 0x08);
+            if (bspCount <= 0 || !bspAddress ||
+                output.childCount + bspCount >
+                    PhysicalContactCompoundShape::kMaximumChildren)
+                return false;
+            const auto* bsps = tagBase +
+                static_cast<size_t>(bspAddress) * 4;
+            for (int32_t bspIndex = 0; bspIndex < bspCount; ++bspIndex)
+            {
+                const auto* bsp = bsps +
+                    static_cast<size_t>(bspIndex) * 0x64;
+                const int16_t nodeIndex =
+                    *reinterpret_cast<const int16_t*>(bsp);
+                const uint32_t node = nodeIndex < 0
+                    ? 0u : static_cast<uint32_t>(nodeIndex);
+                const int32_t vertexCount =
+                    *reinterpret_cast<const int32_t*>(bsp + 0x58);
+                const uint32_t vertexAddress =
+                    *reinterpret_cast<const uint32_t*>(bsp + 0x5C);
+                if (node >= visibleNodeCount || vertexCount < 4 ||
+                    vertexCount > static_cast<int32_t>(
+                        PhysicalContactConvexShape::kMaximumVertices) ||
+                    !vertexAddress)
+                    return false;
+                const PhysicalContactTransform nodeTransform =
+                    Halo3ContactTransformFromBone(visibleNodes[node]);
+                if (!PhysicalContactTransformFinite(nodeTransform))
+                    return false;
+                const auto* vertices = tagBase +
+                    static_cast<size_t>(vertexAddress) * 4;
+                PhysicalContactConvexShape& child =
+                    output.children[output.childCount++];
+                child.radius = 0.0f;
+                child.vertexCount = static_cast<uint16_t>(vertexCount);
+                for (int32_t vertex = 0; vertex < vertexCount; ++vertex)
+                {
+                    const auto* point = reinterpret_cast<const float*>(
+                        vertices + static_cast<size_t>(vertex) * 0x10);
+                    const PhysicalContactVec3 local{
+                        point[0], point[1], point[2]};
+                    const PhysicalContactVec3 world =
+                        PhysicalContactTransformPoint(nodeTransform, local);
+                    child.vertices[vertex] =
+                        PhysicalContactInverseTransformPoint(
+                            visibleRoot, world);
+                }
+                if (!PhysicalContactConvexValid(child))
+                    return false;
+            }
+        }
+        return PhysicalContactCompoundValid(output);
     }
 
     // These accessors mirror object_get_center_of_mass and the native point
@@ -9427,6 +9592,7 @@ namespace
         g_halo3ContactTargetKind.store(
             0xFFFFFFFFu, std::memory_order_relaxed);
         g_halo3ContactNativeSamples.store(0, std::memory_order_relaxed);
+        g_halo3ContactWeaponShapeSource.store(0, std::memory_order_relaxed);
         Halo3PublishWeaponWallOffset({}, 0);
         g_halo3ContactWallSetbackMeters.store(0.0f,
                                                std::memory_order_relaxed);
@@ -9903,6 +10069,15 @@ namespace
         float basis[9]{}, position[3]{};
         float visibleScale = 1.0f;
         uint64_t visiblePoseMs = nowMs;
+        std::array<BoneMatrix,
+            Halo3VisibleWeaponPosePublication::kMaximumNodes> visibleNodes{};
+        uint32_t visibleNodeCount = 0;
+        float paletteBasis[9]{}, palettePosition[3]{};
+        float paletteScale = 1.0f;
+        uint64_t palettePoseMs = 0;
+        const bool haveVisiblePalette = Halo3ReadVisibleWeaponPose(
+            paletteBasis, palettePosition, paletteScale, palettePoseMs,
+            visibleNodes.data(), &visibleNodeCount);
         bool haveVisiblePose = false;
         if (debugRig && g_baseCamValid.load(std::memory_order_acquire))
         {
@@ -9927,8 +10102,16 @@ namespace
             haveVisiblePose = true;
         }
         else
-            haveVisiblePose = Halo3ReadVisibleWeaponPose(
-                basis, position, visibleScale, visiblePoseMs);
+        {
+            haveVisiblePose = haveVisiblePalette;
+            if (haveVisiblePose)
+            {
+                memcpy(basis, paletteBasis, sizeof(basis));
+                memcpy(position, palettePosition, sizeof(position));
+                visibleScale = paletteScale;
+                visiblePoseMs = palettePoseMs;
+            }
+        }
         if (!haveVisiblePose || nowMs < visiblePoseMs ||
             nowMs - visiblePoseMs > 100 || !std::isfinite(visibleScale) ||
             visibleScale <= 0.001f || visibleScale > 100.0f)
@@ -10296,8 +10479,40 @@ namespace
                 weaponTransform.up);
             weaponTransform.scale = visibleScale;
             PhysicalContactCompoundShape weaponShape{};
-            if (!PhysicalContactTransformFinite(weaponTransform) ||
-                !Halo3ContactShapeForObject(weaponData, weaponShape))
+            bool collisionShape = false;
+            PhysicalContactTransform paletteRoot{};
+            if (haveVisiblePalette)
+            {
+                paletteRoot.position = {
+                    palettePosition[0], palettePosition[1],
+                    palettePosition[2]};
+                paletteRoot.forward = PhysicalContactNormalize({
+                    paletteBasis[0], paletteBasis[1], paletteBasis[2]});
+                paletteRoot.up = PhysicalContactNormalize({
+                    paletteBasis[6], paletteBasis[7], paletteBasis[8]});
+                paletteRoot.left = PhysicalContactNormalize(
+                    PhysicalContactCross(
+                        paletteRoot.up, paletteRoot.forward),
+                    {paletteBasis[3], paletteBasis[4], paletteBasis[5]});
+                paletteRoot.up = PhysicalContactNormalize(
+                    PhysicalContactCross(
+                        paletteRoot.forward, paletteRoot.left),
+                    paletteRoot.up);
+                paletteRoot.scale = paletteScale;
+            }
+            if (haveVisiblePalette &&
+                PhysicalContactTransformFinite(weaponTransform) &&
+                PhysicalContactTransformFinite(paletteRoot))
+                collisionShape = Halo3ContactVisibleCollisionShape(
+                    weaponData, visibleNodes.data(), visibleNodeCount,
+                    paletteRoot, weaponShape);
+            const bool physicsFallback = !collisionShape &&
+                PhysicalContactTransformFinite(weaponTransform) &&
+                Halo3ContactShapeForObject(weaponData, weaponShape);
+            g_halo3ContactWeaponShapeSource.store(
+                collisionShape ? 1u : (physicsFallback ? 2u : 0u),
+                std::memory_order_relaxed);
+            if (!collisionShape && !physicsFallback)
             {
                 g_halo3ContactUnsupportedShapes.fetch_add(
                     1, std::memory_order_relaxed);
@@ -10329,7 +10544,7 @@ namespace
                     g_halo3ContactWallWeaponHandle == weaponHandle &&
                     PhysicalContactTransformFinite(
                         g_halo3ContactPreviousWallTransform);
-                std::array<PhysicalContactWallPlane, 64> wallPlanes{};
+                std::array<PhysicalContactWallPlane, 256> wallPlanes{};
                 size_t wallPlaneCount = 0;
                 size_t wallVertexCount = 0;
                 for (uint16_t childIndex = 0;
@@ -10339,7 +10554,8 @@ namespace
                 g_halo3ContactWallVertices.store(
                     static_cast<uint32_t>(wallVertexCount),
                     std::memory_order_relaxed);
-                if (PhysicalContactFinite(camera) && wallVertexCount <= 64)
+                if (PhysicalContactFinite(camera) &&
+                    wallVertexCount <= wallPlanes.size())
                 {
                     for (uint16_t childIndex = 0;
                          childIndex < weaponShape.childCount; ++childIndex)
@@ -10522,7 +10738,7 @@ namespace
             const PhysicalContactVec3 movementDirection =
                 PhysicalContactNormalize(tip - previousTip,
                                          forward);
-            std::array<PhysicalContactVec3, 72> nativeLocalSamples{};
+            std::array<PhysicalContactVec3, 264> nativeLocalSamples{};
             const size_t nativeLocalSampleCount =
                 PhysicalContactCompoundSamplePoints(
                     weaponShape, nativeLocalSamples.data(),
@@ -11078,7 +11294,7 @@ namespace
             "depth=%.4fm normalImpulse=%.5f tangentImpulse=%.5f "
             "authoredShapeHits=%llu animatedBodyHits=%llu "
             "unsupportedShapes=%llu "
-            "nativeSamples=%u "
+            "shapeSource=%u nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm wallRays=%llu "
             "wallMotionRays=%llu "
             "wallVertices=%u wallPlanes=%u",
@@ -11121,6 +11337,8 @@ namespace
             (unsigned long long)g_halo3ContactAnimatedBodyHits.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactUnsupportedShapes.load(
+                std::memory_order_relaxed),
+            g_halo3ContactWeaponShapeSource.load(
                 std::memory_order_relaxed),
             g_halo3ContactNativeSamples.load(std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactWallBlocks.load(
