@@ -23,7 +23,7 @@ render, input, ODST, or Reach paths.
 | `object_set_velocities` world native | `0xA4EAA0` | `0x3411A4` | 1 | both `object_set_velocity` bodies transform the three local floats into a world vector, then call this routine with object handle, world-linear pointer, and null angular pointer; contact already owns a validated, clamped world vector and uses this lower authoritative physics/network path directly |
 | `objects_update` simulation owner | `0xA52920` | `0x34067C` | 1 | retained H3EK `objects.cpp` assertion metadata identifies the body containing the `object_update_absolute_index` transaction; the retail homolog preserves the TLS object table, active-object loops, `object_update_absolute_index` writes, and update-in-progress byte, and the complete runtime signature is unique |
 | `unit_melee_effects` (rejected for damage) | `0xA63390` | `0x35A194` | 1 | official disassembly proves the eight arguments and authored effect selection, but the body only emits melee contact effects; it is not used as the damage entry point and is reached only through Halo's stock wrapper |
-| authored melee tag selector | `0xA5DE20` | `0x35A9A4` | 1 | the official and retail bodies resolve the active weapon and select its ordinary/clang damage and response tag pair; melee type `0` follows the ordinary player-melee branch without entering lunge selection |
+| authored melee tag selector | `0xA5DE20` | `0x35A9A4` | 1 | the official and retail bodies resolve the active weapon and select its ordinary/clang damage and response tag pair; H3EK's own constant-string table maps `0x0A` to `melee`, and both selector bodies route that value to the first-hit pair without entering lunge selection |
 | `damage_owner_from_object` | `0xAA0120` | `0x384A88` | 1 | official assertion/source metadata and both bodies prove the object-handle plus 0x0C-byte owner-output ABI used by Halo's stock melee caller |
 | melee damage application helper | `0xA59860` | `0x35BEFC` | 1 | official assertions name the `damage_owner` and `damage_target` arguments; the retail body copies those records into native damage data, sets the melee damage flags, and enters the engine's damage application path |
 | stock melee effects/response wrapper | stock caller sequence following `0xA596DA` | `0x35BCA0` | 1 | the retail stock melee caller passes the selector's damage/response tags, exact target index, material, point, and normal; the wrapper invokes `unit_melee_effects` and the authored impact response path |
@@ -43,6 +43,16 @@ the active weapon's melee parameter blocks at definition offsets `+0x24C`,
 `+0x26C`, `+0x28C`, `+0x2AC`, and `+0x2CC`, with clang data at `+0x2EC`;
 each block supplies damage at `+0x0C` and response at `+0x1C`. It falls back to
 the weapon's default pair and finally the unit's authored melee damage.
+
+The selector's second argument is a global animation string ID, not a motor
+action enum. The official H3EK constant-string table at RVA `0x1017538` begins
+with empty string ID 0 and places `melee` at ID `0x0A`. The same table names the
+selector's other comparisons: `0x79`/`0x7B`/`0x7D` are `melee_1sthit`,
+`melee_2ndhit`, and `melee_3rdhit`; `0x25A..0x25C` are melee-lunge variants;
+and `0x28B..0x28E` are `melee_strike_1..4`. Official `0xA5DE20` and retail
+`0x35A9A4` have identical value-to-block branches. Physical contact therefore
+passes only `0x0A` (`melee`), selecting authored ordinary first-hit damage while
+never requesting a lunge or synthesizing a motor action.
 
 Halo's damage helper consumes a 0x0C-byte owner and a 0x3C-byte exact-target
 record. Retail reads target object handle `+0x1C`, damage section `+0x2C`,
@@ -171,7 +181,10 @@ melee type `0` returned damage and response datums `0xFFFFFFFF`. The guard
 therefore applied no damage (`meleeStatus=5`, `melees=0`), as designed. The
 runtime log is `out/debug-openxr/b841db2-forge-no-authored-tags.log`. This is a
 failed behavioral candidate: the implementation remains in-tree but is disabled
-until the stock caller's selector argument is reproduced exactly.
+in commit `0450cb4` before the corrected candidate. H3EK evidence subsequently
+proved that the call supplied empty string ID 0 rather than ordinary `melee`
+string ID `0x0A`; the corrected candidate changes only that selector argument
+and re-enables the independently isolated authored-melee transaction.
 
 ## Verification boundary
 

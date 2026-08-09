@@ -6071,11 +6071,12 @@ namespace
     // near-continuous false contact and did not move Forge or campaign props.
     // Keep the failed implementation inert while preserving it for evidence.
     constexpr bool kEnableHalo3PhysicalContactCandidate = true;
-    // Candidate b841db2 bound and invoked the four native entries without a
-    // fault, but meleeType=0 selected no authored tags at runtime. Preserve
-    // the evidence-backed code while keeping high-speed damage inert until the
-    // stock caller's selector argument is reproduced exactly.
-    constexpr bool kEnableHalo3PhysicalMeleeCandidate = false;
+    // Candidate b841db2 proved the four native entries and fail-open guards,
+    // but passed empty string-id 0. H3EK's constant-string table identifies
+    // 0x0A as `melee`; the official and retail selectors both route that exact
+    // value to the authored first-hit damage/response pair without a lunge.
+    constexpr int32_t kHalo3OrdinaryMeleeStringId = 0x0A;
+    constexpr bool kEnableHalo3PhysicalMeleeCandidate = true;
     PhysicalContactDebounce g_halo3ContactDebounce;
     uint64_t g_halo3ContactLastMotionSerial = 0;
     uint64_t g_halo3ContactLastMeleeMs = 0;
@@ -8982,7 +8983,9 @@ namespace
                                     int32_t clangDamageEffectTag = -1;
                                     int32_t clangResponseEffectTag = -1;
                                     g_halo3SelectMelee(
-                                        unitHandle, 0, &meleeClass,
+                                        unitHandle,
+                                        kHalo3OrdinaryMeleeStringId,
+                                        &meleeClass,
                                         &damageEffectTag, &responseEffectTag,
                                         &clangDamageEffectTag,
                                         &clangResponseEffectTag);
@@ -14204,8 +14207,9 @@ namespace
         "44 8B 15 ?? ?? ?? ?? 0F 29 70 A8 65 48 8B 04 25 58 00 00 00 "
         "44 8B F1 B9 38 00 00 00 4A 8B 04 D0";
     // unit_get_melee_damage_and_response (+0x35A9A4): selects the active
-    // weapon's authored ordinary/clang damage and response tags. meleeType=0
-    // is the normal player melee selection and does not request a lunge.
+    // weapon's authored ordinary/clang damage and response tags. H3EK's
+    // constant-string table maps 0x0A to `melee`; this selects the first-hit
+    // pair without requesting any of the 0x25A..0x25C lunge variants.
     const char* kHalo3SelectMeleeSig =
         "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 "
         "41 54 41 55 41 56 41 57 48 83 EC 20 44 8B 15 ?? ?? ?? ?? "
