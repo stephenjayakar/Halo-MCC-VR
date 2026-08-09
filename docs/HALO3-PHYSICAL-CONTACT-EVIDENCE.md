@@ -486,6 +486,13 @@ onto the exact upward contact normal, while the weapon is not separating. The
 existing velocity correction remains capped separately. Side contacts add no
 weight support, and downward separation removes it immediately.
 
+The next null-driver run still reported zero target displacement after 90
+accepted native point impulses. Runtime status now includes the last published
+world impulse vector and its exact GJK contact normal. Both values already live
+in bounded atomic command storage; the worker only reads them while producing
+the existing two-second status line. No logging or extra work enters the render
+or authoritative object-update hooks.
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure
