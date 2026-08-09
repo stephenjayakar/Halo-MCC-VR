@@ -6204,6 +6204,7 @@ namespace
     std::atomic<uint32_t> g_halo3ContactMeleeStatus{0};
     std::atomic<int32_t> g_halo3ContactMeleeDamageTag{-1};
     std::atomic<int32_t> g_halo3ContactMeleeResponseTag{-1};
+    std::atomic<uint16_t> g_halo3ContactMeleeMaterial{0xFFFFu};
     std::atomic<bool> g_halo3ContactDebugRig{false};
     std::atomic<bool> g_halo3ContactDebugMelee{false};
     std::atomic<int32_t> g_halo3ContactDebugAimTarget{-1};
@@ -9080,6 +9081,8 @@ namespace
                                     }
                                     if (meleeRejected)
                                         __leave;
+                                    g_halo3ContactMeleeMaterial.store(
+                                        material, std::memory_order_relaxed);
                                     uint8_t meleeClass = 0;
                                     int32_t clangDamageEffectTag = -1;
                                     int32_t clangResponseEffectTag = -1;
@@ -9843,53 +9846,27 @@ namespace
             }
             const float dt = static_cast<float>(
                 visiblePoseMs - previousPoseMs) * 0.001f;
-            const PhysicalContactVec3 currentSpine = tip - grip;
-            const float spineLengthSquared =
-                PhysicalContactLengthSquared(currentSpine);
-            const float contactU = spineLengthSquared > 1.0e-8f
-                ? std::clamp(((closest.point.x - grip.x) * currentSpine.x +
-                              (closest.point.y - grip.y) * currentSpine.y +
-                              (closest.point.z - grip.z) * currentSpine.z) /
-                                 spineLengthSquared,
-                             0.0f, 1.0f)
-                : 0.0f;
-            const PhysicalContactVec3 weaponPoint =
-                grip + currentSpine * contactU;
-            const PhysicalContactVec3 previousWeaponPoint =
-                previousGrip + (previousTip - previousGrip) * contactU;
-            const PhysicalContactVec3 weaponPointVelocityMeters =
-                (weaponPoint - previousWeaponPoint) *
-                (1.0f / (dt * worldScale));
             float targetLinear[3]{};
             float targetAngular[3]{};
             float targetCenterRaw[3]{};
             g_halo3ObjectGetVelocities(
                 closestHandle, targetLinear, targetAngular);
             g_halo3ObjectGetCenter(closestHandle, targetCenterRaw);
-            const PhysicalContactVec3 targetCenter{
-                targetCenterRaw[0], targetCenterRaw[1], targetCenterRaw[2]};
-            const PhysicalContactVec3 contactOffset = closest.point - targetCenter;
-            const PhysicalContactVec3 angularPointVelocity{
-                targetAngular[1] * contactOffset.z -
-                    targetAngular[2] * contactOffset.y,
-                targetAngular[2] * contactOffset.x -
-                    targetAngular[0] * contactOffset.z,
-                targetAngular[0] * contactOffset.y -
-                    targetAngular[1] * contactOffset.x};
-            const PhysicalContactVec3 targetVelocityWorld{
-                targetLinear[0] + angularPointVelocity.x,
-                targetLinear[1] + angularPointVelocity.y,
-                targetLinear[2] + angularPointVelocity.z};
-            const PhysicalContactVec3 targetVelocityMeters =
-                targetVelocityWorld * (1.0f / worldScale);
-            if (!PhysicalContactFinite(weaponPointVelocityMeters) ||
-                !PhysicalContactFinite(targetVelocityMeters))
+            const PhysicalContactPointVelocity pointVelocity =
+                PhysicalContactVelocityAtPoint(
+                    previousGrip, previousTip, grip, tip, closest.point,
+                    {targetLinear[0], targetLinear[1], targetLinear[2]},
+                    {targetAngular[0], targetAngular[1], targetAngular[2]},
+                    {targetCenterRaw[0], targetCenterRaw[1],
+                     targetCenterRaw[2]},
+                    dt, worldScale);
+            if (!pointVelocity.valid)
             {
                 g_halo3ContactDebounce.EndSample();
                 return;
             }
             const PhysicalContactVec3 relativeVelocity =
-                weaponPointVelocityMeters - targetVelocityMeters;
+                pointVelocity.relativeMetersPerSecond;
             const float relativeSpeed = PhysicalContactLength(relativeVelocity);
             const PhysicalContactVec3 contactDirection =
                 PhysicalContactNormalize(relativeVelocity, movementDirection);
@@ -10050,7 +10027,7 @@ namespace
         LOG("H3 physical contact status: stage=%s eligible=%u speed=%.2fm/s "
             "sweeps=%llu hits=%llu impulses=%llu melees=%llu "
             "command=%llu applied=%llu commandStatus=%u meleeStatus=%u "
-            "damage=0x%08X response=0x%08X",
+            "damage=0x%08X response=0x%08X rawMaterial=%u material=%u",
             stageName,
             g_halo3ContactEligibleObjects.load(std::memory_order_relaxed),
             g_halo3ContactSpeed.load(std::memory_order_relaxed),
@@ -10071,6 +10048,10 @@ namespace
             static_cast<uint32_t>(g_halo3ContactMeleeDamageTag.load(
                 std::memory_order_relaxed)),
             static_cast<uint32_t>(g_halo3ContactMeleeResponseTag.load(
+                std::memory_order_relaxed)),
+            static_cast<uint32_t>(g_halo3ContactCommandMaterial.load(
+                std::memory_order_relaxed)),
+            static_cast<uint32_t>(g_halo3ContactMeleeMaterial.load(
                 std::memory_order_relaxed)));
         if (g_halo3ContactDebugRig.load(std::memory_order_acquire))
         {
@@ -14805,6 +14786,8 @@ namespace
         g_halo3ContactMeleeStatus.store(0, std::memory_order_relaxed);
         g_halo3ContactMeleeDamageTag.store(-1, std::memory_order_relaxed);
         g_halo3ContactMeleeResponseTag.store(-1, std::memory_order_relaxed);
+        g_halo3ContactMeleeMaterial.store(
+            0xFFFFu, std::memory_order_relaxed);
         for (int axis = 0; axis < 3; ++axis)
         {
             g_halo3ContactDebugInitialPosition[axis].store(

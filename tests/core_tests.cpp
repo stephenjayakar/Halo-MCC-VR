@@ -8730,6 +8730,58 @@ int main()
             "Physical contact continuously sweeps translation and rotation "
             "without turning a grazing miss into contact");
 
+        const PhysicalContactPointVelocity translatedVelocity =
+            PhysicalContactVelocityAtPoint(
+                {0, 0, 0}, {1, 0, 0}, {0.2f, 0, 0}, {1.2f, 0, 0},
+                {0.75f, 0, 0}, {}, {}, {}, 0.1f, 1.0f);
+        const PhysicalContactPointVelocity rotatedTipVelocity =
+            PhysicalContactVelocityAtPoint(
+                {0, 0, 0}, {1, 0, 0}, {0, 0, 0}, {0, 1, 0},
+                {0, 2, 0}, {}, {}, {}, 0.1f, 1.0f);
+        const PhysicalContactPointVelocity rotatingTargetVelocity =
+            PhysicalContactVelocityAtPoint(
+                {0, 0, 0}, {1, 0, 0}, {0, 0, 0}, {1, 0, 0},
+                {1, 0, 0}, {0.5f, 0, 0}, {0, 0, 2}, {0, 0, 0},
+                0.05f, 2.0f);
+        const PhysicalContactPointVelocity invalidElapsed =
+            PhysicalContactVelocityAtPoint(
+                {}, {1, 0, 0}, {}, {1, 0, 0}, {1, 0, 0}, {}, {}, {},
+                0.0f, 1.0f);
+        const PhysicalContactPointVelocity invalidAngular =
+            PhysicalContactVelocityAtPoint(
+                {}, {1, 0, 0}, {}, {1, 0, 0}, {1, 0, 0}, {},
+                {std::numeric_limits<float>::quiet_NaN(), 0, 0}, {},
+                0.01f, 1.0f);
+        Check(translatedVelocity.valid &&
+              std::fabs(translatedVelocity.capsuleFraction - 0.55f) <
+                  1.0e-5f &&
+              std::fabs(translatedVelocity.weaponMetersPerSecond.x - 2.0f) <
+                  1.0e-5f &&
+              rotatedTipVelocity.valid &&
+              std::fabs(rotatedTipVelocity.capsuleFraction - 1.0f) <
+                  1.0e-5f &&
+              std::fabs(rotatedTipVelocity.weaponMetersPerSecond.x + 10.0f) <
+                  1.0e-5f &&
+              std::fabs(rotatedTipVelocity.weaponMetersPerSecond.y - 10.0f) <
+                  1.0e-5f &&
+              rotatingTargetVelocity.valid &&
+              std::fabs(
+                  rotatingTargetVelocity.targetMetersPerSecond.x - 0.25f) <
+                  1.0e-5f &&
+              std::fabs(
+                  rotatingTargetVelocity.targetMetersPerSecond.y - 1.0f) <
+                  1.0e-5f &&
+              std::fabs(
+                  rotatingTargetVelocity.relativeMetersPerSecond.x + 0.25f) <
+                  1.0e-5f &&
+              std::fabs(
+                  rotatingTargetVelocity.relativeMetersPerSecond.y + 1.0f) <
+                  1.0e-5f &&
+              !invalidElapsed.valid && !invalidAngular.valid,
+            "Physical contact classifies the swept weapon point, preserves "
+            "rotational tip speed, subtracts target angular velocity at the "
+            "hit, converts world scale, and rejects invalid timing/data");
+
         Check(PhysicalContactClassify(0.049f, 1.50f) ==
                   PhysicalContactAction::None &&
               PhysicalContactClassify(0.05f, 1.50f) ==

@@ -21,12 +21,16 @@ render, input, ODST, or Reach paths.
 | `collision_test_vector_internal` | `0x652A10` | `0x1FD748` | 1 | the official public wrapper at `0x6529D0` proves the eight-argument core ABI; official callers and the structurally identical retail prologue prove the 0x68-byte result fields used here: type `+0x00`, fraction `+0x04`, point `+0x08`, plane normal `+0x2C`, and object handle `+0x40` |
 | `object_set_velocity` native | `0xAD8050` | `0x39BAD0` | 1 | the official script wrapper at `0x7A88F0` and retail wrapper at `0x1E380C` call their respective native with object handle plus three local velocity floats |
 | `object_set_velocities` world native | `0xA4EAA0` | `0x3411A4` | 1 | both `object_set_velocity` bodies transform the three local floats into a world vector, then call this routine with object handle, world-linear pointer, and null angular pointer; contact already owns a validated, clamped world vector and uses this lower authoritative physics/network path directly |
+| `object_get_velocities` | `0xA43EA0` | `0x345480` | 1 | the official full-symbol accessor and its retail homolog return both world-linear and world-angular velocity for the exact object datum; physical contact uses both rather than reading the old raw `object+0x74` approximation |
+| `object_get_center_of_mass` | `0xA426C0` | `0x34523C` | 1 | the official/retail accessor writes the authoritative rigid-body center used to evaluate `linear + angular x (contact-center)` at the exact hit point |
 | `objects_update` simulation owner | `0xA52920` | `0x34067C` | 1 | retained H3EK `objects.cpp` assertion metadata identifies the body containing the `object_update_absolute_index` transaction; the retail homolog preserves the TLS object table, active-object loops, `object_update_absolute_index` writes, and update-in-progress byte, and the complete runtime signature is unique |
 | `unit_melee_effects` (rejected for damage) | `0xA63390` | `0x35A194` | 1 | official disassembly proves the eight arguments and authored effect selection, but the body only emits melee contact effects; it is not used as the damage entry point and is reached only through Halo's stock wrapper |
 | authored melee tag selector | `0xA5DE20` | `0x35A9A4` | 1 | the official and retail bodies resolve the active weapon and select its ordinary/clang damage and response tag pair; H3EK's own constant-string table maps `0x0A` to `melee`, and both selector bodies route that value to the first-hit pair without entering lunge selection |
 | `damage_owner_from_object` | `0xAA0120` | `0x384A88` | 1 | official assertion/source metadata and both bodies prove the object-handle plus 0x0C-byte owner-output ABI used by Halo's stock melee caller |
 | melee damage application helper | `0xA59860` | `0x35BEFC` | 1 | official assertions name the `damage_owner` and `damage_target` arguments; the retail body copies those records into native damage data, sets the melee damage flags, and enters the engine's damage application path |
 | stock melee effects/response wrapper | stock caller sequence following `0xA596DA` | `0x35BCA0` | 1 | the retail stock melee caller passes the selector's damage/response tags, exact target index, material, point, and normal; the wrapper invokes `unit_melee_effects` and the authored impact response path |
+| point-dependent collision-material remap | `0x446DA0` | `0x14B324` | 1 | the official body and retail homolog consume raw collision material plus exact hit point and return the global material expected by damage/effects |
+| global material validation lookup | - | `0x14B274` | 1 | the stock retail melee caller validates the remapped material through this lookup before invoking its effects wrapper; the adjacent unique callsite also resolves the same global-material data pointer without a fixed address |
 | `game_is_cooperative` native | `0xCFB7D0` | `0x0F000C` | 1 | official/retail script wrappers call the native; its body first requires game-options byte `+0x10 == 1` (campaign), then returns whether the authoritative player count is greater than one |
 
 The retail signatures embedded in `game.cpp` wildcard only relocation/call
@@ -58,11 +62,15 @@ Halo's damage helper consumes a 0x0C-byte owner and a 0x3C-byte exact-target
 record. Retail reads target object handle `+0x1C`, damage section `+0x2C`,
 material `+0x30`, scale `+0x34`, and contest/flag bytes `+0x38/+0x39`. Physical
 contact supplies the collision point/normal, exact datum handle, invalid
-surface/node/region/material sentinels, and scale 1.0, matching the stock
-zero-initialized melee record where contact metadata is unavailable. The command
-also carries the weapon handle; the simulation consumer revalidates that the
-same weapon remains active before selecting tags. No grip, trigger, animation,
-melee action, contest, or lunge input is synthesized.
+surface/node/region sentinels, and scale 1.0. The collision result's raw
+material at `+0x28` is carried through the bounded command; on the simulation
+thread it is remapped at the exact hit point and validated through the same
+global-material lookup as the stock melee caller. Bounds-only fallback contact
+uses authored global default material zero. An invalid material rejects melee
+alone while preserving any valid impulse. The command also carries the weapon
+handle; the simulation consumer revalidates that the same weapon remains active
+before selecting tags. No grip, trigger, animation, melee action, contest, or
+lunge input is synthesized.
 
 The collision query's first argument packs two 32-bit flag sets: collision
 flags in the low dword and object-type flags in the high dword. The official
@@ -101,8 +109,13 @@ bounds-derived capsule fallback, restricted to physics-capable object kinds; an
 earlier exact native structure hit still wins unless the proxy begins at the
 same surface, such as a weapon resting on a floor. Unlike rejected candidate
 `a644d2c`, scenery and machine bounds are not treated as interactive surfaces.
-The exact final visible right-wrist transform
-is published by the first-person palette path through a bounded atomic snapshot.
+The earlier wrist-target publication was runtime-rejected because the desired IK
+wrist is not necessarily the transform Halo ultimately skins. The replacement
+publishes only after the final visible-palette consumer returns. It accepts a
+bounded right-wrist-descendant render model with at most 16 validated nodes
+(covering the H3EK ordinary weapon, sword, and hammer first-person models) and
+publishes that model's finite final root through an atomic snapshot. This is the
+same matrix space as the visible weapon pixels, not a controller/wrist estimate.
 OpenXR pose, linear/angular velocity, timestamp, and serial use a separate
 bounded atomic snapshot.
 
@@ -138,7 +151,12 @@ simulation owner validates and applies it before object update. The capsule
 fallback admits only the engine object kinds that can own movable physics; the
 native velocity path remains the final authority for whether the exact object
 actually owns a rigid body. The velocity delta is proportional to swing speed
-and clamped. At or above the configured threshold, an independently debounced
+and clamped. Classification uses the contacted capsule fraction at the previous
+and current final visible transforms divided by their exact bounded timestamp
+delta. It subtracts target surface velocity from the two native accessors,
+including `angular x (contact-center)`, so a rotational tip strike can count as
+melee and a target moving with the weapon does not inflate relative speed. At or
+above the configured threshold, an independently debounced
 command selects the equipped weapon's native melee tags, builds native damage
 ownership for the player, applies damage to that exact target, and invokes the
 stock effects/response wrapper. Missing or ambiguous melee signatures leave
@@ -226,6 +244,8 @@ request, or lunge is introduced.
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
 grazing misses, the noise floor, slow pushes, exact melee threshold crossing,
+contact-fraction point velocity, rotational tip speed, target angular surface
+velocity, world-scale conversion, invalid timing/data,
 finite-value rejection, movable/static classification, impulse clamping,
 per-target overlap debounce, separation rearming, reset on weapon/tracking
 change, 250 ms cooldown eligibility, timestamp-underflow rejection, and capsule
@@ -233,3 +253,12 @@ fallback. The cumulative Release build and complete `ctest` suite must pass
 before packaging. Headset acceptance (specific weapons,
 materials, enemies, loose weapons/crates, walls, pause/loading/death, and rapid
 motion) remains intentionally pending; the feature therefore defaults off.
+
+Candidate `af89f28` launched and injected without a crash. SteamVR could not be
+used for this run because a pre-existing unsigned `WTSAPI32.dll` in the MCC
+binary directory shadows the Windows DLL and exports only the wide query while
+the current signed SteamVR `vrclient_x64.dll` imports
+`WTSQuerySessionInformationA`; project safety forbids patching game files. A
+process-local `XR_RUNTIME_JSON` override proved the installed Oculus 1.201.0
+runtime initializes, but no headset was connected, so this is launch evidence
+only and not physical-contact acceptance.

@@ -58,6 +58,78 @@ inline PhysicalContactVec3 PhysicalContactNormalize(
         ? v * (1.0f / length) : fallback;
 }
 
+inline PhysicalContactVec3 PhysicalContactCross(
+    PhysicalContactVec3 a, PhysicalContactVec3 b)
+{
+    return {
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x};
+}
+
+struct PhysicalContactPointVelocity
+{
+    bool valid = false;
+    float capsuleFraction = 0.0f;
+    PhysicalContactVec3 weaponMetersPerSecond{};
+    PhysicalContactVec3 targetMetersPerSecond{};
+    PhysicalContactVec3 relativeMetersPerSecond{};
+};
+
+// Compute velocity where contact actually occurred rather than classifying a
+// rotational strike from controller-origin speed. The same capsule fraction is
+// evaluated at the previous and current visible weapon poses. Target velocity
+// includes the rigid body's angular contribution, v + omega x (point-center).
+inline PhysicalContactPointVelocity PhysicalContactVelocityAtPoint(
+    PhysicalContactVec3 previousGrip, PhysicalContactVec3 previousTip,
+    PhysicalContactVec3 currentGrip, PhysicalContactVec3 currentTip,
+    PhysicalContactVec3 contactPoint, PhysicalContactVec3 targetLinearVelocity,
+    PhysicalContactVec3 targetAngularVelocity,
+    PhysicalContactVec3 targetCenter, float elapsedSeconds,
+    float worldUnitsPerMeter)
+{
+    PhysicalContactPointVelocity result{};
+    if (!PhysicalContactFinite(previousGrip) ||
+        !PhysicalContactFinite(previousTip) ||
+        !PhysicalContactFinite(currentGrip) ||
+        !PhysicalContactFinite(currentTip) ||
+        !PhysicalContactFinite(contactPoint) ||
+        !PhysicalContactFinite(targetLinearVelocity) ||
+        !PhysicalContactFinite(targetAngularVelocity) ||
+        !PhysicalContactFinite(targetCenter) ||
+        !std::isfinite(elapsedSeconds) || elapsedSeconds <= 0.0f ||
+        elapsedSeconds > 0.1f || !std::isfinite(worldUnitsPerMeter) ||
+        worldUnitsPerMeter <= 0.0f)
+        return result;
+
+    const PhysicalContactVec3 currentSpine = currentTip - currentGrip;
+    const float spineLengthSquared = PhysicalContactLengthSquared(currentSpine);
+    const float u = spineLengthSquared > 1.0e-8f
+        ? std::clamp(
+              PhysicalContactDot(contactPoint - currentGrip, currentSpine) /
+                  spineLengthSquared,
+              0.0f, 1.0f)
+        : 0.0f;
+    const PhysicalContactVec3 weaponPoint = currentGrip + currentSpine * u;
+    const PhysicalContactVec3 previousWeaponPoint =
+        previousGrip + (previousTip - previousGrip) * u;
+    const float metersPerWorldUnit = 1.0f / worldUnitsPerMeter;
+    result.weaponMetersPerSecond =
+        (weaponPoint - previousWeaponPoint) *
+        (metersPerWorldUnit / elapsedSeconds);
+    const PhysicalContactVec3 angularPointVelocity = PhysicalContactCross(
+        targetAngularVelocity, contactPoint - targetCenter);
+    result.targetMetersPerSecond =
+        (targetLinearVelocity + angularPointVelocity) * metersPerWorldUnit;
+    result.relativeMetersPerSecond =
+        result.weaponMetersPerSecond - result.targetMetersPerSecond;
+    result.capsuleFraction = u;
+    result.valid = PhysicalContactFinite(result.weaponMetersPerSecond) &&
+        PhysicalContactFinite(result.targetMetersPerSecond) &&
+        PhysicalContactFinite(result.relativeMetersPerSecond);
+    return result;
+}
+
 struct PhysicalContactHit
 {
     bool hit = false;
