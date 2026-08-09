@@ -263,6 +263,18 @@ the target `0.061` world units. MCC remained responsive. The preserved log is
 This proves the installed headless Forge high-speed impulse-plus-native-melee
 path. It is not headset acceptance.
 
+The user's first headset result on the `60893a7` line proved that weapon
+contacts select and move other objects, but rejected the response quality:
+objects "go flying", contact feels collision/force-offset, and the interaction
+reads as a one-shot "spank" rather than a gentle continuous push. Commit
+`7e34710` therefore leaves the exact target, sweep, and authored-melee paths
+intact but disables the rejected first-overlap velocity kick. Candidate
+`6c8accd` replaces it with a bounded contact constraint: on every overlap it
+matches at most 25% of inward hand speed, caps desired target speed at
+`0.30 m/s`, caps each correction at `0.08 m/s`, preserves tangential velocity,
+and stops adding velocity once the target follows the contact. This replacement
+is installed but awaits headset acceptance.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
