@@ -11556,8 +11556,28 @@ namespace
                 std::memory_order_relaxed);
             if (constraintImpulse.apply)
             {
-                worldVelocity = constraintImpulse.worldImpulse;
-                commandFlags |= kHalo3ContactCommandPointImpulse;
+                if (debugScoop)
+                {
+                    // Diagnostic split: the same loose Forge weapon moved
+                    // sideways through the native point-impulse path but did
+                    // not lift from the floor. Drive only the environment-
+                    // gated scoop with Halo's proven absolute world-velocity
+                    // setter. If this lifts the body, the authored trajectory
+                    // and readback are sound and the remaining defect is
+                    // isolated to floor-loaded point impulses.
+                    worldVelocity = {
+                        targetLinear[0], targetLinear[1], targetLinear[2]};
+                    worldVelocity = worldVelocity +
+                        constraintImpulse.worldImpulse *
+                            (1.0f / targetMass);
+                    if (PhysicalContactFinite(worldVelocity))
+                        commandFlags |= kHalo3ContactCommandImpulse;
+                }
+                else
+                {
+                    worldVelocity = constraintImpulse.worldImpulse;
+                    commandFlags |= kHalo3ContactCommandPointImpulse;
+                }
             }
 
             if (requestMelee)
