@@ -162,6 +162,17 @@ This proves headless Forge rigid-body interaction for the slow-contact path. It
 does not constitute headset acceptance and does not prove the still fail-closed
 high-speed native melee path.
 
+Candidate `b841db244fed9b32854b65370278aee3ad1ee545` uniquely bound the
+selector (`+0x35A9A4`), damage helper (`+0x35BEFC`), owner builder
+(`+0x384A88`), and stock effects wrapper (`+0x35BCA0`) and ran in the same
+authoritative Construct Forge rig. High-speed commands reached and were consumed
+by the simulation hook without an exception, but calling the selector with
+melee type `0` returned damage and response datums `0xFFFFFFFF`. The guard
+therefore applied no damage (`meleeStatus=5`, `melees=0`), as designed. The
+runtime log is `out/debug-openxr/b841db2-forge-no-authored-tags.log`. This is a
+failed behavioral candidate: the implementation remains in-tree but is disabled
+until the stock caller's selector argument is reproduced exactly.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

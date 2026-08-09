@@ -6071,6 +6071,11 @@ namespace
     // near-continuous false contact and did not move Forge or campaign props.
     // Keep the failed implementation inert while preserving it for evidence.
     constexpr bool kEnableHalo3PhysicalContactCandidate = true;
+    // Candidate b841db2 bound and invoked the four native entries without a
+    // fault, but meleeType=0 selected no authored tags at runtime. Preserve
+    // the evidence-backed code while keeping high-speed damage inert until the
+    // stock caller's selector argument is reproduced exactly.
+    constexpr bool kEnableHalo3PhysicalMeleeCandidate = false;
     PhysicalContactDebounce g_halo3ContactDebounce;
     uint64_t g_halo3ContactLastMotionSerial = 0;
     uint64_t g_halo3ContactLastMeleeMs = 0;
@@ -14981,7 +14986,8 @@ namespace
                     reinterpret_cast<Halo3CollisionTestVectorFn>(collisionHit);
                 g_halo3GameIsCooperative =
                     reinterpret_cast<Halo3GameIsCooperativeFn>(cooperativeHit);
-                if (selectMeleeUnique && applyMeleeDamageUnique &&
+                if (kEnableHalo3PhysicalMeleeCandidate &&
+                    selectMeleeUnique && applyMeleeDamageUnique &&
                     damageOwnerUnique && meleeEffectsUnique)
                 {
                     g_halo3SelectMelee =
