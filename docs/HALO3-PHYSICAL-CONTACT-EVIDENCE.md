@@ -590,6 +590,22 @@ lateral speed. A target passes only at `0.02 m` lift, `0.05 m` carry, and
 `0.05 m/s` release speed; the whole path remains below the `1.50 m/s` melee
 threshold.
 
+Installed candidate `a36a0a0` made the missing release momentum measurable.
+The known loose handle `0xE2740005` lifted `0.342 m` and carried `0.075 m`,
+but its maximum lateral velocity in the release window was only `0.002 m/s`.
+The rig correctly rejected it instead of reporting a visual movement as a
+successful toss. Three constrained Forge weapons were also rejected first.
+The preserved log is
+`out/debug-openxr/a36a0a0-forge-scoop-release-failed.log` (SHA-256
+`C2FE68115ACC3A053BEF8870E26C80646694575D0D88161B515FF84A4E86A2A6`).
+Halo's next object update removes most of the previous small correction from a
+floor-loaded body. The sustained solver therefore now resolves the measured
+relative velocity in one sample instead of 20 percent. Native reduced mass,
+Coulomb friction, and the existing `0.08 m/s` per-sample cap remain in force.
+Pure tests require at least `0.10 m/s` lateral correction for the representative
+`2 kg` carried body while retaining more than a tenfold light-to-`500 kg`
+vehicle response ratio.
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure

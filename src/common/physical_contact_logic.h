@@ -1374,7 +1374,12 @@ inline PhysicalContactConstraintImpulse PhysicalContactSustainedImpulse(
         weaponMassKilograms * targetMassKilograms /
         (weaponMassKilograms + targetMassKilograms);
 
-    constexpr float kVelocityFollowFraction = 0.20f;
+    // A floor-loaded body can lose its previous correction inside Halo's next
+    // object update. Solve the measured relative velocity in one contact
+    // sample; authored reduced mass, Coulomb friction, and the per-sample cap
+    // still bound the response. The old 20% solve moved the body while held
+    // but left almost no velocity at separation.
+    constexpr float kVelocityFollowFraction = 1.00f;
     constexpr float kPenetrationCorrectionFraction = 0.15f;
     constexpr float kMaximumPenetrationSpeed = 0.25f;
     constexpr float kMaximumTargetDeltaPerSample = 0.08f;

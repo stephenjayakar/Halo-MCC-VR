@@ -9400,6 +9400,8 @@ int main()
             PhysicalContactTargetDeltaVelocity(sustainedGentle, 0.382f);
         const PhysicalContactVec3 mongooseTargetDelta =
             PhysicalContactTargetDeltaVelocity(sustainedMongoose, 500.0f);
+        const PhysicalContactVec3 carryTargetDelta =
+            PhysicalContactTargetDeltaVelocity(sustainedCarry, 2.0f);
         const PhysicalContactVec3 invalidTargetDelta =
             PhysicalContactTargetDeltaVelocity(sustainedGentle, 0.0f);
         Check(sustainedGentle.apply &&
@@ -9426,7 +9428,10 @@ int main()
                   sustainedGentle.normalImpulseKilogramMetersPerSecond /
                       0.382f &&
               gentleTargetDelta.x > mongooseTargetDelta.x * 10.0f &&
+              gentleTargetDelta.x / 0.5f >= 0.079f &&
               mongooseTargetDelta.x > 0.0f &&
+              carryTargetDelta.x / 0.5f > 0.10f &&
+              carryTargetDelta.z > 0.0f &&
               PhysicalContactLengthSquared(invalidTargetDelta) == 0.0f &&
               sustainedLift.apply && sustainedLift.worldImpulse.z > 0.0f &&
               sustainedLift.normalImpulseKilogramMetersPerSecond >=
