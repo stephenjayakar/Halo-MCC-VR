@@ -6340,6 +6340,14 @@ namespace
     std::atomic<float> g_halo3ContactDebugInitialPosition[3]{};
     std::atomic<float> g_halo3ContactDebugCurrentPosition[3]{};
     std::atomic<float> g_halo3ContactDebugVelocity[3]{};
+    // Camera-thread-only anchor for the automated contact rig. A slow test
+    // must not chase a target after applying an impulse. Chasing changes the
+    // weapon orientation and creates artificial high-speed tip motion.
+    bool g_halo3ContactDebugAnchorValid = false;
+    uint32_t g_halo3ContactDebugAnchorGeneration = 0;
+    int32_t g_halo3ContactDebugAnchorHandle = -1;
+    PhysicalContactTransform g_halo3ContactDebugAnchorTransform{};
+    PhysicalContactVec3 g_halo3ContactDebugAnchorForward{};
     enum class Halo3NodeBindingState : uint8_t
     {
         NotInstalled = 0,
@@ -10413,6 +10421,11 @@ namespace
                 int32_t aimTarget = -1;
                 uint8_t aimKind = 0xFF;
                 int targetPriority = -1;
+                const bool haveAnchor =
+                    g_halo3ContactDebugAnchorValid &&
+                    g_halo3ContactDebugAnchorGeneration == generation;
+                const int32_t anchoredHandle = haveAnchor
+                    ? g_halo3ContactDebugAnchorHandle : -1;
                 const uint32_t limit = std::min(
                     header.firstUnallocated, header.maximumCount);
                 for (uint32_t index = 0; index < limit; ++index)
@@ -10428,6 +10441,8 @@ namespace
                     const uint8_t kind = *(entry +
                         kHalo3ObjectEntryKindOffset);
                     if (handle == unitHandle || handle == weaponHandle ||
+                        (anchoredHandle != -1 &&
+                         handle != anchoredHandle) ||
                         !PhysicalContactMovableKind(kind))
                         continue;
                     auto* data = *reinterpret_cast<unsigned char**>(
@@ -10447,7 +10462,8 @@ namespace
                     // Forge acceptance is specifically a loose weapon. Prefer
                     // kind 2 and use another movable root only when the map has
                     // no weapon datum at all.
-                    const int priority = kind == 2 ? 1 : 0;
+                    const int priority = anchoredHandle != -1
+                        ? 2 : (kind == 2 ? 1 : 0);
                     if (!std::isfinite(distanceSquared) ||
                         distanceSquared < 0.25f ||
                         priority < targetPriority ||
@@ -10461,20 +10477,44 @@ namespace
                     aimKind = kind;
                     debugAimData = data;
                 }
+                if (anchoredHandle != -1 && aimTarget == -1)
+                {
+                    g_halo3ContactDebugAnchorValid = false;
+                    g_halo3ContactDebugAnchorHandle = -1;
+                }
+                else if (aimTarget != -1 && anchoredHandle == -1)
+                {
+                    const PhysicalContactTransform anchorTransform =
+                        Halo3ContactObjectTransform(debugAimData);
+                    const PhysicalContactVec3 anchorForward =
+                        PhysicalContactNormalize(target - camera, forward);
+                    if (PhysicalContactTransformFinite(anchorTransform) &&
+                        PhysicalContactFinite(anchorForward))
+                    {
+                        g_halo3ContactDebugAnchorValid = true;
+                        g_halo3ContactDebugAnchorGeneration = generation;
+                        g_halo3ContactDebugAnchorHandle = aimTarget;
+                        g_halo3ContactDebugAnchorTransform = anchorTransform;
+                        g_halo3ContactDebugAnchorForward = anchorForward;
+                    }
+                }
                 g_halo3ContactDebugAimTarget.store(
                     aimTarget, std::memory_order_relaxed);
                 g_halo3ContactDebugAimKind.store(
                     aimKind, std::memory_order_relaxed);
                 if (aimTarget != -1)
                 {
-                    forward = PhysicalContactNormalize(target - camera,
-                                                       forward);
+                    forward = g_halo3ContactDebugAnchorValid
+                        ? g_halo3ContactDebugAnchorForward
+                        : PhysicalContactNormalize(target - camera, forward);
                     // Temporary root position. Once the exact weapon and
                     // target shapes are loaded below, align their opposing
                     // support points. A bounding-radius guess cannot place a
                     // detailed collision model reliably because its authored
                     // origin is not the visible muzzle or center.
-                    grip = target;
+                    grip = g_halo3ContactDebugAnchorValid
+                        ? g_halo3ContactDebugAnchorTransform.position
+                        : target;
                 }
             }
             PhysicalContactTransform weaponTransform{};
@@ -10540,7 +10580,9 @@ namespace
             {
                 PhysicalContactCompoundShape debugTargetShape{};
                 const PhysicalContactTransform debugTargetTransform =
-                    Halo3ContactObjectTransform(debugAimData);
+                    g_halo3ContactDebugAnchorValid
+                    ? g_halo3ContactDebugAnchorTransform
+                    : Halo3ContactObjectTransform(debugAimData);
                 if (Halo3ContactShapeForObject(
                         debugAimData, debugTargetShape) &&
                     PhysicalContactTransformFinite(debugTargetTransform))
@@ -16120,6 +16162,11 @@ namespace
         g_halo3ContactDebugMelee.store(
             contactDebugMeleeEnabled, std::memory_order_release);
         g_halo3ContactDebugTarget.store(-1, std::memory_order_release);
+        g_halo3ContactDebugAnchorValid = false;
+        g_halo3ContactDebugAnchorGeneration = 0;
+        g_halo3ContactDebugAnchorHandle = -1;
+        g_halo3ContactDebugAnchorTransform = {};
+        g_halo3ContactDebugAnchorForward = {};
         g_halo3ContactDebugGameOptions.store(0, std::memory_order_release);
         g_halo3ContactCommandHandle.store(-1, std::memory_order_relaxed);
         g_halo3ContactCommandGeneration.store(0, std::memory_order_relaxed);
