@@ -6076,7 +6076,7 @@ namespace
     // 0x0A as `melee`; the official and retail selectors both route that exact
     // value to the authored first-hit damage/response pair without a lunge.
     constexpr int32_t kHalo3OrdinaryMeleeStringId = 0x0A;
-    constexpr bool kEnableHalo3PhysicalMeleeCandidate = false;
+    constexpr bool kEnableHalo3PhysicalMeleeCandidate = true;
     PhysicalContactDebounce g_halo3ContactDebounce;
     uint64_t g_halo3ContactLastMotionSerial = 0;
     uint64_t g_halo3ContactLastMeleeMs = 0;
@@ -8891,6 +8891,7 @@ namespace
                             bool meleeFaulted = false;
                             bool damageApplied = false;
                             bool meleeRejected = false;
+                            uint32_t meleeFaultStatus = 3;
                             int32_t damageEffectTag = -1;
                             int32_t responseEffectTag = -1;
                             __try
@@ -9001,6 +9002,7 @@ namespace
                                          0xFFFFu) != 0xFFFFu)
                                     {
                                         Halo3DamageOwner owner{};
+                                        meleeFaultStatus = 6;
                                         g_halo3DamageOwnerFromObject(
                                             unitHandle, &owner);
                                         Halo3DamageTarget target{};
@@ -9017,9 +9019,11 @@ namespace
                                         target.damageSection = -1;
                                         target.materialIndex = 0xFFFFu;
                                         target.scale = 1.0f;
+                                        meleeFaultStatus = 7;
                                         g_halo3ApplyMeleeDamage(
                                             unitHandle, damageEffectTag,
                                             &owner, &target);
+                                        meleeFaultStatus = 8;
                                         g_halo3MeleeEffectsWrapper(
                                             unitHandle, damageEffectTag,
                                             responseEffectTag,
@@ -9039,7 +9043,8 @@ namespace
                             if (meleeFaulted)
                             {
                                 g_halo3ContactMeleeStatus.store(
-                                    3, std::memory_order_relaxed);
+                                    meleeFaultStatus,
+                                    std::memory_order_relaxed);
                                 if (!wantsImpulse)
                                     g_halo3ContactCommandStatus.store(
                                         3, std::memory_order_relaxed);

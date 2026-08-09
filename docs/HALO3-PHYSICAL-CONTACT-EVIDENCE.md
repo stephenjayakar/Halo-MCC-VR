@@ -198,6 +198,13 @@ failed behavioral candidate and is disabled again before downstream-call
 isolation. The selector value is now proven; the remaining fault is after tag
 selection.
 
+The next diagnostic candidate preserves the same fail-open transaction but
+records the exact post-selector fault boundary: status `6` while constructing
+the native damage owner, `7` while applying native melee damage, and `8` while
+invoking the stock effects/response wrapper. These are bounded atomic status
+writes only; no logging, allocation, locks, or additional engine calls are
+introduced in `objects_update`.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
