@@ -38,10 +38,46 @@ namespace
     XInputGetCapsFn g_origGetCaps[3] = {};
     XInputSetStateFn g_origSetState[3] = {};
     std::atomic<bool> g_overrideLogged{false};
+    std::atomic<bool> g_debugKeyboardPad{false};
+    std::atomic<bool> g_debugKeyboardPadInitialized{false};
     MenuChordDetector g_menuChord;
     MenuChordDetector g_pauseChord;
     ScopeToggleDetector g_scopeToggle;
     std::atomic<uint64_t> g_startPulseUntilMs{0};
+
+    void InitializeDebugKeyboardPad()
+    {
+        bool expected = false;
+        if (!g_debugKeyboardPadInitialized.compare_exchange_strong(expected, true))
+            return;
+        wchar_t value[8]{};
+        const DWORD length = GetEnvironmentVariableW(
+            L"HALOMCCVR_DEBUG_KEYBOARD_GAMEPAD", value,
+            8);
+        const bool enabled = length == 1 && value[0] == L'1';
+        g_debugKeyboardPad.store(enabled);
+        if (enabled)
+            LOG("debug input: keyboard-to-gamepad bridge enabled");
+    }
+
+    bool MergeDebugKeyboardPad(XINPUT_STATE* state)
+    {
+        if (!state || !g_debugKeyboardPad.load())
+            return false;
+        WORD buttons = 0;
+        const auto down = [](int key) {
+            return (GetAsyncKeyState(key) & 0x8000) != 0;
+        };
+        if (down(VK_UP)) buttons |= XINPUT_GAMEPAD_DPAD_UP;
+        if (down(VK_DOWN)) buttons |= XINPUT_GAMEPAD_DPAD_DOWN;
+        if (down(VK_LEFT)) buttons |= XINPUT_GAMEPAD_DPAD_LEFT;
+        if (down(VK_RIGHT)) buttons |= XINPUT_GAMEPAD_DPAD_RIGHT;
+        if (down(VK_RETURN) || down(VK_SPACE)) buttons |= XINPUT_GAMEPAD_A;
+        if (down(VK_ESCAPE) || down(VK_BACK)) buttons |= XINPUT_GAMEPAD_B;
+        if (down(VK_TAB)) buttons |= XINPUT_GAMEPAD_START;
+        state->Gamepad.wButtons |= buttons;
+        return buttons != 0;
+    }
 
     // Map |v| in 0..1 to a raw stick value that clears MCC's inner deadzone,
     // so small corrections still produce movement.
@@ -340,6 +376,16 @@ namespace
             *state = {};
             r = ERROR_SUCCESS;
         }
+        // Debug-only shell control for automated runtime tests. SteamVR's null
+        // HMD exposes no controller, so translate injected keyboard keys into
+        // the virtual gamepad before the title gameplay gate. The bridge is
+        // opt-in through HALOMCCVR_DEBUG_KEYBOARD_GAMEPAD and is never read or
+        // evaluated in normal launches.
+        if (MergeDebugKeyboardPad(state))
+        {
+            static std::atomic<DWORD> debugSeq{1};
+            state->dwPacketNumber += debugSeq.fetch_add(1);
+        }
         // Controller admission is separate from shared gameplay ownership.
         // Private ODST camera-only and Reach controller-only stages may expose
         // ordinary gamepad input while motion aim and every title-runtime
@@ -586,6 +632,7 @@ int Input_ClaimXInputIat()
 
 int Input_InstallXInputHook()
 {
+    InitializeDebugKeyboardPad();
     // MCC may load any of these depending on OS/build, and it can load them
     // LATE (well after our first attempt) — the caller keeps retrying forever.
     // Safe to call repeatedly: already-hooked slots are skipped.
