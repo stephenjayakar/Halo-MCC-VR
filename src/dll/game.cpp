@@ -6817,9 +6817,57 @@ namespace
         return PhysicalContactConvexValid(output);
     }
 
-    bool Halo3ContactConvexForObject(
+    // H3EK's hkpListShape constructor at +0x03C2E0 proves runtime type 10,
+    // child storage at +0x30, count at +0x38, and a 0x20-byte child stride.
+    // Preserve every disjoint child as its own convex. Taking one convex hull
+    // across a hammer head and haft would create collision in empty space.
+    bool Halo3ContactCompoundFromHavokShape(
+        const unsigned char* havokShape,
+        PhysicalContactCompoundShape& output, int depth = 0)
+    {
+        if (!havokShape || depth > 3)
+            return false;
+        const int32_t type = *reinterpret_cast<const int32_t*>(
+            havokShape + 0x18);
+        if (type != 10) // hkpListShape
+        {
+            if (output.childCount >=
+                PhysicalContactCompoundShape::kMaximumChildren)
+                return false;
+            PhysicalContactConvexShape child{};
+            if (!Halo3ContactConvexFromHavokShape(
+                    havokShape, child))
+                return false;
+            output.children[output.childCount++] = child;
+            return true;
+        }
+
+        const auto* children =
+            *reinterpret_cast<const unsigned char* const*>(
+                havokShape + 0x30);
+        const int32_t childCount = *reinterpret_cast<const int32_t*>(
+            havokShape + 0x38);
+        if (!children || childCount <= 0 ||
+            childCount > static_cast<int32_t>(
+                PhysicalContactCompoundShape::kMaximumChildren) ||
+            output.childCount + childCount >
+                PhysicalContactCompoundShape::kMaximumChildren)
+            return false;
+        for (int32_t childIndex = 0; childIndex < childCount; ++childIndex)
+        {
+            const auto* child =
+                *reinterpret_cast<const unsigned char* const*>(
+                    children + static_cast<size_t>(childIndex) * 0x20);
+            if (!Halo3ContactCompoundFromHavokShape(
+                    child, output, depth + 1))
+                return false;
+        }
+        return PhysicalContactCompoundValid(output);
+    }
+
+    bool Halo3ContactShapeForObject(
         const unsigned char* objectData,
-        PhysicalContactConvexShape& output)
+        PhysicalContactCompoundShape& output)
     {
         if (!objectData)
             return false;
@@ -6857,7 +6905,9 @@ namespace
                 rigidBody + 0x58);
         if ((nodeIndex != -1 && nodeIndex != 0) || !shape)
             return false;
-        return Halo3ContactConvexFromHavokShape(shape, output);
+        output = {};
+        return Halo3ContactCompoundFromHavokShape(shape, output) &&
+            PhysicalContactCompoundValid(output);
     }
 
     // These accessors mirror object_get_center_of_mass and the native point
@@ -10093,9 +10143,9 @@ namespace
                     weaponTransform.forward, weaponTransform.left),
                 weaponTransform.up);
             weaponTransform.scale = visibleScale;
-            PhysicalContactConvexShape weaponShape{};
+            PhysicalContactCompoundShape weaponShape{};
             if (!PhysicalContactTransformFinite(weaponTransform) ||
-                !Halo3ContactConvexForObject(weaponData, weaponShape))
+                !Halo3ContactShapeForObject(weaponData, weaponShape))
             {
                 g_halo3ContactUnsupportedShapes.fetch_add(
                     1, std::memory_order_relaxed);
@@ -10226,6 +10276,7 @@ namespace
             PhysicalContactVec3 closestWeaponPoint{};
             bool closestUsesAuthoredShape = false;
             bool closestNormalReliable = false;
+            PhysicalContactConvexShape closestWeaponShape{};
             PhysicalContactConvexShape closestTargetShape{};
             PhysicalContactTransform closestTargetTransform{};
             uint32_t eligibleObjects = 0;
@@ -10294,7 +10345,7 @@ namespace
             const int32_t debugAimTarget =
                 g_halo3ContactDebugAimTarget.load(std::memory_order_relaxed);
             const float weaponBroadRadius =
-                PhysicalContactConvexBoundRadius(weaponShape) *
+                PhysicalContactCompoundBoundRadius(weaponShape) *
                 std::max(previousWeaponTransform.scale,
                          weaponTransform.scale);
             const uint32_t limit = std::min(
@@ -10335,16 +10386,16 @@ namespace
                     weaponBroadRadius + radius);
                 if (!proxy.hit)
                     continue;
-                PhysicalContactConvexShape targetShape{};
-                if (!Halo3ContactConvexForObject(data, targetShape))
+                PhysicalContactCompoundShape targetShape{};
+                if (!Halo3ContactShapeForObject(data, targetShape))
                     continue;
                 const PhysicalContactTransform targetTransform =
                     Halo3ContactObjectTransform(data);
                 if (!PhysicalContactTransformFinite(targetTransform))
                     continue;
                 ++eligibleObjects;
-                const PhysicalContactConvexHit authored =
-                    PhysicalContactSweepConvex(
+                const PhysicalContactCompoundHit authored =
+                    PhysicalContactSweepCompound(
                         weaponShape, previousWeaponTransform, weaponTransform,
                         targetShape, targetTransform);
                 if (!authored.hit ||
@@ -10360,7 +10411,10 @@ namespace
                 closestWeaponPoint = authored.weaponPoint;
                 closestUsesAuthoredShape = true;
                 closestNormalReliable = authored.normalReliable;
-                closestTargetShape = targetShape;
+                closestWeaponShape =
+                    weaponShape.children[authored.weaponChild];
+                closestTargetShape =
+                    targetShape.children[authored.targetChild];
                 closestTargetTransform = targetTransform;
                 // Convex Havok shapes carry the material on their primitive,
                 // not per face. Zero selects the authored default material.
@@ -10441,7 +10495,8 @@ namespace
                     return;
                 }
                 closestWeaponPoint = PhysicalContactConvexSupport(
-                    weaponShape, weaponTransform, closest.normal * -1.0f);
+                    closestWeaponShape, weaponTransform,
+                    closest.normal * -1.0f);
                 const PhysicalContactVec3 targetPoint =
                     PhysicalContactConvexSupport(
                         closestTargetShape, closestTargetTransform,

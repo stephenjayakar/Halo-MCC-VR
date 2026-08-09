@@ -8788,6 +8788,42 @@ int main()
             "preserve grazing clearance, distinguish swept planes from "
             "existing overlap, and reject invalid geometry");
 
+        PhysicalContactCompoundShape twoPartWeapon{};
+        twoPartWeapon.childCount = 2;
+        twoPartWeapon.children[0] =
+            makeBox({0.10f, 0.10f, 0.10f}, 0.0f);
+        twoPartWeapon.children[1] =
+            makeBox({0.10f, 0.10f, 0.10f}, 0.0f);
+        for (uint16_t vertex = 0;
+             vertex < twoPartWeapon.children[0].vertexCount; ++vertex)
+        {
+            twoPartWeapon.children[0].vertices[vertex].x -= 0.50f;
+            twoPartWeapon.children[1].vertices[vertex].x += 0.50f;
+        }
+        PhysicalContactCompoundShape onePartTarget{};
+        onePartTarget.childCount = 1;
+        onePartTarget.children[0] =
+            makeBox({0.05f, 0.05f, 0.05f}, 0.0f);
+        PhysicalContactTransform compoundWeaponTransform{};
+        PhysicalContactTransform compoundTargetTransform{};
+        const PhysicalContactCompoundHit compoundGap =
+            PhysicalContactSweepCompound(
+                twoPartWeapon, compoundWeaponTransform,
+                compoundWeaponTransform, onePartTarget,
+                compoundTargetTransform);
+        compoundTargetTransform.position = {0.50f, 0, 0};
+        const PhysicalContactCompoundHit compoundHead =
+            PhysicalContactSweepCompound(
+                twoPartWeapon, compoundWeaponTransform,
+                compoundWeaponTransform, onePartTarget,
+                compoundTargetTransform);
+        Check(!compoundGap.hit && compoundHead.hit &&
+              compoundHead.weaponChild == 1 &&
+              PhysicalContactCompoundValid(twoPartWeapon) &&
+              PhysicalContactCompoundBoundRadius(twoPartWeapon) > 0.59f,
+            "Compound authored shapes keep disjoint parts separate and "
+            "report the exact child that touched");
+
         bool gjkGridExact = true;
         const PhysicalContactConvexShape gridBox =
             makeBox({0.10f, 0.15f, 0.20f}, 0.0f);

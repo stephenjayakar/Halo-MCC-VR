@@ -149,6 +149,13 @@ struct PhysicalContactConvexShape
     float radius = 0.0f;
 };
 
+struct PhysicalContactCompoundShape
+{
+    static constexpr size_t kMaximumChildren = 8;
+    std::array<PhysicalContactConvexShape, kMaximumChildren> children{};
+    uint16_t childCount = 0;
+};
+
 inline bool PhysicalContactConvexValid(const PhysicalContactConvexShape& shape)
 {
     if (!shape.vertexCount ||
@@ -162,6 +169,18 @@ inline bool PhysicalContactConvexValid(const PhysicalContactConvexShape& shape)
     return true;
 }
 
+inline bool PhysicalContactCompoundValid(
+    const PhysicalContactCompoundShape& shape)
+{
+    if (!shape.childCount ||
+        shape.childCount > PhysicalContactCompoundShape::kMaximumChildren)
+        return false;
+    for (uint16_t i = 0; i < shape.childCount; ++i)
+        if (!PhysicalContactConvexValid(shape.children[i]))
+            return false;
+    return true;
+}
+
 inline float PhysicalContactConvexBoundRadius(
     const PhysicalContactConvexShape& shape)
 {
@@ -171,6 +190,16 @@ inline float PhysicalContactConvexBoundRadius(
             radiusSquared,
             PhysicalContactLengthSquared(shape.vertices[i]));
     return std::sqrt(radiusSquared) + shape.radius;
+}
+
+inline float PhysicalContactCompoundBoundRadius(
+    const PhysicalContactCompoundShape& shape)
+{
+    float radius = 0.0f;
+    for (uint16_t i = 0; i < shape.childCount; ++i)
+        radius = std::max(
+            radius, PhysicalContactConvexBoundRadius(shape.children[i]));
+    return radius;
 }
 
 inline PhysicalContactVec3 PhysicalContactConvexSupport(
@@ -508,6 +537,46 @@ inline PhysicalContactConvexHit PhysicalContactSweepConvex(
         target, targetTransform, result.normal);
     result.point = (result.weaponPoint + result.targetPoint) * 0.5f;
     return result;
+}
+
+struct PhysicalContactCompoundHit : PhysicalContactConvexHit
+{
+    uint16_t weaponChild = 0;
+    uint16_t targetChild = 0;
+};
+
+inline PhysicalContactCompoundHit PhysicalContactSweepCompound(
+    const PhysicalContactCompoundShape& weapon,
+    const PhysicalContactTransform& previousWeaponTransform,
+    const PhysicalContactTransform& currentWeaponTransform,
+    const PhysicalContactCompoundShape& target,
+    const PhysicalContactTransform& targetTransform)
+{
+    PhysicalContactCompoundHit closest{};
+    if (!PhysicalContactCompoundValid(weapon) ||
+        !PhysicalContactCompoundValid(target))
+        return closest;
+    for (uint16_t weaponChild = 0;
+         weaponChild < weapon.childCount; ++weaponChild)
+    {
+        for (uint16_t targetChild = 0;
+             targetChild < target.childCount; ++targetChild)
+        {
+            const PhysicalContactConvexHit candidate =
+                PhysicalContactSweepConvex(
+                    weapon.children[weaponChild], previousWeaponTransform,
+                    currentWeaponTransform, target.children[targetChild],
+                    targetTransform);
+            if (!candidate.hit ||
+                (closest.hit &&
+                 candidate.fraction >= closest.fraction - 1.0e-6f))
+                continue;
+            static_cast<PhysicalContactConvexHit&>(closest) = candidate;
+            closest.weaponChild = weaponChild;
+            closest.targetChild = targetChild;
+        }
+    }
+    return closest;
 }
 
 inline PhysicalContactPointVelocity PhysicalContactRigidPointVelocity(

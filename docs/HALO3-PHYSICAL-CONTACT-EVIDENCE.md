@@ -149,7 +149,9 @@ The resolver at `0x52E830` proves these authored blocks and returned shapes:
 
 Constructors in that same official routine prove internal type `3` sphere,
 `5` triangle, `6` box, `7` capsule, `8` convex vertices, `12` convex
-translate, and `13` convex transform. Radius is shape `+0x20`. Capsule
+translate, and `13` convex transform. The official list constructor at
+`0x03C2E0` proves type `10`, child storage `+0x30`, count `+0x38`, and a
+`0x20` child stride. Radius is shape `+0x20`. Capsule
 endpoints are `+0x30/+0x40`. Box half extents are `+0x30`. Transform child,
 rotation rows, and translation are `+0x30`, `+0x40/+0x50/+0x60`, and `+0x70`.
 A convex-vertices shape stores its packed four-vector pointer at `+0x50`, group
@@ -158,15 +160,34 @@ Official assault-rifle XML confirms four exact vertices and a `0.009` rounded
 radius instead of the interim long capsule.
 
 The new candidate reads only that resolved immutable shape pointer. It copies
-at most 256 finite support vertices into fixed stack storage. It supports the
-proven sphere, triangle, box, capsule, polyhedron, translate, and transform
-types. Multi-body, multi-sphere, list, MOPP, invalid, and ambiguous shapes stay
-non-interactive. A bounds sphere performs broad-phase rejection only. A bounded
+at most eight disjoint convex children and 256 finite vertices per child into
+fixed stack storage. It supports the proven sphere, triangle, box, capsule,
+polyhedron, list, translate, and transform types. Multi-body, multi-sphere,
+MOPP, invalid, and ambiguous shapes stay non-interactive. A bounds sphere
+performs broad-phase rejection only. A bounded
 GJK sweep decides contact. It interpolates the final visible weapon translation,
 orientation, and scale. It samples at one-centimetre swept spacing, up to 32
 poses, then performs nine binary refinements at the first overlap. Broad bounds
 never create a hit. Unsupported geometry never falls back to capsule/sphere
 contact.
+
+Official extracted H3EK tags close the player melee-weapon cases. The energy
+sword physics tag (SHA-256
+`8B34EFF8A6F525E50085AE94A6E41A459DB988E698A4BCBF97A7AB8AD25F3FDD`)
+uses one four-vertex polyhedron. The gravity hammer physics tag (SHA-256
+`D7EDC3609E0603A98D41B57CF912D87C2DAEECC3BACC79A174946FE76C80C24D`)
+uses one list with separate eight-vertex haft and 12-vertex head polyhedra.
+Sweeping each child pair preserves the authored empty space. A convex hull over
+both hammer parts would create false contact. The bounded eight-by-eight,
+12-vertex benchmark measured `0.0691 ms` p95 on this machine. The common case
+remains below `0.022 ms` p95. Both stay below the `0.25 ms` contact budget.
+
+An official H3EK XML census covered all 44 weapon physics tags. Forty-two use
+one rigid body. The two multi-body exceptions are detached missile-pod tripod
+or vehicle garbage, not held weapons. Root shapes are 32 polyhedra, three
+boxes, two pills, one sphere, and four lists. The largest list has four box
+children. Every active held-weapon root therefore fits the bounded compound
+reader. Unsupported multi-body data cannot silently become approximate contact.
 
 The earlier wrist-target publication was runtime-rejected because the desired IK
 wrist is not necessarily the transform Halo ultimately skins. The replacement
