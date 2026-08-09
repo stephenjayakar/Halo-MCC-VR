@@ -8755,6 +8755,12 @@ int main()
         const PhysicalContactConvexHit exactTranslation =
             PhysicalContactSweepConvex(
                 rifle, rifleFrom, rifleTo, prop, propTransform);
+        PhysicalContactTransform overlappingRifle{};
+        overlappingRifle.position = {0.65f, 0, 0};
+        const PhysicalContactConvexHit existingOverlap =
+            PhysicalContactSweepConvex(
+                rifle, overlappingRifle, overlappingRifle,
+                prop, propTransform);
         propTransform.position = {1.0f, 0.16f, 0};
         const PhysicalContactConvexHit exactGrazingMiss =
             PhysicalContactSweepConvex(
@@ -8771,14 +8777,16 @@ int main()
             PhysicalContactSweepConvex(
                 invalidConvex, rifleFrom, rifleTo, prop, propTransform);
         Check(exactTranslation.hit &&
+              exactTranslation.normalReliable &&
               exactTranslation.fraction > 0.20f &&
               exactTranslation.fraction < 0.30f &&
               exactTranslation.normal.x < -0.90f &&
+              existingOverlap.hit && !existingOverlap.normalReliable &&
               !exactGrazingMiss.hit && exactRotation.hit &&
               !invalidShape.hit,
             "Authored convex sweeps detect thin translation and rotation, "
-            "preserve grazing clearance, return the first surface, and "
-            "reject invalid geometry");
+            "preserve grazing clearance, distinguish swept planes from "
+            "existing overlap, and reject invalid geometry");
 
         bool gjkGridExact = true;
         const PhysicalContactConvexShape gridBox =
@@ -8891,25 +8899,31 @@ int main()
         PhysicalContactTargetState* target = debounce.Touch(0x12340007, &first);
         const bool initial = first && target && target->meleeArmed;
         target->meleeArmed = false;
+        target->contactNormalValid = true;
+        target->contactNormal = exactTranslation.normal;
         debounce.EndSample();
         debounce.BeginSample();
         target = debounce.Touch(0x12340007, &first);
-        const bool held = !first && target && !target->meleeArmed;
+        const bool held = !first && target && !target->meleeArmed &&
+            target->contactNormalValid &&
+            target->contactNormal.x < -0.90f;
         debounce.EndSample();
         debounce.BeginSample();
         debounce.EndSample();
         debounce.BeginSample();
         target = debounce.Touch(0x12340007, &first);
-        const bool rearmed = first && target && target->meleeArmed;
+        const bool rearmed = first && target && target->meleeArmed &&
+            !target->contactNormalValid;
         debounce.EndSample();
         debounce.Reset(); // weapon/title/tracking change
         debounce.BeginSample();
         target = debounce.Touch(0x12340007, &first);
-        const bool resetRearmed = first && target && target->meleeArmed;
+        const bool resetRearmed = first && target && target->meleeArmed &&
+            !target->contactNormalValid;
         debounce.EndSample();
         Check(initial && held && rearmed && resetRearmed,
-            "Per-target contact fires once while overlapping and rearms after "
-            "separation or a weapon/tracking reset");
+            "Per-target contact preserves the swept surface normal during "
+            "overlap and rearms cleanly after separation or reset");
 
         Check(!PhysicalContactMeleeReady(
                   PhysicalContactAction::ImpulseOnly, true, true, 1000, 0) &&

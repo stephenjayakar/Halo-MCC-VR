@@ -10225,6 +10225,9 @@ namespace
             uint16_t closestMaterial = 0;
             PhysicalContactVec3 closestWeaponPoint{};
             bool closestUsesAuthoredShape = false;
+            bool closestNormalReliable = false;
+            PhysicalContactConvexShape closestTargetShape{};
+            PhysicalContactTransform closestTargetTransform{};
             uint32_t eligibleObjects = 0;
             // collision_flags: structure; object_flags: object-query enable
             // plus every object type. H3EK's generated +0x14060 initializer
@@ -10280,6 +10283,7 @@ namespace
                     closestMaterial = native.materialIndex;
                     closestWeaponPoint = hitPoint;
                     closestUsesAuthoredShape = false;
+                    closestNormalReliable = true;
                 }
             }
             // Halo 3's vector query resolves BSP and authored model collision,
@@ -10355,6 +10359,9 @@ namespace
                 closestHandle = handle;
                 closestWeaponPoint = authored.weaponPoint;
                 closestUsesAuthoredShape = true;
+                closestNormalReliable = authored.normalReliable;
+                closestTargetShape = targetShape;
+                closestTargetTransform = targetTransform;
                 // Convex Havok shapes carry the material on their primitive,
                 // not per face. Zero selects the authored default material.
                 closestMaterial = 0;
@@ -10416,6 +10423,34 @@ namespace
             bool firstContact = false;
             PhysicalContactTargetState* contact =
                 g_halo3ContactDebounce.Touch(closestHandle, &firstContact);
+            if (closestUsesAuthoredShape)
+            {
+                if (closestNormalReliable)
+                {
+                    contact->contactNormal = closest.normal;
+                    contact->contactNormalValid = true;
+                }
+                else if (contact->contactNormalValid)
+                    closest.normal = contact->contactNormal;
+                else
+                {
+                    // A newly observed pre-existing overlap has no swept
+                    // separating plane. Wait for separation instead of
+                    // inventing a center-to-center force direction.
+                    g_halo3ContactDebounce.EndSample();
+                    return;
+                }
+                closestWeaponPoint = PhysicalContactConvexSupport(
+                    weaponShape, weaponTransform, closest.normal * -1.0f);
+                const PhysicalContactVec3 targetPoint =
+                    PhysicalContactConvexSupport(
+                        closestTargetShape, closestTargetTransform,
+                        closest.normal);
+                // Use the exact target surface for the native point impulse.
+                // The current weapon support point is only the matching
+                // material point used to measure rigid weapon velocity.
+                closest.point = targetPoint;
+            }
             if (!previousPoseMs || visiblePoseMs <= previousPoseMs ||
                 visiblePoseMs - previousPoseMs > 100 ||
                 !g_halo3ObjectGetVelocities || !g_halo3ObjectGetCenter)

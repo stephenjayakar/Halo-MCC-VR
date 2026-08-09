@@ -343,6 +343,19 @@ impulse. It preserves the exact contact point, uses the held weapon and target
 body masses, and lets Halo compute angular response from target inertia. It
 awaits headset acceptance.
 
+Review of continued authored overlap found one deterministic force-direction
+fault. GJK returns a separating plane immediately before first impact. If the
+previous pose already overlaps, no separating plane exists. The old path then
+invented a center-to-center normal. That normal changed as the prop moved. It
+also used the prior weapon support point to measure the current rigid velocity.
+
+The overlap-normal candidate stores the first reliable swept plane per target.
+It reuses that plane during continuous overlap. Separation or reset clears it.
+A contact first observed inside a target waits for separation. The path now
+measures velocity at the matching current weapon support point and applies the
+native point impulse at the exact target support surface. Pure tests distinguish
+a swept plane from existing overlap and verify normal retention and cleanup.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

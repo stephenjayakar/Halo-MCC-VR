@@ -395,6 +395,7 @@ inline bool PhysicalContactConvexIntersect(
 struct PhysicalContactConvexHit
 {
     bool hit = false;
+    bool normalReliable = false;
     float fraction = 1.0f;
     PhysicalContactVec3 point{};
     PhysicalContactVec3 weaponPoint{};
@@ -488,6 +489,8 @@ inline PhysicalContactConvexHit PhysicalContactSweepConvex(
         }
         result.hit = true;
         result.fraction = high;
+        result.normalReliable =
+            PhysicalContactLengthSquared(separation) > 1.0e-12f;
     }
 
     const PhysicalContactTransform impact =
@@ -922,6 +925,8 @@ struct PhysicalContactTargetState
     bool overlapping = false;
     bool previouslyOverlapping = false;
     bool meleeArmed = true;
+    bool contactNormalValid = false;
+    PhysicalContactVec3 contactNormal{1.0f, 0.0f, 0.0f};
     uint64_t belowHalfSinceMs = 0;
 };
 
