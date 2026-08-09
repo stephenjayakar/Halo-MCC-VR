@@ -23,6 +23,7 @@ render, input, ODST, or Reach paths.
 | `object_set_velocities` world native | `0xA4EAA0` | `0x3411A4` | 1 | both `object_set_velocity` bodies transform the three local floats into a world vector, then call this routine with object handle, world-linear pointer, and null angular pointer; contact already owns a validated, clamped world vector and uses this lower authoritative physics/network path directly |
 | `object_get_velocities` | `0xA43EA0` | `0x345480` | 1 | the official full-symbol accessor and its retail homolog return both world-linear and world-angular velocity for the exact object datum; physical contact uses both rather than reading the old raw `object+0x74` approximation |
 | `object_get_center_of_mass` | `0xA426C0` | `0x34523C` | 1 | the official/retail accessor writes the authoritative rigid-body center used to evaluate `linear + angular x (contact-center)` at the exact hit point |
+| `havok_component_apply_point_impulse` | `0x480750` | `0x15FBC4` | 1 | the official full-symbol wrapper and retail homolog take component, body index, world point, and impulse; both resolve the exact body and dispatch its native point-impulse method, which uses authored mass and inertia |
 | `objects_update` simulation owner | `0xA52920` | `0x34067C` | 1 | retained H3EK `objects.cpp` assertion metadata identifies the body containing the `object_update_absolute_index` transaction; the retail homolog preserves the TLS object table, active-object loops, `object_update_absolute_index` writes, and update-in-progress byte, and the complete runtime signature is unique |
 | `unit_melee_effects` (rejected for damage) | `0xA63390` | `0x35A194` | 1 | official disassembly proves the eight arguments and authored effect selection, but the body only emits melee contact effects; it is not used as the damage entry point and is reached only through Halo's stock wrapper |
 | authored melee tag selector | `0xA5DE20` | `0x35A9A4` | 1 | the official and retail bodies resolve the active weapon and select its ordinary/clang damage and response tag pair; H3EK's own constant-string table maps `0x0A` to `melee`, and both selector bodies route that value to the first-hit pair without entering lunge selection |
@@ -71,6 +72,24 @@ alone while preserving any valid impulse. The command also carries the weapon
 handle; the simulation consumer revalidates that the same weapon remains active
 before selecting tags. No grip, trigger, animation, melee action, contest, or
 lunge input is synthesized.
+
+The mass-aware candidate follows the component path used by
+`object_get_center_of_mass`. Object data `+0x9C` holds the Havok component
+datum. The unique retail accessor loads the component-array global at function
+`+0x6C`, then resolves `elements + index * 0xC0`. The root body index is the
+signed byte at component `+0x0C`; body count is `+0x28`; body records are at
+`+0x20` with stride `0x60`; the body wrapper is record `+0x50`; and authored
+mass is wrapper `+0x1DC`. Official `0x078AF0` reads that same mass when
+computing inverse mass. Missing, stale, non-root, invalid, or non-finite mass
+data rejects only that contact command.
+
+The response is a bounded inelastic collision. It computes reduced mass
+`weaponMass * targetMass / (weaponMass + targetMass)` and multiplies it by
+inward relative contact speed. The result is converted from metres to Halo
+world units and sent to the native point-impulse wrapper at the exact authored
+contact point. Halo then applies the target's own mass and inertia. Approach is
+capped at `8.0 m/s`, and target velocity change is capped at `2.5 m/s` for
+runtime safety. No guessed weapon or target mass is used.
 
 The collision query's first argument packs two 32-bit flag sets: collision
 flags in the low dword and object-type flags in the high dword. The official
@@ -178,7 +197,7 @@ performs no native write.
 
 Collision remains on the camera callback, but object mutation and damage do not.
 The camera callback publishes a bounded atomic command containing operation
-flags, validated target/player/weapon handles, world velocity, contact
+flags, validated target/player/weapon handles, world impulse, contact
 point/normal, generation, timestamp, and serial. The unique `objects_update`
 hook consumes that command immediately before the authoritative object update.
 The hook performs no allocation, logging, file I/O, locking, or signature
@@ -187,12 +206,12 @@ scanning and always calls the original update routine.
 The closest native surface blocks its sample. BSP and instanced geometry receive
 no impulse or damage. Player, held weapon, attached/first-person-only objects,
 stale handles, and invalid values are rejected. Every exact object hit publishes
-one native velocity command per continuous contact above 0.05 m/s; the
-simulation owner validates and applies it before object update. Authored convex
+one native point-impulse command per sample above 0.05 m/s; the simulation
+owner re-resolves the target component and body before applying it. Authored convex
 contact admits only root engine object kinds that can own movable physics. The
-native velocity path remains the final authority for whether the exact object
-actually owns a rigid body. The velocity delta is proportional to swing speed
-and clamped. Classification maps the exact current weapon contact point into
+native point-impulse path remains the final authority for whether the exact
+object owns a rigid body. Authored masses and relative speed determine the
+bounded momentum transfer. Classification maps the exact current weapon contact point into
 the previous full visible transform. This includes translation, pitch, yaw,
 roll, and scale over the exact bounded timestamp delta. It subtracts target
 surface velocity from the two native accessors,
@@ -315,7 +334,14 @@ intact but disables the rejected first-overlap velocity kick. Candidate
 matches at most 25% of inward hand speed, caps desired target speed at
 `0.30 m/s`, caps each correction at `0.08 m/s`, preserves tangential velocity,
 and stops adding velocity once the target follows the contact. This replacement
-is installed but awaits headset acceptance.
+was installed but remained an interim approximation.
+
+Candidate `515a40a` replaces capsule/sphere final contact with the immutable
+authored Havok convexes described above. The next mass-aware candidate replaces
+the interim whole-object velocity correction with the proven native point
+impulse. It preserves the exact contact point, uses the held weapon and target
+body masses, and lets Halo compute angular response from target inertia. It
+awaits headset acceptance.
 
 ## Verification boundary
 
@@ -323,10 +349,12 @@ The pure regression suite covers translation and rotation sweeps, tunnelling,
 grazing misses, the noise floor, slow pushes, exact melee threshold crossing,
 contact-fraction point velocity, rotational tip speed, target angular surface
 velocity, world-scale conversion, invalid timing/data,
-finite-value rejection, movable/static classification, impulse clamping,
+finite-value rejection, movable/static classification, mass response,
+point-impulse clamping,
 per-target overlap debounce, separation rearming, reset on weapon/tracking
-change, 250 ms cooldown eligibility, timestamp-underflow rejection, and capsule
-fallback. The cumulative Release build and complete `ctest` suite must pass
+change, 250 ms cooldown eligibility, timestamp-underflow rejection, exact
+convex translation/rotation/tunnelling, grazing rejection, and unsupported
+shape failure. The cumulative Release build and complete `ctest` suite must pass
 before packaging. Headset acceptance (specific weapons,
 materials, enemies, loose weapons/crates, walls, pause/loading/death, and rapid
 motion) remains intentionally pending; the feature therefore defaults off.

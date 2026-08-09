@@ -843,6 +843,67 @@ inline PhysicalContactPushResponse PhysicalContactStablePush(
     return result;
 }
 
+struct PhysicalContactMassImpulse
+{
+    bool apply = false;
+    float approachMetersPerSecond = 0.0f;
+    float impulseKilogramMetersPerSecond = 0.0f;
+    PhysicalContactVec3 worldImpulse{};
+};
+
+// A bounded inelastic collision response. Native Halo masses decide how much
+// momentum the held weapon transfers. The engine's point-impulse function then
+// uses the target's authored mass and inertia to produce linear and angular
+// motion at the exact contact point.
+inline PhysicalContactMassImpulse PhysicalContactMassAwareImpulse(
+    float weaponMassKilograms, float targetMassKilograms,
+    PhysicalContactVec3 relativeMetersPerSecond,
+    PhysicalContactVec3 contactNormal, float worldUnitsPerMeter)
+{
+    PhysicalContactMassImpulse result{};
+    if (!std::isfinite(weaponMassKilograms) ||
+        !std::isfinite(targetMassKilograms) ||
+        weaponMassKilograms <= 0.001f || targetMassKilograms <= 0.001f ||
+        weaponMassKilograms > 1000000.0f ||
+        targetMassKilograms > 1000000.0f ||
+        !PhysicalContactFinite(relativeMetersPerSecond) ||
+        !PhysicalContactFinite(contactNormal) ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f)
+        return result;
+
+    const PhysicalContactVec3 relativeDirection = PhysicalContactNormalize(
+        relativeMetersPerSecond, {1.0f, 0.0f, 0.0f});
+    PhysicalContactVec3 outward = PhysicalContactNormalize(
+        contactNormal, relativeDirection * -1.0f);
+    if (PhysicalContactDot(relativeMetersPerSecond, outward) > 0.0f)
+        outward = outward * -1.0f;
+    const PhysicalContactVec3 pushDirection = outward * -1.0f;
+    const float approach = PhysicalContactDot(
+        relativeMetersPerSecond, pushDirection);
+    if (!std::isfinite(approach) || approach < 0.05f)
+        return result;
+
+    constexpr float kMaximumApproachMetersPerSecond = 8.0f;
+    constexpr float kMaximumTargetDeltaMetersPerSecond = 2.5f;
+    const float reducedMass =
+        weaponMassKilograms * targetMassKilograms /
+        (weaponMassKilograms + targetMassKilograms);
+    float impulse = reducedMass * std::min(
+        approach, kMaximumApproachMetersPerSecond);
+    impulse = std::min(
+        impulse,
+        targetMassKilograms * kMaximumTargetDeltaMetersPerSecond);
+    if (!std::isfinite(impulse) || impulse <= 1.0e-5f)
+        return result;
+
+    result.approachMetersPerSecond = approach;
+    result.impulseKilogramMetersPerSecond = impulse;
+    result.worldImpulse =
+        pushDirection * (impulse * worldUnitsPerMeter);
+    result.apply = PhysicalContactFinite(result.worldImpulse);
+    return result;
+}
+
 // Retail Halo 3 game-options enums: mode 1 campaign, mode 2 multiplayer.
 // Halo 3 MCC's solo Forge host reports simulation 5 (distributed server), not
 // simulation 1 (local). Admit the authoritative Forge host and reject every

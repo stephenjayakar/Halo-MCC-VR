@@ -8974,6 +8974,46 @@ int main()
             "correction, preserves tangential motion, does not accumulate "
             "once the target follows, and corrects reversed normals");
 
+        const PhysicalContactMassImpulse equalMassImpulse =
+            PhysicalContactMassAwareImpulse(
+                4.0f, 4.0f, {1.0f, 0, 0}, {-1, 0, 0}, 0.5f);
+        const PhysicalContactMassImpulse heavyTargetImpulse =
+            PhysicalContactMassAwareImpulse(
+                4.0f, 200.0f, {1.0f, 0, 0}, {-1, 0, 0}, 0.5f);
+        const PhysicalContactMassImpulse lightTargetImpulse =
+            PhysicalContactMassAwareImpulse(
+                20.0f, 2.0f, {1.0f, 0, 0}, {-1, 0, 0}, 0.5f);
+        const PhysicalContactMassImpulse reversedMassNormal =
+            PhysicalContactMassAwareImpulse(
+                4.0f, 4.0f, {1.0f, 0, 0}, {1, 0, 0}, 0.5f);
+        const PhysicalContactMassImpulse tangentialMassImpulse =
+            PhysicalContactMassAwareImpulse(
+                4.0f, 4.0f, {0, 1.0f, 0}, {-1, 0, 0}, 0.5f);
+        const PhysicalContactMassImpulse invalidMassImpulse =
+            PhysicalContactMassAwareImpulse(
+                0.0f, 4.0f, {1.0f, 0, 0}, {-1, 0, 0}, 0.5f);
+        const PhysicalContactMassImpulse clampedMassImpulse =
+            PhysicalContactMassAwareImpulse(
+                100.0f, 1.0f, {100.0f, 0, 0}, {-1, 0, 0}, 0.5f);
+        Check(equalMassImpulse.apply &&
+              std::fabs(equalMassImpulse.impulseKilogramMetersPerSecond -
+                        2.0f) < 1.0e-6f &&
+              std::fabs(equalMassImpulse.worldImpulse.x - 1.0f) < 1.0e-6f &&
+              heavyTargetImpulse.apply &&
+              std::fabs(heavyTargetImpulse.impulseKilogramMetersPerSecond -
+                        (800.0f / 204.0f)) < 1.0e-6f &&
+              lightTargetImpulse.apply &&
+              std::fabs(lightTargetImpulse.impulseKilogramMetersPerSecond -
+                        (40.0f / 22.0f)) < 1.0e-6f &&
+              reversedMassNormal.apply &&
+              std::fabs(reversedMassNormal.worldImpulse.x - 1.0f) < 1.0e-6f &&
+              !tangentialMassImpulse.apply && !invalidMassImpulse.apply &&
+              clampedMassImpulse.apply &&
+              std::fabs(clampedMassImpulse.impulseKilogramMetersPerSecond -
+                        2.5f) < 1.0e-6f,
+            "Native masses produce bounded inelastic momentum, reject invalid "
+            "or tangential input, and correct reversed normals");
+
         const PhysicalContactWallConstraint wallTip =
             PhysicalContactWallOffsetForRay(
                 {}, {2.0f, 0, 0}, 0.75f, 0.10f);

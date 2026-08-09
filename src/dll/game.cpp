@@ -6183,6 +6183,9 @@ namespace
         float* worldAngularVelocity);
     using Halo3ObjectGetCenterFn = float*(__fastcall*)(
         int32_t objectHandle, float* worldCenter);
+    using Halo3ComponentApplyPointImpulseFn = void(__fastcall*)(
+        void* component, int32_t bodyIndex, const float* worldPoint,
+        const float* worldImpulse);
     using Halo3MaterialRemapFn = uint16_t*(__fastcall*)(
         uint16_t* outputMaterial, uint16_t rawMaterial, const float* point);
     using Halo3MaterialLookupFn = void*(__fastcall*)(
@@ -6197,6 +6200,9 @@ namespace
     Halo3GameIsCooperativeFn g_halo3GameIsCooperative = nullptr;
     Halo3ObjectGetVelocitiesFn g_halo3ObjectGetVelocities = nullptr;
     Halo3ObjectGetCenterFn g_halo3ObjectGetCenter = nullptr;
+    Halo3ComponentApplyPointImpulseFn g_halo3ComponentApplyPointImpulse =
+        nullptr;
+    void** g_halo3HavokComponentData = nullptr;
     Halo3MaterialRemapFn g_halo3MaterialRemap = nullptr;
     Halo3MaterialLookupFn g_halo3MaterialLookup = nullptr;
     void** g_halo3MaterialGlobals = nullptr;
@@ -6255,6 +6261,8 @@ namespace
     std::atomic<float> g_halo3ContactWallSetbackMeters{0.0f};
     std::atomic<uint64_t> g_halo3ContactAuthoredShapeHits{0};
     std::atomic<uint64_t> g_halo3ContactUnsupportedShapes{0};
+    std::atomic<float> g_halo3ContactWeaponMass{0.0f};
+    std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<int32_t> g_halo3ContactCommandHandle{-1};
     std::atomic<float> g_halo3ContactCommandVelocity[3]{};
     std::atomic<uint32_t> g_halo3ContactCommandGeneration{0};
@@ -6264,6 +6272,7 @@ namespace
     std::atomic<uint32_t> g_halo3ContactCommandStatus{0};
     constexpr uint32_t kHalo3ContactCommandImpulse = 1u << 0;
     constexpr uint32_t kHalo3ContactCommandMelee = 1u << 1;
+    constexpr uint32_t kHalo3ContactCommandPointImpulse = 1u << 2;
     std::atomic<uint32_t> g_halo3ContactCommandFlags{0};
     std::atomic<int32_t> g_halo3ContactCommandUnitHandle{-1};
     std::atomic<int32_t> g_halo3ContactCommandWeaponHandle{-1};
@@ -6849,6 +6858,101 @@ namespace
         if ((nodeIndex != -1 && nodeIndex != 0) || !shape)
             return false;
         return Halo3ContactConvexFromHavokShape(shape, output);
+    }
+
+    // These accessors mirror object_get_center_of_mass and the native point
+    // impulse wrapper. Callers keep them inside SEH because Halo owns both
+    // datum arrays and can invalidate them during title or map transitions.
+    bool Halo3ContactObjectDataForHandle(
+        int32_t objectHandle, unsigned char*& objectData)
+    {
+        objectData = nullptr;
+        if (objectHandle == -1 || !g_engineTlsIndex)
+            return false;
+        auto** slots = reinterpret_cast<void**>(__readgsqword(0x58));
+        auto* tls = slots ? reinterpret_cast<unsigned char*>(
+            slots[*g_engineTlsIndex]) : nullptr;
+        auto* table = tls
+            ? *reinterpret_cast<unsigned char**>(
+                  tls + kHalo3TlsObjectTableOffset)
+            : nullptr;
+        if (!table)
+            return false;
+        OdstDataArrayHeaderView header{};
+        header.nameIsObject =
+            memcmp(table + kOdstDataArrayNameOffset, "object", 7) == 0;
+        header.signature = *reinterpret_cast<const uint32_t*>(
+            table + kOdstDataArraySignatureOffset);
+        header.maximumCount = *reinterpret_cast<const uint32_t*>(
+            table + kOdstDataArrayMaxCountOffset);
+        header.elementSize = *reinterpret_cast<const uint32_t*>(
+            table + kOdstDataArrayElementSizeOffset);
+        header.firstUnallocated = *reinterpret_cast<const uint32_t*>(
+            table + kOdstDataArrayFirstUnallocatedOffset);
+        header.valid = *(table + kOdstDataArrayValidOffset);
+        const uint32_t index = static_cast<uint32_t>(objectHandle) & 0xFFFFu;
+        auto* entries = *reinterpret_cast<unsigned char**>(
+            table + kOdstDataArrayElementsOffset);
+        if (!OdstObjectTableIsWalkable(header) || !entries ||
+            index >= header.maximumCount)
+            return false;
+        auto* entry = entries +
+            static_cast<size_t>(index) * kHalo3ObjectEntryStride;
+        if (*reinterpret_cast<const uint16_t*>(entry) !=
+            static_cast<uint16_t>(
+                static_cast<uint32_t>(objectHandle) >> 16))
+            return false;
+        objectData = *reinterpret_cast<unsigned char**>(
+            entry + kHalo3ObjectEntryDataOffset);
+        return objectData != nullptr;
+    }
+
+    bool Halo3ContactMassForObjectData(
+        const unsigned char* objectData, void*& component,
+        int32_t& bodyIndex, float& massKilograms)
+    {
+        component = nullptr;
+        bodyIndex = -1;
+        massKilograms = 0.0f;
+        if (!objectData || !g_halo3HavokComponentData)
+            return false;
+        const int32_t componentHandle =
+            *reinterpret_cast<const int32_t*>(objectData + 0x9C);
+        auto* componentArray = static_cast<unsigned char*>(
+            *g_halo3HavokComponentData);
+        if (componentHandle == -1 || !componentArray)
+            return false;
+        auto* elements = *reinterpret_cast<unsigned char**>(
+            componentArray + 0x48);
+        if (!elements)
+            return false;
+        const uint32_t componentIndex =
+            static_cast<uint32_t>(componentHandle) & 0xFFFFu;
+        auto* resolved = elements +
+            static_cast<size_t>(componentIndex) * 0xC0;
+        const int32_t count = *reinterpret_cast<const int32_t*>(
+            resolved + 0x28);
+        const int32_t resolvedBodyIndex =
+            static_cast<int32_t>(*reinterpret_cast<const int8_t*>(
+                resolved + 0x0C));
+        auto* bodyRecords = *reinterpret_cast<unsigned char**>(
+            resolved + 0x20);
+        if (!bodyRecords || count <= 0 || count > 1024 ||
+            resolvedBodyIndex < 0 || resolvedBodyIndex >= count)
+            return false;
+        auto* bodyWrapper = *reinterpret_cast<unsigned char**>(
+            bodyRecords + static_cast<size_t>(resolvedBodyIndex) * 0x60 +
+            0x50);
+        if (!bodyWrapper)
+            return false;
+        const float mass = *reinterpret_cast<const float*>(
+            bodyWrapper + 0x1DC);
+        if (!std::isfinite(mass) || mass <= 0.001f || mass > 1000000.0f)
+            return false;
+        component = resolved;
+        bodyIndex = resolvedBodyIndex;
+        massKilograms = mass;
+        return true;
     }
 
     PhysicalContactTransform Halo3ContactObjectTransform(
@@ -9118,6 +9222,8 @@ namespace
         g_halo3ContactPreviousPoseMs = 0;
         g_halo3ContactWallOffset = {};
         g_halo3ContactWallUpdateMs = 0;
+        g_halo3ContactWeaponMass.store(0.0f, std::memory_order_relaxed);
+        g_halo3ContactTargetMass.store(0.0f, std::memory_order_relaxed);
         Halo3PublishWeaponWallOffset({}, 0);
         g_halo3ContactWallSetbackMeters.store(0.0f,
                                                std::memory_order_relaxed);
@@ -9167,12 +9273,16 @@ namespace
             }
             const bool wantsImpulse =
                 (commandFlags & kHalo3ContactCommandImpulse) != 0;
+            const bool wantsPointImpulse =
+                (commandFlags & kHalo3ContactCommandPointImpulse) != 0;
             const bool wantsMelee =
                 (commandFlags & kHalo3ContactCommandMelee) != 0;
             const bool commonValid = generation && generation ==
                     g_halo3RuntimeGeneration.load(std::memory_order_acquire) &&
                 sampleMs && nowMs >= sampleMs && nowMs - sampleMs <= 500 &&
-                handle != -1 && (wantsImpulse || wantsMelee) && serial ==
+                handle != -1 &&
+                (wantsImpulse || wantsPointImpulse || wantsMelee) &&
+                serial ==
                     g_halo3ContactCommandSerial.load(
                         std::memory_order_acquire);
             if (commonValid)
@@ -9184,27 +9294,57 @@ namespace
                         applied, serial, std::memory_order_acq_rel,
                         std::memory_order_relaxed))
                 {
-                    if (wantsImpulse)
+                    if (wantsImpulse || wantsPointImpulse)
                     {
                         const bool impulseValid =
                             std::isfinite(velocity[0]) &&
                             std::isfinite(velocity[1]) &&
                             std::isfinite(velocity[2]) &&
-                            g_halo3ObjectSetVelocities;
+                            ((!wantsPointImpulse &&
+                              g_halo3ObjectSetVelocities) ||
+                             (wantsPointImpulse &&
+                              std::isfinite(point[0]) &&
+                              std::isfinite(point[1]) &&
+                              std::isfinite(point[2]) &&
+                              g_halo3ComponentApplyPointImpulse));
                         bool impulseFaulted = false;
+                        bool impulseApplied = false;
                         if (impulseValid)
                         {
                             __try
                             {
-                                g_halo3ObjectSetVelocities(
-                                    handle, velocity, nullptr);
+                                if (wantsPointImpulse)
+                                {
+                                    unsigned char* targetData = nullptr;
+                                    void* component = nullptr;
+                                    int32_t bodyIndex = -1;
+                                    float targetMass = 0.0f;
+                                    if (Halo3ContactObjectDataForHandle(
+                                            handle, targetData) &&
+                                        Halo3ContactMassForObjectData(
+                                            targetData, component, bodyIndex,
+                                            targetMass))
+                                    {
+                                        g_halo3ComponentApplyPointImpulse(
+                                            component, bodyIndex, point,
+                                            velocity);
+                                        impulseApplied = true;
+                                    }
+                                }
+                                else
+                                {
+                                    g_halo3ObjectSetVelocities(
+                                        handle, velocity, nullptr);
+                                    impulseApplied = true;
+                                }
                             }
                             __except (EXCEPTION_EXECUTE_HANDLER)
                             {
                                 impulseFaulted = true;
                             }
                         }
-                        if (!impulseValid || impulseFaulted)
+                        if (!impulseValid || impulseFaulted ||
+                            !impulseApplied)
                         {
                             g_halo3ContactCommandStatus.store(
                                 impulseFaulted ? 3u : 4u,
@@ -9255,7 +9395,7 @@ namespace
                         {
                             g_halo3ContactMeleeStatus.store(
                                 4, std::memory_order_relaxed);
-                            if (!wantsImpulse)
+                            if (!wantsImpulse && !wantsPointImpulse)
                                 g_halo3ContactCommandStatus.store(
                                     4, std::memory_order_relaxed);
                         }
@@ -9431,7 +9571,7 @@ namespace
                                 g_halo3ContactMeleeStatus.store(
                                     meleeFaultStatus,
                                     std::memory_order_relaxed);
-                                if (!wantsImpulse)
+                                if (!wantsImpulse && !wantsPointImpulse)
                                     g_halo3ContactCommandStatus.store(
                                         3, std::memory_order_relaxed);
                                 g_halo3PhysicalMeleeBindings.store(
@@ -9445,7 +9585,7 @@ namespace
                             {
                                 g_halo3ContactMeleeStatus.store(
                                     4, std::memory_order_relaxed);
-                                if (!wantsImpulse)
+                                if (!wantsImpulse && !wantsPointImpulse)
                                     g_halo3ContactCommandStatus.store(
                                         4, std::memory_order_relaxed);
                             }
@@ -9453,7 +9593,7 @@ namespace
                             {
                                 g_halo3ContactMeleeStatus.store(
                                     5, std::memory_order_relaxed);
-                                if (!wantsImpulse)
+                                if (!wantsImpulse && !wantsPointImpulse)
                                     g_halo3ContactCommandStatus.store(
                                         4, std::memory_order_relaxed);
                             }
@@ -10385,13 +10525,34 @@ namespace
                     commandFlags |= kHalo3ContactCommandImpulse;
             }
 
-            const PhysicalContactPushResponse push = PhysicalContactStablePush(
-                {targetLinear[0], targetLinear[1], targetLinear[2]},
-                relativeVelocity, closest.normal, worldScale);
-            if (push.apply)
+            void* weaponComponent = nullptr;
+            void* targetComponent = nullptr;
+            int32_t weaponBodyIndex = -1;
+            int32_t targetBodyIndex = -1;
+            float weaponMass = 0.0f;
+            float targetMass = 0.0f;
+            const bool haveNativeMasses = Halo3ContactMassForObjectData(
+                    weaponData, weaponComponent, weaponBodyIndex,
+                    weaponMass) &&
+                Halo3ContactMassForObjectData(
+                    closestData, targetComponent, targetBodyIndex,
+                    targetMass);
+            const PhysicalContactMassImpulse massImpulse =
+                haveNativeMasses
+                ? PhysicalContactMassAwareImpulse(
+                      weaponMass, targetMass, relativeVelocity,
+                      closest.normal, worldScale)
+                : PhysicalContactMassImpulse{};
+            g_halo3ContactWeaponMass.store(
+                haveNativeMasses ? weaponMass : 0.0f,
+                std::memory_order_relaxed);
+            g_halo3ContactTargetMass.store(
+                haveNativeMasses ? targetMass : 0.0f,
+                std::memory_order_relaxed);
+            if (massImpulse.apply)
             {
-                worldVelocity = push.worldVelocity;
-                commandFlags |= kHalo3ContactCommandImpulse;
+                worldVelocity = massImpulse.worldImpulse;
+                commandFlags |= kHalo3ContactCommandPointImpulse;
             }
 
             if (requestMelee)
@@ -10484,6 +10645,7 @@ namespace
             "sweeps=%llu hits=%llu impulses=%llu melees=%llu "
             "command=%llu applied=%llu commandStatus=%u meleeStatus=%u "
             "damage=0x%08X response=0x%08X rawMaterial=%u material=%u "
+            "weaponMass=%.3f targetMass=%.3f "
             "authoredShapeHits=%llu unsupportedShapes=%llu "
             "wallBlocks=%llu wallSetback=%.3fm",
             stageName,
@@ -10511,6 +10673,8 @@ namespace
                 std::memory_order_relaxed)),
             static_cast<uint32_t>(g_halo3ContactMeleeMaterial.load(
                 std::memory_order_relaxed)),
+            g_halo3ContactWeaponMass.load(std::memory_order_relaxed),
+            g_halo3ContactTargetMass.load(std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactAuthoredShapeHits.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactUnsupportedShapes.load(
@@ -14797,6 +14961,14 @@ namespace
         "4A 8B 34 C0 E8 ?? ?? ?? ?? 0F B7 C0 "
         "48 8D 2C 40 4A 8B 04 36 48 8B 48 48 "
         "48 8B 7C E9 10 83 BF 9C 00 00 00 FF";
+    // havok_component_apply_point_impulse (+0x15FBC4). The official H3EK
+    // wrapper and retail homolog resolve one body record, divide by its native
+    // mass, and dispatch through the rigid body's point-impulse vtable slot.
+    const char* kHalo3ComponentApplyPointImpulseSig =
+        "48 83 EC 48 48 63 C2 4C 8D 14 40 48 8B 41 20 "
+        "49 C1 E2 05 41 F6 44 02 58 02 74 ?? "
+        "4D 8B C1 48 83 C4 48 E9 ?? ?? ?? ?? "
+        "49 8B 4C 02 50 0F 57 C9 F3 41 0F 10 40 08";
     // objects_update (+0x34067C), mapped from official H3EK +0xA52920 by its
     // object_update_absolute_index transaction and per-object update loop.
     const char* kHalo3ObjectsUpdateSig =
@@ -15563,6 +15735,8 @@ namespace
             g_halo3GameIsCooperative = nullptr;
             g_halo3ObjectGetVelocities = nullptr;
             g_halo3ObjectGetCenter = nullptr;
+            g_halo3ComponentApplyPointImpulse = nullptr;
+            g_halo3HavokComponentData = nullptr;
             g_halo3MaterialRemap = nullptr;
             g_halo3MaterialLookup = nullptr;
             g_halo3MaterialGlobals = nullptr;
@@ -15574,6 +15748,8 @@ namespace
                 sig::Find(base, size, kHalo3ObjectGetVelocitiesSig);
             const uintptr_t getCenterHit =
                 sig::Find(base, size, kHalo3ObjectGetCenterSig);
+            const uintptr_t pointImpulseHit = sig::Find(
+                base, size, kHalo3ComponentApplyPointImpulseSig);
             const uintptr_t collisionHit =
                 sig::Find(base, size, kHalo3CollisionTestVectorSig);
             const uintptr_t updateHit =
@@ -15608,6 +15784,10 @@ namespace
             const bool getCenterUnique = getCenterHit && !sig::Find(
                 getCenterHit + 1, base + size - getCenterHit - 1,
                 kHalo3ObjectGetCenterSig);
+            const bool pointImpulseUnique = pointImpulseHit && !sig::Find(
+                pointImpulseHit + 1,
+                base + size - pointImpulseHit - 1,
+                kHalo3ComponentApplyPointImpulseSig);
             const bool collisionUnique = collisionHit && !sig::Find(
                 collisionHit + 1, base + size - collisionHit - 1,
                 kHalo3CollisionTestVectorSig);
@@ -15653,8 +15833,29 @@ namespace
                     materialValidationSite + 26 + callDisp ==
                     materialLookupHit;
             }
+            bool componentDataConsistent = false;
+            void** componentDataSlot = nullptr;
+            if (getCenterUnique &&
+                *reinterpret_cast<const uint8_t*>(getCenterHit + 0x6C) ==
+                    0x48 &&
+                *reinterpret_cast<const uint8_t*>(getCenterHit + 0x6D) ==
+                    0x8B &&
+                *reinterpret_cast<const uint8_t*>(getCenterHit + 0x6E) ==
+                    0x05)
+            {
+                const int32_t componentDisp =
+                    *reinterpret_cast<const int32_t*>(getCenterHit + 0x6F);
+                const uintptr_t componentSlotAddress =
+                    getCenterHit + 0x73 + componentDisp;
+                componentDataConsistent = componentSlotAddress >= base &&
+                    componentSlotAddress + sizeof(void*) <= base + size;
+                if (componentDataConsistent)
+                    componentDataSlot = reinterpret_cast<void**>(
+                        componentSlotAddress);
+            }
             if (velocityUnique && velocitiesUnique && collisionUnique &&
                 getVelocitiesUnique && getCenterUnique &&
+                pointImpulseUnique && componentDataConsistent &&
                 cooperativeUnique && updateUnique)
             {
                 g_halo3ObjectSetVelocity =
@@ -15668,6 +15869,10 @@ namespace
                         getVelocitiesHit);
                 g_halo3ObjectGetCenter =
                     reinterpret_cast<Halo3ObjectGetCenterFn>(getCenterHit);
+                g_halo3ComponentApplyPointImpulse =
+                    reinterpret_cast<Halo3ComponentApplyPointImpulseFn>(
+                        pointImpulseHit);
+                g_halo3HavokComponentData = componentDataSlot;
                 g_halo3GameIsCooperative =
                     reinterpret_cast<Halo3GameIsCooperativeFn>(cooperativeHit);
                 if (kEnableHalo3PhysicalMeleeCandidate &&
@@ -15723,7 +15928,7 @@ namespace
                 }
                 LOG("H3 physical contact: optional native bindings %s "
                     "collision=+0x%llX velocity=+0x%llX world=+0x%llX "
-                    "update=+0x%llX solo=+0x%llX "
+                    "pointImpulse=+0x%llX update=+0x%llX solo=+0x%llX "
                     "[unique; hook=%d/%d]; authored melee=%s "
                     "selector=+0x%llX damage=+0x%llX owner=+0x%llX "
                     "effects=+0x%llX [unique=%d/%d/%d/%d; "
@@ -15733,6 +15938,7 @@ namespace
                     (unsigned long long)(collisionHit - base),
                     (unsigned long long)(velocityHit - base),
                     (unsigned long long)(velocitiesHit - base),
+                    (unsigned long long)(pointImpulseHit - base),
                     (unsigned long long)(updateHit - base),
                     (unsigned long long)(cooperativeHit - base),
                     static_cast<int>(updateCreate),
@@ -15758,11 +15964,15 @@ namespace
             {
                 LOG("H3 physical contact: disabled; signature evidence "
                     "missing/ambiguous (collision=%d/%d velocity=%d/%d "
-                    "world=%d/%d update=%d/%d "
+                    "world=%d/%d pointImpulse=%d/%d componentData=%d "
+                    "update=%d/%d "
                     "solo=%d/%d)",
                     collisionHit ? 1 : 0, collisionUnique ? 1 : 0,
                     velocityHit ? 1 : 0, velocityUnique ? 1 : 0,
                     velocitiesHit ? 1 : 0, velocitiesUnique ? 1 : 0,
+                    pointImpulseHit ? 1 : 0,
+                    pointImpulseUnique ? 1 : 0,
+                    componentDataConsistent ? 1 : 0,
                     updateHit ? 1 : 0, updateUnique ? 1 : 0,
                     cooperativeHit ? 1 : 0, cooperativeUnique ? 1 : 0);
             }
