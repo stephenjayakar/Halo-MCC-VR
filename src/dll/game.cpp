@@ -6354,6 +6354,9 @@ namespace
     std::atomic<float> g_halo3ContactDebugInitialPosition[3]{};
     std::atomic<float> g_halo3ContactDebugCurrentPosition[3]{};
     std::atomic<float> g_halo3ContactDebugVelocity[3]{};
+    std::atomic<float> g_halo3ContactDebugPeakLiftMeters{0.0f};
+    std::atomic<float> g_halo3ContactDebugPeakCarryMeters{0.0f};
+    std::atomic<float> g_halo3ContactDebugPeakReleaseSpeed{0.0f};
     // Camera-thread-only anchor for the automated contact rig. A slow test
     // must not chase a target after applying an impulse. Chasing changes the
     // weapon orientation and creates artificial high-speed tip motion.
@@ -10435,17 +10438,78 @@ namespace
                                     g_halo3ContactDebugCurrentPosition[axis]
                                         .store(debugPosition[axis],
                                                std::memory_order_relaxed);
-                            const auto* debugVelocity =
-                                reinterpret_cast<const float*>(
-                                    debugData + 0x74);
+                            float debugLinear[3]{};
+                            float debugAngular[3]{};
+                            if (g_halo3ObjectGetVelocities)
+                                g_halo3ObjectGetVelocities(
+                                    debugHandle, debugLinear, debugAngular);
                             const PhysicalContactVec3 velocity{
-                                debugVelocity[0], debugVelocity[1],
-                                debugVelocity[2]};
-                            if (PhysicalContactFinite(velocity))
+                                debugLinear[0], debugLinear[1],
+                                debugLinear[2]};
+                            if (g_halo3ObjectGetVelocities &&
+                                PhysicalContactFinite(velocity))
                                 for (int axis = 0; axis < 3; ++axis)
                                     g_halo3ContactDebugVelocity[axis].store(
-                                        debugVelocity[axis],
+                                        debugLinear[axis],
                                         std::memory_order_relaxed);
+                            const float debugWorldScale =
+                                g_worldScale.load(std::memory_order_relaxed);
+                            const uint64_t debugScoopStart =
+                                g_halo3ContactDebugScoopStartMs;
+                            if (debugScoop && debugScoopStart &&
+                                debugWorldScale >= 0.05f &&
+                                debugWorldScale <= 2.0f)
+                            {
+                                const PhysicalContactVec3 initial{
+                                    g_halo3ContactDebugInitialPosition[0].load(
+                                        std::memory_order_relaxed),
+                                    g_halo3ContactDebugInitialPosition[1].load(
+                                        std::memory_order_relaxed),
+                                    g_halo3ContactDebugInitialPosition[2].load(
+                                        std::memory_order_relaxed)};
+                                if (PhysicalContactFinite(initial))
+                                {
+                                    const float liftMeters = std::max(
+                                        0.0f,
+                                        (value.z - initial.z) /
+                                            debugWorldScale);
+                                    const float carryMeters =
+                                        std::sqrt(
+                                            (value.x - initial.x) *
+                                                (value.x - initial.x) +
+                                            (value.y - initial.y) *
+                                                (value.y - initial.y)) /
+                                        debugWorldScale;
+                                    g_halo3ContactDebugPeakLiftMeters.store(
+                                        std::max(
+                                            liftMeters,
+                                            g_halo3ContactDebugPeakLiftMeters
+                                                .load(std::memory_order_relaxed)),
+                                        std::memory_order_relaxed);
+                                    g_halo3ContactDebugPeakCarryMeters.store(
+                                        std::max(
+                                            carryMeters,
+                                            g_halo3ContactDebugPeakCarryMeters
+                                                .load(std::memory_order_relaxed)),
+                                        std::memory_order_relaxed);
+                                    const uint64_t elapsed = GetTickCount64() -
+                                        debugScoopStart;
+                                    if (elapsed >= 3750 && elapsed <= 5000 &&
+                                        PhysicalContactFinite(velocity))
+                                    {
+                                        const float lateralSpeed = std::sqrt(
+                                            velocity.x * velocity.x +
+                                            velocity.y * velocity.y) /
+                                            debugWorldScale;
+                                        g_halo3ContactDebugPeakReleaseSpeed.store(
+                                            std::max(
+                                                lateralSpeed,
+                                                g_halo3ContactDebugPeakReleaseSpeed
+                                                    .load(std::memory_order_relaxed)),
+                                            std::memory_order_relaxed);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -10670,7 +10734,14 @@ namespace
                         Halo3ContactObjectTransform(debugAimData);
                     if (PhysicalContactDebugTargetMovedEnough(
                             g_halo3ContactDebugAnchorTransform.position,
-                            currentTransform.position, worldScale))
+                            currentTransform.position, worldScale) &&
+                        PhysicalContactDebugScoopPassed(
+                            g_halo3ContactDebugPeakLiftMeters.load(
+                                std::memory_order_relaxed),
+                            g_halo3ContactDebugPeakCarryMeters.load(
+                                std::memory_order_relaxed),
+                            g_halo3ContactDebugPeakReleaseSpeed.load(
+                                std::memory_order_relaxed)))
                     {
                         g_halo3ContactDebugTargetValidated.store(
                             true, std::memory_order_relaxed);
@@ -10696,6 +10767,12 @@ namespace
                             false, std::memory_order_relaxed);
                         g_halo3ContactDebugTarget.store(
                             -1, std::memory_order_relaxed);
+                        g_halo3ContactDebugPeakLiftMeters.store(
+                            0.0f, std::memory_order_relaxed);
+                        g_halo3ContactDebugPeakCarryMeters.store(
+                            0.0f, std::memory_order_relaxed);
+                        g_halo3ContactDebugPeakReleaseSpeed.store(
+                            0.0f, std::memory_order_relaxed);
                         aimTarget = -1;
                         aimKind = 0xFF;
                         debugAimData = nullptr;
@@ -10719,6 +10796,12 @@ namespace
                         g_halo3ContactDebugScoopStartMs = nowMs;
                         g_halo3ContactDebugTargetValidated.store(
                             false, std::memory_order_relaxed);
+                        g_halo3ContactDebugPeakLiftMeters.store(
+                            0.0f, std::memory_order_relaxed);
+                        g_halo3ContactDebugPeakCarryMeters.store(
+                            0.0f, std::memory_order_relaxed);
+                        g_halo3ContactDebugPeakReleaseSpeed.store(
+                            0.0f, std::memory_order_relaxed);
                     }
                 }
                 g_halo3ContactDebugAimTarget.store(
@@ -11936,7 +12019,8 @@ namespace
                 "target=0x%08X "
                 "start=(%.3f %.3f %.3f) now=(%.3f %.3f %.3f) "
                 "moved=%.3f velocity=(%.3f %.3f %.3f) game=%u sim=%u "
-                "cooperative=%u options=%u rejected=%u validated=%u",
+                "cooperative=%u options=%u rejected=%u validated=%u "
+                "peakLift=%.3fm peakCarry=%.3fm releaseSpeed=%.3fm/s",
                 static_cast<uint32_t>(
                     g_halo3ContactDebugAimTarget.load(
                         std::memory_order_relaxed)),
@@ -11957,7 +12041,13 @@ namespace
                 g_halo3ContactDebugRejectedTargetCount.load(
                     std::memory_order_relaxed),
                 g_halo3ContactDebugTargetValidated.load(
-                    std::memory_order_relaxed) ? 1u : 0u);
+                    std::memory_order_relaxed) ? 1u : 0u,
+                g_halo3ContactDebugPeakLiftMeters.load(
+                    std::memory_order_relaxed),
+                g_halo3ContactDebugPeakCarryMeters.load(
+                    std::memory_order_relaxed),
+                g_halo3ContactDebugPeakReleaseSpeed.load(
+                    std::memory_order_relaxed));
             const uint64_t census =
                 g_halo3ContactDebugObjectCensus.load(
                     std::memory_order_relaxed);
@@ -16660,6 +16750,12 @@ namespace
             0, std::memory_order_release);
         g_halo3ContactDebugTargetValidated.store(
             false, std::memory_order_release);
+        g_halo3ContactDebugPeakLiftMeters.store(
+            0.0f, std::memory_order_release);
+        g_halo3ContactDebugPeakCarryMeters.store(
+            0.0f, std::memory_order_release);
+        g_halo3ContactDebugPeakReleaseSpeed.store(
+            0.0f, std::memory_order_release);
         g_halo3ContactDebugTarget.store(-1, std::memory_order_release);
         g_halo3ContactDebugAnchorValid = false;
         g_halo3ContactDebugAnchorGeneration = 0;

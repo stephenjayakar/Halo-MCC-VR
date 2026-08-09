@@ -574,6 +574,22 @@ the same authoritative `objects_update` call. It revalidates the salted handle,
 dynamic motion type, generation and finite velocity before the post-update
 write; failure still disables physical contact alone.
 
+Installed candidate `01143d8` proved that post-update placement fixes the
+overwritten response. The automated rig rejected the first anchored map weapon,
+selected a loose `2.008 kg` weapon, lifted it `0.094` world units, and carried
+it `0.098` world units sideways. The body returned to the floor after
+separation. The run applied 94 mass-correct responses with zero melee events
+and no crash. Its preserved log is
+`out/debug-openxr/01143d8-forge-post-update-lift-carry-success.log` (SHA-256
+`7E8D6A8C9348CBB92F501F564422B25068A6AC57C88473CA0E29B9D7563A3E52`).
+The original debug path stopped sideways before separation, so this run proves
+lift and carry but not retained toss velocity. The next debug-only trajectory
+separates downward while its lateral smoothstep is still moving. Native object
+velocity readback records peak lift, horizontal carry, and post-separation
+lateral speed. A target passes only at `0.02 m` lift, `0.05 m` carry, and
+`0.05 m/s` release speed; the whole path remains below the `1.50 m/s` melee
+threshold.
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure

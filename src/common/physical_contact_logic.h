@@ -1112,15 +1112,28 @@ inline PhysicalContactDebugScoopPose PhysicalContactDebugScoopTrajectory(
         return 6.0f * value * (1.0f - value) / durationSeconds;
     };
     const float liftPhase = (elapsedMilliseconds - 1000.0f) / 1500.0f;
-    const float carryPhase = (elapsedMilliseconds - 2500.0f) / 1500.0f;
-    const float releasePhase = (elapsedMilliseconds - 4000.0f) / 750.0f;
+    // Keep moving sideways while the weapon separates downward. This leaves
+    // the target with measurable lateral velocity instead of carrying it to
+    // rest before release.
+    const float carryPhase = (elapsedMilliseconds - 2500.0f) / 2500.0f;
+    const float releasePhase = (elapsedMilliseconds - 3500.0f) / 500.0f;
     return {
         0.35f * smoothStep(liftPhase),
         0.35f * smoothStep(carryPhase),
-        0.30f * smoothStep(releasePhase),
+        0.40f * smoothStep(releasePhase),
         0.35f * smoothStepVelocity(liftPhase, 1.5f),
-        0.35f * smoothStepVelocity(carryPhase, 1.5f),
-        0.30f * smoothStepVelocity(releasePhase, 0.75f)};
+        0.35f * smoothStepVelocity(carryPhase, 2.5f),
+        0.40f * smoothStepVelocity(releasePhase, 0.5f)};
+}
+
+inline bool PhysicalContactDebugScoopPassed(
+    float peakLiftMeters, float peakCarryMeters,
+    float peakReleaseSpeedMetersPerSecond)
+{
+    return std::isfinite(peakLiftMeters) && peakLiftMeters >= 0.02f &&
+        std::isfinite(peakCarryMeters) && peakCarryMeters >= 0.05f &&
+        std::isfinite(peakReleaseSpeedMetersPerSecond) &&
+        peakReleaseSpeedMetersPerSecond >= 0.05f;
 }
 
 inline bool PhysicalContactDebugTargetMovedEnough(

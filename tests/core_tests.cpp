@@ -9152,7 +9152,8 @@ int main()
                           lateralVelocity * lateralVelocity));
             if (milliseconds > 1 &&
                 milliseconds != 1000 && milliseconds != 2500 &&
-                milliseconds != 4000 && milliseconds != 4750)
+                milliseconds != 3500 && milliseconds != 4000 &&
+                milliseconds != 5000)
             {
                 const float reportedVertical =
                     scoop.liftMetersPerSecond -
@@ -9172,9 +9173,11 @@ int main()
         const PhysicalContactDebugScoopPose scoopLifted =
             PhysicalContactDebugScoopTrajectory(2500.0f);
         const PhysicalContactDebugScoopPose scoopCarried =
-            PhysicalContactDebugScoopTrajectory(4000.0f);
+            PhysicalContactDebugScoopTrajectory(5000.0f);
+        const PhysicalContactDebugScoopPose scoopSeparating =
+            PhysicalContactDebugScoopTrajectory(3750.0f);
         const PhysicalContactDebugScoopPose scoopReleased =
-            PhysicalContactDebugScoopTrajectory(4750.0f);
+            PhysicalContactDebugScoopTrajectory(4000.0f);
         const bool debugTargetMovedEnough =
             PhysicalContactDebugTargetMovedEnough(
                 {1.0f, 2.0f, 3.0f}, {1.02f, 2.0f, 3.0f}, 0.328f);
@@ -9184,21 +9187,27 @@ int main()
         Check(scoopReady.liftMeters == 0.0f &&
               scoopLifted.liftMeters == 0.35f &&
               scoopCarried.carryMeters == 0.35f &&
-              scoopReleased.releaseMeters == 0.30f &&
-              maximumScoopSpeed < 0.61f &&
-              maximumScoopDerivativeError < 0.002f &&
+              scoopReleased.releaseMeters == 0.40f &&
+              scoopSeparating.carryMetersPerSecond > 0.15f &&
+              maximumScoopSpeed < 1.30f &&
+              maximumScoopDerivativeError < 0.006f &&
               scoopReady.liftMetersPerSecond == 0.0f &&
               scoopLifted.liftMetersPerSecond == 0.0f &&
               scoopCarried.carryMetersPerSecond == 0.0f &&
               scoopReleased.releaseMetersPerSecond == 0.0f &&
+              PhysicalContactDebugScoopPassed(0.02f, 0.05f, 0.05f) &&
+              !PhysicalContactDebugScoopPassed(0.019f, 0.05f, 0.05f) &&
+              !PhysicalContactDebugScoopPassed(
+                  0.02f, 0.05f,
+                  std::numeric_limits<float>::quiet_NaN()) &&
               debugTargetMovedEnough && debugTargetStayedAnchored &&
               !PhysicalContactDebugTargetMovedEnough(
                   {}, {}, std::numeric_limits<float>::quiet_NaN()) &&
               PhysicalContactDebugScoopTrajectory(-1.0f).liftMeters == 0.0f,
             "The one-shot Forge scoop rig reports the exact lift, carry, and "
             "release velocity, stays below the 1.50 m/s melee threshold, and "
-            "ends every phase at rest while rejecting anchored targets by "
-            "measured displacement");
+            "releases during lateral motion, validates lift/carry/toss "
+            "metrics, and rejects anchored targets by measured displacement");
 
         const PhysicalContactPushResponse gentlePush =
             PhysicalContactStablePush(
