@@ -11556,28 +11556,20 @@ namespace
                 std::memory_order_relaxed);
             if (constraintImpulse.apply)
             {
-                if (debugScoop)
-                {
-                    // Diagnostic split: the same loose Forge weapon moved
-                    // sideways through the native point-impulse path but did
-                    // not lift from the floor. Drive only the environment-
-                    // gated scoop with Halo's proven absolute world-velocity
-                    // setter. If this lifts the body, the authored trajectory
-                    // and readback are sound and the remaining defect is
-                    // isolated to floor-loaded point impulses.
-                    worldVelocity = {
-                        targetLinear[0], targetLinear[1], targetLinear[2]};
-                    worldVelocity = worldVelocity +
-                        constraintImpulse.worldImpulse *
-                            (1.0f / targetMass);
-                    if (PhysicalContactFinite(worldVelocity))
-                        commandFlags |= kHalo3ContactCommandImpulse;
-                }
-                else
-                {
-                    worldVelocity = constraintImpulse.worldImpulse;
-                    commandFlags |= kHalo3ContactCommandPointImpulse;
-                }
+                // The controlled Forge split moved the exact same 2.019 kg
+                // loose weapon through object_set_velocities after the point-
+                // impulse path repeatedly failed under floor load. Publish an
+                // authored-mass velocity change for every sustained contact.
+                // Halo keeps the body's angular velocity because the native
+                // setter receives a null angular pointer. Native melee remains
+                // an independent command and is unchanged.
+                worldVelocity = {
+                    targetLinear[0], targetLinear[1], targetLinear[2]};
+                worldVelocity = worldVelocity +
+                    PhysicalContactTargetDeltaVelocity(
+                        constraintImpulse, targetMass);
+                if (PhysicalContactFinite(worldVelocity))
+                    commandFlags |= kHalo3ContactCommandImpulse;
             }
 
             if (requestMelee)

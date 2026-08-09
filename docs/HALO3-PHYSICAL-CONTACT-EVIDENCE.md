@@ -512,6 +512,39 @@ proven loose `2.019 kg` weapon before constrained lighter map weapons. This is
 limited to environment-gated target selection; product contact still follows
 native dynamic-body evidence for every contacted object.
 
+The next point-impulse run selected that exact previously movable `2.019 kg`
+weapon, aligned an exact vertical normal, and applied 99 upward point impulses.
+The body still moved `0.000` world units. Candidate `f830ce6` changed only the
+environment-gated scoop response to the already bound authoritative
+`object_set_velocities` path. In the same Construct setup it moved the same
+handle `0xE2740005` by `0.124` world units under a sub-melee trajectory, with
+111 applied responses and zero melee events. This isolates the failed floor
+response to the point-impulse path or its placement in the object-update
+transaction; target selection, native mass, readback, and the whole-object
+physics/network path are live. The preserved log is
+`out/debug-openxr/f830ce6-forge-scoop-world-velocity-moves.log` (SHA-256
+`AE2E369EA3BB7572534B87A395985556445AE3B096C729C03FBA6AF20C72603B`).
+
+The user's `f830ce6` Steam / SteamVR OpenXR / Quest headset session at 120 Hz
+independently confirmed native campaign melee, but reported that gentle nudging
+did not work and that contact with vehicles often destroyed things by accident.
+Its log recorded 971 exact shape hits, 536 accepted point responses, 27 native
+melee events, target masses from `1.246 kg` through `17045.13 kg`, and tracked
+weapon spikes up to `25.03 m/s`. The preserved log is
+`out/debug-openxr/f830ce6-headset-forge-120hz-user-session.log` (SHA-256
+`7A9AEF4F4B0FFCAB138BA912C11915B9CB386D5B187DBC35D186C40164269909`).
+
+The mass-correct replacement keeps the bounded impulse calculation for contact
+load and haptics, divides it by the target's authored mass to obtain only that
+body's velocity change, adds the result to Halo's native linear-velocity
+readback, and publishes the absolute value through `object_set_velocities`.
+The native call receives a null angular pointer, preserving the body's current
+angular velocity. A loose prop therefore follows contact while a 10,000 kg body
+gets a proportionally tiny change instead of the old mass-amplified point call.
+Native melee remains a separate command and is unchanged. This replacement is
+source- and pure-test-verified but awaits the controlled Forge matrix and
+headset acceptance.
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure

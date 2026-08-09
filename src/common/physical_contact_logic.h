@@ -1410,6 +1410,25 @@ inline PhysicalContactConstraintImpulse PhysicalContactSustainedImpulse(
     return result;
 }
 
+// Halo's object_set_velocities entry consumes an absolute world-space linear
+// velocity. Convert the bounded physical impulse into only the target's
+// velocity change before adding it to the native velocity readback. This keeps
+// authored mass in the response: a light prop follows the weapon, while a
+// vehicle or other very heavy body receives a proportionally tiny nudge.
+inline PhysicalContactVec3 PhysicalContactTargetDeltaVelocity(
+    const PhysicalContactConstraintImpulse& response,
+    float targetMassKilograms)
+{
+    if (!response.apply || !PhysicalContactFinite(response.worldImpulse) ||
+        !std::isfinite(targetMassKilograms) ||
+        targetMassKilograms <= 0.001f ||
+        targetMassKilograms > 1000000.0f)
+        return {};
+    const PhysicalContactVec3 delta =
+        response.worldImpulse * (1.0f / targetMassKilograms);
+    return PhysicalContactFinite(delta) ? delta : PhysicalContactVec3{};
+}
+
 // Convert the exact mass-aware point impulse into portable controller feedback.
 // The square-root response keeps a light prop readable without letting a heavy
 // vehicle saturate the controller. Native melee gets a clear minimum pulse.

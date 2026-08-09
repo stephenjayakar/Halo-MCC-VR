@@ -9377,6 +9377,12 @@ int main()
             PhysicalContactSustainedImpulse(
                 2.76f, 2.0f, {0, 0, -0.26f}, {0, 0, -1},
                 0.0f, 1.0f / 60.0f, 0.5f);
+        const PhysicalContactVec3 gentleTargetDelta =
+            PhysicalContactTargetDeltaVelocity(sustainedGentle, 0.382f);
+        const PhysicalContactVec3 mongooseTargetDelta =
+            PhysicalContactTargetDeltaVelocity(sustainedMongoose, 500.0f);
+        const PhysicalContactVec3 invalidTargetDelta =
+            PhysicalContactTargetDeltaVelocity(sustainedGentle, 0.0f);
         Check(sustainedGentle.apply &&
               sustainedGentle.approachMetersPerSecond > 0.199f &&
               sustainedGentle.worldImpulse.x > 0.0f &&
@@ -9400,6 +9406,9 @@ int main()
                       500.0f <
                   sustainedGentle.normalImpulseKilogramMetersPerSecond /
                       0.382f &&
+              gentleTargetDelta.x > mongooseTargetDelta.x * 10.0f &&
+              mongooseTargetDelta.x > 0.0f &&
+              PhysicalContactLengthSquared(invalidTargetDelta) == 0.0f &&
               sustainedLift.apply && sustainedLift.worldImpulse.z > 0.0f &&
               sustainedLift.normalImpulseKilogramMetersPerSecond >=
                   2.0f * 9.80f / 60.0f &&
@@ -9407,10 +9416,10 @@ int main()
               sustainedCarry.worldImpulse.z > 0.0f &&
               !sustainedLiftRelease.apply &&
               !sustainedInvalid.apply,
-            "Sustained native point contact adds bounded normal load and "
-            "Coulomb friction, supports an exact upward contact by native "
-            "target mass, resists heavy vehicles, and releases without a "
-            "separating kick");
+            "Sustained contact adds bounded normal load and Coulomb friction, "
+            "converts authored impulse to mass-correct native target velocity, "
+            "supports upward contact, resists heavy vehicles, and releases "
+            "without a separating kick");
 
         const PhysicalContactWallConstraint wallTip =
             PhysicalContactWallOffsetForRay(
