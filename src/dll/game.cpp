@@ -6976,6 +6976,28 @@ namespace
             PhysicalContactCompoundValid(output);
     }
 
+    PhysicalContactVec3 Halo3ContactCompoundSupport(
+        const PhysicalContactCompoundShape& shape,
+        const PhysicalContactTransform& transform,
+        PhysicalContactVec3 direction)
+    {
+        PhysicalContactVec3 result = transform.position;
+        float bestProjection = -FLT_MAX;
+        for (uint16_t child = 0; child < shape.childCount; ++child)
+        {
+            const PhysicalContactVec3 candidate =
+                PhysicalContactConvexSupport(
+                    shape.children[child], transform, direction);
+            const float projection = PhysicalContactDot(candidate, direction);
+            if (projection > bestProjection)
+            {
+                bestProjection = projection;
+                result = candidate;
+            }
+        }
+        return result;
+    }
+
     PhysicalContactTransform Halo3ContactTransformFromBone(
         const BoneMatrix& bone)
     {
@@ -10379,6 +10401,7 @@ namespace
                 position[0], position[1], position[2]};
             PhysicalContactVec3 forward = PhysicalContactNormalize({
                 basis[0], basis[1], basis[2]});
+            unsigned char* debugAimData = nullptr;
             if (debugRig)
             {
                 const PhysicalContactVec3 camera{
@@ -10386,7 +10409,6 @@ namespace
                     g_baseCamY.load(std::memory_order_relaxed),
                     g_baseCamZ.load(std::memory_order_relaxed)};
                 PhysicalContactVec3 target{};
-                float targetRadius = 0.25f;
                 float closestDistanceSquared = 1.0e30f;
                 int32_t aimTarget = -1;
                 uint8_t aimKind = 0xFF;
@@ -10435,12 +10457,9 @@ namespace
                     targetPriority = priority;
                     closestDistanceSquared = distanceSquared;
                     target = candidate;
-                    const float radius = *reinterpret_cast<const float*>(
-                        data + 0x28);
-                    targetRadius = std::isfinite(radius) && radius > 0.05f &&
-                        radius < 5.0f ? radius : 0.25f;
                     aimTarget = handle;
                     aimKind = kind;
+                    debugAimData = data;
                 }
                 g_halo3ContactDebugAimTarget.store(
                     aimTarget, std::memory_order_relaxed);
@@ -10450,18 +10469,12 @@ namespace
                 {
                     forward = PhysicalContactNormalize(target - camera,
                                                        forward);
-                    grip = target - forward * (targetRadius + 0.10f);
-                    // Keep the synthetic controller velocity and the visible
-                    // weapon pose describing the same motion. The older rig
-                    // pinned the grip to the target, so the contact-point
-                    // classifier correctly measured zero even though its
-                    // metadata claimed a fast controller. This one-second
-                    // sinusoid reaches debugMaxSpeed in metres per second and
-                    // naturally separates from the target once per cycle.
-                    const float amplitude =
-                        worldScale * debugMaxSpeed / kDebugAngularRate;
-                    grip = grip + forward *
-                        (amplitude * std::sin(debugPhase));
+                    // Temporary root position. Once the exact weapon and
+                    // target shapes are loaded below, align their opposing
+                    // support points. A bounding-radius guess cannot place a
+                    // detailed collision model reliably because its authored
+                    // origin is not the visible muzzle or center.
+                    grip = target;
                 }
             }
             PhysicalContactTransform weaponTransform{};
@@ -10522,6 +10535,35 @@ namespace
                     std::memory_order_relaxed);
                 Halo3ResetPhysicalContact();
                 return;
+            }
+            if (debugRig && debugAimData)
+            {
+                PhysicalContactCompoundShape debugTargetShape{};
+                const PhysicalContactTransform debugTargetTransform =
+                    Halo3ContactObjectTransform(debugAimData);
+                if (Halo3ContactShapeForObject(
+                        debugAimData, debugTargetShape) &&
+                    PhysicalContactTransformFinite(debugTargetTransform))
+                {
+                    const PhysicalContactVec3 weaponFront =
+                        Halo3ContactCompoundSupport(
+                            weaponShape, weaponTransform, forward);
+                    const PhysicalContactVec3 targetNear =
+                        Halo3ContactCompoundSupport(
+                            debugTargetShape, debugTargetTransform,
+                            forward * -1.0f);
+                    // The support points start 2 cm apart. The one-second
+                    // sinusoid then crosses the exact authored target surface,
+                    // reaches debugMaxSpeed, and separates once per cycle.
+                    const float amplitude =
+                        worldScale * debugMaxSpeed / kDebugAngularRate;
+                    const float displacement =
+                        amplitude * std::sin(debugPhase) -
+                        worldScale * 0.02f;
+                    weaponTransform.position = weaponTransform.position +
+                        (targetNear + forward * displacement - weaponFront);
+                    grip = weaponTransform.position;
+                }
             }
             const PhysicalContactVec3 tip = grip + forward * capsuleLength;
             // Constrain the final rendered weapon against native BSP/instance
