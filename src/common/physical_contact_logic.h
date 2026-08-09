@@ -1322,6 +1322,31 @@ inline PhysicalContactConstraintImpulse PhysicalContactSustainedImpulse(
     return result;
 }
 
+// Convert the exact mass-aware point impulse into portable controller feedback.
+// The square-root response keeps a light prop readable without letting a heavy
+// vehicle saturate the controller. Native melee gets a clear minimum pulse.
+inline float PhysicalContactHapticAmplitude(
+    float normalImpulseKilogramMetersPerSecond,
+    float tangentImpulseKilogramMetersPerSecond, bool melee)
+{
+    if (!std::isfinite(normalImpulseKilogramMetersPerSecond) ||
+        !std::isfinite(tangentImpulseKilogramMetersPerSecond) ||
+        normalImpulseKilogramMetersPerSecond < 0.0f ||
+        tangentImpulseKilogramMetersPerSecond < 0.0f)
+        return 0.0f;
+    const float magnitude = std::sqrt(
+        normalImpulseKilogramMetersPerSecond *
+            normalImpulseKilogramMetersPerSecond +
+        tangentImpulseKilogramMetersPerSecond *
+            tangentImpulseKilogramMetersPerSecond);
+    float amplitude = magnitude > 1.0e-6f
+        ? std::clamp(0.08f + 0.55f * std::sqrt(magnitude), 0.0f, 0.60f)
+        : 0.0f;
+    if (melee)
+        amplitude = std::max(amplitude, 0.75f);
+    return amplitude;
+}
+
 // Retail Halo 3 game-options enums: mode 1 campaign, mode 2 multiplayer.
 // Halo 3 MCC's solo Forge host reports simulation 5 (distributed server), not
 // simulation 1 (local). Admit the authoritative Forge host and reject every

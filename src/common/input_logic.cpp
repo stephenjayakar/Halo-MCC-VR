@@ -1,5 +1,6 @@
 #include "input_logic.h"
 
+#include <algorithm>
 #include <cmath>
 
 void MenuChordDetector::Reset()
@@ -86,6 +87,19 @@ HapticPeakSample SampleHapticPeak(float peak, float latest)
     sample.apply = p > l ? p : l;
     sample.carry = l;
     return sample;
+}
+
+HapticHandAmplitudes MixRightContactHaptics(
+    float gameAmplitude, float rightContactAmplitude, float intensity)
+{
+    const auto finiteClamp = [](float value) -> float
+    {
+        return std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.0f;
+    };
+    const float scale = finiteClamp(intensity);
+    const float game = finiteClamp(gameAmplitude) * scale;
+    const float contact = finiteClamp(rightContactAmplitude) * scale;
+    return {game, std::max(game, contact)};
 }
 
 uint32_t NormalizeVirtualXInputSetStateResult(

@@ -279,6 +279,10 @@ void VR_RequestScopeToggle();
 // Receives Halo's blended XInput rumble level (0..1). The render thread maps
 // it to portable OpenXR feedback on both hands and owns all stop conditions.
 void VR_SetGameHaptics(float amplitude);
+// Lock-free exact-contact peak. Halo's simulation hook publishes only after a
+// native point impulse or native melee event succeeds. The VR frame loop sends
+// it to the right controller without replacing stock two-hand game rumble.
+void VR_RequestRightContactHaptic(float amplitude);
 
 // Position and rotation of one eye relative to the midpoint of both OpenXR
 // views. Position is in meters and both outputs use OpenXR view-local axes

@@ -6333,6 +6333,7 @@ namespace
     std::atomic<float> g_halo3ContactCommandPoint[3]{};
     std::atomic<float> g_halo3ContactCommandNormal[3]{};
     std::atomic<uint16_t> g_halo3ContactCommandMaterial{0};
+    std::atomic<float> g_halo3ContactCommandHaptic{0.0f};
     std::atomic<uint32_t> g_halo3ContactMeleeStatus{0};
     std::atomic<int32_t> g_halo3ContactMeleeDamageTag{-1};
     std::atomic<int32_t> g_halo3ContactMeleeResponseTag{-1};
@@ -9677,6 +9678,8 @@ namespace
                 g_halo3ContactCommandFlags.load(std::memory_order_relaxed);
             const uint16_t rawMaterial =
                 g_halo3ContactCommandMaterial.load(std::memory_order_relaxed);
+            const float contactHaptic =
+                g_halo3ContactCommandHaptic.load(std::memory_order_relaxed);
             float velocity[3]{};
             float point[3]{};
             float normal[3]{};
@@ -9712,6 +9715,7 @@ namespace
                         applied, serial, std::memory_order_acq_rel,
                         std::memory_order_relaxed))
                 {
+                    bool contactHapticSent = false;
                     if (wantsImpulse || wantsPointImpulse)
                     {
                         const bool impulseValid =
@@ -9787,6 +9791,13 @@ namespace
                                 static_cast<uint32_t>(
                                     Halo3PhysicalContactStage::Impulse),
                                 std::memory_order_relaxed);
+                            if (wantsPointImpulse &&
+                                std::isfinite(contactHaptic) &&
+                                contactHaptic > 0.0f)
+                            {
+                                VR_RequestRightContactHaptic(contactHaptic);
+                                contactHapticSent = true;
+                            }
                         }
                     }
 
@@ -10027,6 +10038,11 @@ namespace
                                     static_cast<uint32_t>(
                                         Halo3PhysicalContactStage::Melee),
                                     std::memory_order_relaxed);
+                                if (!contactHapticSent &&
+                                    std::isfinite(contactHaptic) &&
+                                    contactHaptic > 0.0f)
+                                    VR_RequestRightContactHaptic(
+                                        contactHaptic);
                             }
                         }
                     }
@@ -11474,6 +11490,10 @@ namespace
 
             if (commandFlags)
             {
+                const float commandHaptic = PhysicalContactHapticAmplitude(
+                    constraintImpulse.normalImpulseKilogramMetersPerSecond,
+                    constraintImpulse.tangentImpulseKilogramMetersPerSecond,
+                    requestMelee);
                 g_halo3ContactCommandHandle.store(
                     closestHandle, std::memory_order_relaxed);
                 g_halo3ContactCommandUnitHandle.store(
@@ -11482,6 +11502,8 @@ namespace
                     weaponHandle, std::memory_order_relaxed);
                 g_halo3ContactCommandMaterial.store(
                     closestMaterial, std::memory_order_relaxed);
+                g_halo3ContactCommandHaptic.store(
+                    commandHaptic, std::memory_order_relaxed);
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     g_halo3ContactCommandVelocity[axis].store(

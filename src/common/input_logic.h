@@ -54,6 +54,17 @@ struct HapticPeakSample
 
 HapticPeakSample SampleHapticPeak(float peak, float latest);
 
+struct HapticHandAmplitudes
+{
+    float left = 0.0f;
+    float right = 0.0f;
+};
+
+// Stock game rumble stays symmetric. Exact physical weapon contact adds only
+// to the right hand and never weakens a stronger stock pulse.
+HapticHandAmplitudes MixRightContactHaptics(
+    float gameAmplitude, float rightContactAmplitude, float intensity);
+
 // The mod owns virtual slot 0 when no physical pad is present. A valid
 // XInputSetState request must therefore observe a connected controller even
 // when title capability policy suppresses the actual haptic effect.

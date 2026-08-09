@@ -6670,6 +6670,19 @@ int main()
     const HapticPeakSample clamped = SampleHapticPeak(1.5f, -0.5f);
     Check(clamped.apply == 1.0f && clamped.carry == 0.0f,
         "Peak-hold haptic samples clamp to the [0,1] amplitude range");
+    const HapticHandAmplitudes contactOnly =
+        MixRightContactHaptics(0.0f, 0.6f, 0.5f);
+    const HapticHandAmplitudes stockDominates =
+        MixRightContactHaptics(0.8f, 0.3f, 1.0f);
+    const HapticHandAmplitudes invalidHaptics =
+        MixRightContactHaptics(
+            std::numeric_limits<float>::quiet_NaN(), 0.5f,
+            std::numeric_limits<float>::infinity());
+    Check(contactOnly.left == 0.0f && contactOnly.right == 0.3f &&
+          stockDominates.left == 0.8f && stockDominates.right == 0.8f &&
+          invalidHaptics.left == 0.0f && invalidHaptics.right == 0.0f,
+        "Exact contact adds only right-hand feedback, preserves stronger stock "
+        "rumble on both hands, obeys intensity, and rejects invalid values");
     Check(NormalizeVirtualXInputSetStateResult(
               ERROR_DEVICE_NOT_CONNECTED, 0, false) ==
               ERROR_DEVICE_NOT_CONNECTED,
@@ -9230,6 +9243,22 @@ int main()
             "Every validated root dynamic Havok body receives contact impulses "
             "without an object-kind allowlist; fixed, unresolved, attached, "
             "and excluded objects do not");
+
+        const float lightContactHaptic =
+            PhysicalContactHapticAmplitude(0.08f, 0.04f, false);
+        const float heavyContactHaptic =
+            PhysicalContactHapticAmplitude(0.60f, 0.48f, false);
+        Check(lightContactHaptic > 0.20f && lightContactHaptic < 0.30f &&
+              heavyContactHaptic > lightContactHaptic &&
+              heavyContactHaptic <= 0.60f &&
+              PhysicalContactHapticAmplitude(0.0f, 0.0f, true) == 0.75f &&
+              PhysicalContactHapticAmplitude(0.0f, 0.0f, false) == 0.0f &&
+              PhysicalContactHapticAmplitude(
+                  std::numeric_limits<float>::quiet_NaN(), 0.0f,
+                  true) == 0.0f,
+            "Exact contact haptics scale with the mass-aware point impulse, "
+            "cap heavy impacts, give native melee a clear minimum, and reject "
+            "invalid or empty contact");
 
         const PhysicalContactConstraintImpulse sustainedGentle =
             PhysicalContactSustainedImpulse(

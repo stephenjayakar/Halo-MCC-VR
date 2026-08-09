@@ -518,6 +518,23 @@ for props. The earliest body hit supplies the exact weapon child, target child,
 surface point, normal, and temporal fraction. A provider fault rejects only
 that contact sample. It does not change VR ownership or the node binding.
 
+## Exact-contact haptics
+
+Physical contact previously published no haptic event. The only feedback came
+from Halo's ordinary XInput rumble, including native melee effects, so it could
+not identify the exact authored contact point or the successful point-impulse
+transaction. The exact-contact candidate carries one bounded amplitude in the
+existing atomic simulation command. The authoritative `objects_update` hook
+raises a lock-free right-hand peak only after the native point impulse or native
+melee event succeeds. It performs no OpenXR call, allocation, lock, logging, or
+file access. The normal VR frame loop consumes the peak and mixes it with stock
+rumble: game feedback remains on both hands, contact adds only to the right, and
+the stronger value wins. Slow feedback follows the square root of the exact
+mass-aware normal/tangent impulse, capped at `0.60`; native melee has a `0.75`
+minimum. The universal `haptic_intensity` still scales both sources. Tracking,
+focus, menu, pause, and title-capability gates drop pending contact feedback.
+Headset amplitude acceptance remains pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
