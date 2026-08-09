@@ -6290,7 +6290,8 @@ namespace
     std::atomic<uint64_t> g_halo3ContactHits{0};
     std::atomic<uint64_t> g_halo3ContactImpulses{0};
     std::atomic<uint64_t> g_halo3ContactMelees{0};
-    std::atomic<float> g_halo3ContactSpeed{0.0f};
+    std::atomic<float> g_halo3ContactWeaponSpeed{0.0f};
+    std::atomic<float> g_halo3ContactRelativeSpeed{0.0f};
     std::atomic<uint64_t> g_halo3ContactWallBlocks{0};
     std::atomic<float> g_halo3ContactWallSetbackMeters{0.0f};
     std::atomic<uint64_t> g_halo3ContactWallRays{0};
@@ -11171,12 +11172,18 @@ namespace
             const PhysicalContactVec3 relativeVelocity =
                 pointVelocity.relativeMetersPerSecond;
             const float relativeSpeed = PhysicalContactLength(relativeVelocity);
+            const float weaponSpeed = PhysicalContactLength(
+                pointVelocity.weaponMetersPerSecond);
             const PhysicalContactVec3 contactDirection =
                 PhysicalContactNormalize(relativeVelocity, movementDirection);
             const PhysicalContactAction action = PhysicalContactClassify(
-                relativeSpeed, g_config.physical_weapon_melee_speed);
-            g_halo3ContactSpeed.store(relativeSpeed, std::memory_order_relaxed);
-            if (relativeSpeed < g_config.physical_weapon_melee_speed * 0.5f)
+                relativeSpeed, weaponSpeed,
+                g_config.physical_weapon_melee_speed);
+            g_halo3ContactWeaponSpeed.store(
+                weaponSpeed, std::memory_order_relaxed);
+            g_halo3ContactRelativeSpeed.store(
+                relativeSpeed, std::memory_order_relaxed);
+            if (weaponSpeed < g_config.physical_weapon_melee_speed * 0.5f)
             {
                 if (!contact->belowHalfSinceMs)
                     contact->belowHalfSinceMs = nowMs;
@@ -11370,7 +11377,8 @@ namespace
             g_halo3ContactStage.load(std::memory_order_relaxed);
         const char* stageName = stage < std::size(kStageNames)
             ? kStageNames[stage] : "invalid";
-        LOG("H3 physical contact status: stage=%s eligible=%u speed=%.2fm/s "
+        LOG("H3 physical contact status: stage=%s eligible=%u "
+            "weaponSpeed=%.2fm/s relativeSpeed=%.2fm/s "
             "sweeps=%llu hits=%llu impulses=%llu melees=%llu "
             "command=%llu applied=%llu commandStatus=%u meleeStatus=%u "
             "damage=0x%08X response=0x%08X rawMaterial=%u material=%u "
@@ -11384,7 +11392,8 @@ namespace
             "wallVertices=%u wallPlanes=%u",
             stageName,
             g_halo3ContactEligibleObjects.load(std::memory_order_relaxed),
-            g_halo3ContactSpeed.load(std::memory_order_relaxed),
+            g_halo3ContactWeaponSpeed.load(std::memory_order_relaxed),
+            g_halo3ContactRelativeSpeed.load(std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactSweeps.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactHits.load(

@@ -8927,19 +8927,25 @@ int main()
             "rotational tip speed, subtracts target angular velocity at the "
             "hit, converts world scale, and rejects invalid timing/data");
 
-        Check(PhysicalContactClassify(0.049f, 1.50f) ==
+        Check(PhysicalContactClassify(0.049f, 2.00f, 1.50f) ==
                   PhysicalContactAction::None &&
-              PhysicalContactClassify(0.05f, 1.50f) ==
+              PhysicalContactClassify(0.05f, 0.00f, 1.50f) ==
                   PhysicalContactAction::ImpulseOnly &&
-              PhysicalContactClassify(1.49f, 1.50f) ==
+              PhysicalContactClassify(3.00f, 0.90f, 1.50f) ==
                   PhysicalContactAction::ImpulseOnly &&
-              PhysicalContactClassify(1.50f, 1.50f) ==
+              PhysicalContactClassify(0.50f, 1.49f, 1.50f) ==
+                  PhysicalContactAction::ImpulseOnly &&
+              PhysicalContactClassify(0.50f, 1.50f, 1.50f) ==
                   PhysicalContactAction::ImpulseAndMelee &&
               PhysicalContactClassify(
-                  std::numeric_limits<float>::quiet_NaN(), 1.50f) ==
+                  std::numeric_limits<float>::quiet_NaN(), 2.00f, 1.50f) ==
+                  PhysicalContactAction::None &&
+              PhysicalContactClassify(
+                  2.00f, std::numeric_limits<float>::quiet_NaN(), 1.50f) ==
                   PhysicalContactAction::None,
-            "Tracking noise and non-finite velocity do nothing, slow motion "
-            "pushes only, and melee begins exactly at the configured threshold");
+            "Relative tracking noise and non-finite velocity do nothing, "
+            "target motion can push but cannot cause melee, and melee begins "
+            "exactly when the weapon reaches the configured threshold");
 
         PhysicalContactDebounce debounce;
         bool first = false;

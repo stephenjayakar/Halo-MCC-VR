@@ -925,13 +925,15 @@ enum class PhysicalContactAction : uint8_t
 };
 
 inline PhysicalContactAction PhysicalContactClassify(
-    float speedMetersPerSecond, float meleeThresholdMetersPerSecond)
+    float relativeSpeedMetersPerSecond, float weaponSpeedMetersPerSecond,
+    float meleeThresholdMetersPerSecond)
 {
-    if (!std::isfinite(speedMetersPerSecond) ||
+    if (!std::isfinite(relativeSpeedMetersPerSecond) ||
+        !std::isfinite(weaponSpeedMetersPerSecond) ||
         !std::isfinite(meleeThresholdMetersPerSecond) ||
-        speedMetersPerSecond < 0.05f)
+        relativeSpeedMetersPerSecond < 0.05f)
         return PhysicalContactAction::None;
-    return speedMetersPerSecond >= meleeThresholdMetersPerSecond
+    return weaponSpeedMetersPerSecond >= meleeThresholdMetersPerSecond
         ? PhysicalContactAction::ImpulseAndMelee
         : PhysicalContactAction::ImpulseOnly;
 }
