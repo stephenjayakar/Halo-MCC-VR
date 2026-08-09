@@ -387,15 +387,32 @@ its exact authored rounded radius plus `5 mm` visual clearance. Release remains
 bounded at `1.5 m/s`. The 44-tag census proves every held weapon uses at most
 20 vertices. Runtime storage allows 64 vertices without allocation.
 
-Animated bipeds do not expose one root convex. They continue through Halo 3's
-native object-aware collision query. The earlier branch traced three
-bounds-derived motion points and two non-temporal spine lines. Fractions from
-those different lines were not comparable. The authored-sample candidate now
-traces every exact weapon vertex plus one centre per disjoint child from its
-previous visible transform to its current transform. Every hit fraction is one
-motion-time fraction. The exact current material point feeds rigid point-speed
-measurement. Native target geometry still supplies the enemy datum, surface
-point, normal, and material for authored melee damage.
+Animated bipeds do not expose one root convex. The earlier branch traced three
+bounds-derived motion points and two non-temporal spine lines through Halo 3's
+native object query. Fractions from those different lines were not comparable.
+The authored-sample candidate replaced them with every exact weapon vertex and
+one centre per disjoint child. All fractions then represented motion time.
+
+An offline comparison against exact convex sweep proved that vertex and centre
+samples still missed broadside contact. Against the official assault-rifle
+shape, 52,580 random motions produced an exact hit. Vertex and centre lines
+missed 3,970 of them and reported 289 false hits. Adding all vertex-pair
+midpoints still missed 2,965 and reported 342 false hits. Point sampling is
+therefore retained only as native material evidence. It cannot create or
+override object contact. Unsupported target shapes remain inert. It is not the
+final biped contact decision.
+
+The official H3EK `physics_model` tags for Master Chief, male and female
+marines, brutes, and elites each contain ten node-bound rigid bodies. The five
+tags use authored pills and polyhedra for the head, torso, pelvis, arms, and
+legs. Pill endpoints and polyhedron vertices are local to each named render
+node. The already proven `g_halo3InterpolatedNodes` provider returns the exact
+world-space animated node matrix used by the visible model. The exact biped
+candidate reads that fixed body block, resolves each Havok child, transforms it
+through its animated node, and runs the same continuous compound GJK sweep used
+for props. The earliest body hit supplies the exact weapon child, target child,
+surface point, normal, and temporal fraction. A provider fault rejects only
+that contact sample. It does not change VR ownership or the node binding.
 
 ## Verification boundary
 

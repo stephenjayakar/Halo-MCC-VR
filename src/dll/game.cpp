@@ -6263,6 +6263,7 @@ namespace
     std::atomic<uint32_t> g_halo3ContactWallVertices{0};
     std::atomic<uint32_t> g_halo3ContactWallPlanes{0};
     std::atomic<uint64_t> g_halo3ContactAuthoredShapeHits{0};
+    std::atomic<uint64_t> g_halo3ContactAnimatedBodyHits{0};
     std::atomic<uint64_t> g_halo3ContactUnsupportedShapes{0};
     std::atomic<uint32_t> g_halo3ContactNativeSamples{0};
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
@@ -6869,10 +6870,16 @@ namespace
         return PhysicalContactCompoundValid(output);
     }
 
-    bool Halo3ContactShapeForObject(
-        const unsigned char* objectData,
-        PhysicalContactCompoundShape& output)
+    struct Halo3ContactPhysicsView
     {
+        const unsigned char* rigidBodies = nullptr;
+        int32_t rigidBodyCount = 0;
+    };
+
+    bool Halo3ContactPhysicsForObject(
+        const unsigned char* objectData, Halo3ContactPhysicsView& output)
+    {
+        output = {};
         if (!objectData)
             return false;
         const uint32_t objectDatum =
@@ -6898,10 +6905,24 @@ namespace
             *reinterpret_cast<const int32_t*>(physicsDef + 0x58);
         const uint32_t rigidBodyAddress =
             *reinterpret_cast<const uint32_t*>(physicsDef + 0x5C);
-        if (rigidBodyCount != 1 || !rigidBodyAddress)
+        if (rigidBodyCount <= 0 || rigidBodyCount > 32 ||
+            !rigidBodyAddress)
             return false;
-        const auto* rigidBody = tagBase +
+        output.rigidBodies = tagBase +
             static_cast<size_t>(rigidBodyAddress) * 4;
+        output.rigidBodyCount = rigidBodyCount;
+        return true;
+    }
+
+    bool Halo3ContactShapeForObject(
+        const unsigned char* objectData,
+        PhysicalContactCompoundShape& output)
+    {
+        Halo3ContactPhysicsView physics{};
+        if (!Halo3ContactPhysicsForObject(objectData, physics) ||
+            physics.rigidBodyCount != 1)
+            return false;
+        const auto* rigidBody = physics.rigidBodies;
         const int16_t nodeIndex =
             *reinterpret_cast<const int16_t*>(rigidBody);
         const auto* shape =
@@ -7036,6 +7057,113 @@ namespace
                 scale < 100.0f
             ? scale : 1.0f;
         return transform;
+    }
+
+    struct Halo3ContactAnimatedBodyHit
+    {
+        PhysicalContactCompoundHit hit{};
+        PhysicalContactConvexShape weaponShape{};
+        PhysicalContactConvexShape targetShape{};
+        PhysicalContactTransform targetTransform{};
+        int32_t rigidBodyIndex = -1;
+    };
+
+    bool Halo3ContactReadInterpolatedNodes(
+        int32_t objectHandle, Halo3Matrix4x3** matrices, int* count)
+    {
+        if (!matrices || !count || !g_halo3InterpolatedNodes)
+            return false;
+        *matrices = nullptr;
+        *count = 0;
+        bool returned = false;
+        __try
+        {
+            returned = g_halo3InterpolatedNodes(
+                objectHandle, matrices, count) != 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            returned = false;
+        }
+        return returned;
+    }
+
+    // Official H3EK player bipeds use ten node-bound rigid bodies. Their pill
+    // and polyhedron coordinates are local to the named render node. Halo's
+    // proven interpolated-node provider returns that node in world space.
+    bool Halo3ContactSweepAnimatedBodies(
+        int32_t objectHandle, const unsigned char* objectData,
+        const PhysicalContactCompoundShape& weaponShape,
+        const PhysicalContactTransform& previousWeaponTransform,
+        const PhysicalContactTransform& currentWeaponTransform,
+        Halo3ContactAnimatedBodyHit& output)
+    {
+        output = {};
+        output.rigidBodyIndex = -1;
+        Halo3ContactPhysicsView physics{};
+        if (!Halo3ContactPhysicsForObject(objectData, physics) ||
+            physics.rigidBodyCount <= 1 ||
+            g_halo3NodeBinding.load(std::memory_order_acquire) !=
+                static_cast<uint8_t>(Halo3NodeBindingState::Installed) ||
+            !g_halo3InterpolatedNodes)
+            return false;
+
+        Halo3Matrix4x3* matrices = nullptr;
+        int matrixCount = 0;
+        if (!Halo3ContactReadInterpolatedNodes(
+                objectHandle, &matrices, &matrixCount) || !matrices ||
+            matrixCount <= 0 || matrixCount > kHalo3MaximumRenderNodes)
+            return false;
+
+        bool resolvedAny = false;
+        for (int32_t bodyIndex = 0;
+             bodyIndex < physics.rigidBodyCount; ++bodyIndex)
+        {
+            const auto* rigidBody = physics.rigidBodies +
+                static_cast<size_t>(bodyIndex) * 0xC0;
+            const int16_t nodeIndex =
+                *reinterpret_cast<const int16_t*>(rigidBody);
+            const auto* shape =
+                *reinterpret_cast<const unsigned char* const*>(
+                    rigidBody + 0x58);
+            if (nodeIndex < 0 || nodeIndex >= matrixCount || !shape ||
+                !Halo3MatrixValid(matrices[nodeIndex]))
+                continue;
+            PhysicalContactCompoundShape targetShape{};
+            if (!Halo3ContactCompoundFromHavokShape(shape, targetShape) ||
+                !PhysicalContactCompoundValid(targetShape))
+                continue;
+            const Halo3Matrix4x3& matrix = matrices[nodeIndex];
+            PhysicalContactTransform targetTransform{};
+            targetTransform.position = {
+                matrix.position[0], matrix.position[1], matrix.position[2]};
+            targetTransform.forward = {
+                matrix.forward[0], matrix.forward[1], matrix.forward[2]};
+            targetTransform.left = {
+                matrix.left[0], matrix.left[1], matrix.left[2]};
+            targetTransform.up = {
+                matrix.up[0], matrix.up[1], matrix.up[2]};
+            targetTransform.scale = matrix.scale;
+            if (!PhysicalContactTransformFinite(targetTransform))
+                continue;
+            resolvedAny = true;
+            const PhysicalContactCompoundHit candidate =
+                PhysicalContactSweepCompound(
+                    weaponShape, previousWeaponTransform,
+                    currentWeaponTransform, targetShape, targetTransform);
+            if (!candidate.hit ||
+                (output.hit.hit &&
+                 candidate.fraction >= output.hit.fraction - 1.0e-6f))
+                continue;
+            output.hit = candidate;
+            output.weaponShape =
+                weaponShape.children[candidate.weaponChild];
+            output.targetShape =
+                targetShape.children[candidate.targetChild];
+            output.targetTransform = targetTransform;
+            output.rigidBodyIndex = bodyIndex;
+        }
+        return resolvedAny;
     }
 
     // Cache the selected node's default inverse once per concrete vehicle/seat,
@@ -10317,6 +10445,9 @@ namespace
             int32_t closestType = -1;
             int32_t closestHandle = -1;
             uint16_t closestMaterial = 0;
+            int32_t nativeMaterialHandle = -1;
+            uint16_t nativeMaterial = 0;
+            float nativeMaterialFraction = 1.0f;
             PhysicalContactVec3 closestWeaponPoint{};
             bool closestUsesAuthoredShape = false;
             bool closestUsesRigidWeaponPoint = false;
@@ -10376,6 +10507,20 @@ namespace
                 if (!PhysicalContactFinite(hitPoint) ||
                     !PhysicalContactFinite(hitNormal))
                     continue;
+                if (native.type == 4)
+                {
+                    // Object-aware point samples are not a final collision
+                    // shape. They can miss a broadside hit or report a broad
+                    // native proxy before the exact body. Keep only material
+                    // evidence. Exact authored convexes decide object contact.
+                    if (native.fraction < nativeMaterialFraction)
+                    {
+                        nativeMaterialFraction = native.fraction;
+                        nativeMaterialHandle = native.objectHandle;
+                        nativeMaterial = native.materialIndex;
+                    }
+                    continue;
+                }
                 if (!closest.hit || native.fraction < closest.fraction)
                 {
                     closest.hit = true;
@@ -10384,8 +10529,7 @@ namespace
                     closest.normal = PhysicalContactNormalize(
                         hitNormal, movementDirection * -1.0f);
                     closestType = native.type;
-                    closestHandle = native.type == 4
-                        ? native.objectHandle : -1;
+                    closestHandle = -1;
                     closestMaterial = native.materialIndex;
                     closestWeaponPoint = currentPoint;
                     closestUsesAuthoredShape = false;
@@ -10442,22 +10586,51 @@ namespace
                     weaponBroadRadius + radius);
                 if (!proxy.hit)
                     continue;
+                PhysicalContactCompoundHit authored{};
+                PhysicalContactConvexShape authoredWeaponShape{};
+                PhysicalContactConvexShape authoredTargetShape{};
+                PhysicalContactTransform authoredTargetTransform{};
+                bool usesAnimatedBody = false;
                 PhysicalContactCompoundShape targetShape{};
-                if (!Halo3ContactShapeForObject(data, targetShape))
-                    continue;
-                const PhysicalContactTransform targetTransform =
-                    Halo3ContactObjectTransform(data);
-                if (!PhysicalContactTransformFinite(targetTransform))
-                    continue;
-                ++eligibleObjects;
-                const PhysicalContactCompoundHit authored =
-                    PhysicalContactSweepCompound(
+                if (Halo3ContactShapeForObject(data, targetShape))
+                {
+                    authoredTargetTransform =
+                        Halo3ContactObjectTransform(data);
+                    if (!PhysicalContactTransformFinite(
+                            authoredTargetTransform))
+                        continue;
+                    authored = PhysicalContactSweepCompound(
                         weaponShape, previousWeaponTransform, weaponTransform,
-                        targetShape, targetTransform);
+                        targetShape, authoredTargetTransform);
+                    if (authored.hit)
+                    {
+                        authoredWeaponShape =
+                            weaponShape.children[authored.weaponChild];
+                        authoredTargetShape =
+                            targetShape.children[authored.targetChild];
+                    }
+                }
+                else
+                {
+                    Halo3ContactAnimatedBodyHit animated{};
+                    if (!Halo3ContactSweepAnimatedBodies(
+                            handle, data, weaponShape,
+                            previousWeaponTransform, weaponTransform,
+                            animated))
+                        continue;
+                    authored = animated.hit;
+                    authoredWeaponShape = animated.weaponShape;
+                    authoredTargetShape = animated.targetShape;
+                    authoredTargetTransform = animated.targetTransform;
+                    usesAnimatedBody = authored.hit;
+                }
+                ++eligibleObjects;
                 if (!authored.hit ||
                     (closest.hit &&
                      authored.fraction > closest.fraction + 0.001f))
                     continue;
+                const uint16_t authoredMaterial =
+                    nativeMaterialHandle == handle ? nativeMaterial : 0;
                 closest.hit = true;
                 closest.fraction = authored.fraction;
                 closest.point = authored.point;
@@ -10467,14 +10640,15 @@ namespace
                 closestWeaponPoint = authored.weaponPoint;
                 closestUsesAuthoredShape = true;
                 closestNormalReliable = authored.normalReliable;
-                closestWeaponShape =
-                    weaponShape.children[authored.weaponChild];
-                closestTargetShape =
-                    targetShape.children[authored.targetChild];
-                closestTargetTransform = targetTransform;
+                closestWeaponShape = authoredWeaponShape;
+                closestTargetShape = authoredTargetShape;
+                closestTargetTransform = authoredTargetTransform;
+                if (usesAnimatedBody)
+                    g_halo3ContactAnimatedBodyHits.fetch_add(
+                        1, std::memory_order_relaxed);
                 // Convex Havok shapes carry the material on their primitive,
                 // not per face. Zero selects the authored default material.
-                closestMaterial = 0;
+                closestMaterial = authoredMaterial;
             }
             g_halo3ContactPreviousGrip = grip;
             g_halo3ContactPreviousTip = tip;
@@ -10792,7 +10966,8 @@ namespace
             "command=%llu applied=%llu commandStatus=%u meleeStatus=%u "
             "damage=0x%08X response=0x%08X rawMaterial=%u material=%u "
             "weaponMass=%.3f targetMass=%.3f "
-            "authoredShapeHits=%llu unsupportedShapes=%llu "
+            "authoredShapeHits=%llu animatedBodyHits=%llu "
+            "unsupportedShapes=%llu "
             "nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm wallRays=%llu "
             "wallVertices=%u wallPlanes=%u",
@@ -10824,6 +10999,8 @@ namespace
             g_halo3ContactWeaponMass.load(std::memory_order_relaxed),
             g_halo3ContactTargetMass.load(std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactAuthoredShapeHits.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactAnimatedBodyHits.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactUnsupportedShapes.load(
                 std::memory_order_relaxed),
