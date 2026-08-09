@@ -6234,6 +6234,9 @@ namespace
     bool g_halo3ContactPreviousPoseValid = false;
     PhysicalContactVec3 g_halo3ContactWallOffset{};
     uint64_t g_halo3ContactWallUpdateMs = 0;
+    PhysicalContactTransform g_halo3ContactPreviousWallTransform{};
+    int32_t g_halo3ContactWallWeaponHandle = -1;
+    bool g_halo3ContactPreviousWallPoseValid = false;
     enum class Halo3PhysicalContactStage : uint32_t
     {
         Disabled = 0,
@@ -6260,6 +6263,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactWallBlocks{0};
     std::atomic<float> g_halo3ContactWallSetbackMeters{0.0f};
     std::atomic<uint64_t> g_halo3ContactWallRays{0};
+    std::atomic<uint64_t> g_halo3ContactWallMotionRays{0};
     std::atomic<uint32_t> g_halo3ContactWallVertices{0};
     std::atomic<uint32_t> g_halo3ContactWallPlanes{0};
     std::atomic<uint64_t> g_halo3ContactAuthoredShapeHits{0};
@@ -9404,6 +9408,9 @@ namespace
         g_halo3ContactPreviousPoseMs = 0;
         g_halo3ContactWallOffset = {};
         g_halo3ContactWallUpdateMs = 0;
+        g_halo3ContactPreviousWallTransform = {};
+        g_halo3ContactWallWeaponHandle = -1;
+        g_halo3ContactPreviousWallPoseValid = false;
         g_halo3ContactWeaponMass.store(0.0f, std::memory_order_relaxed);
         g_halo3ContactTargetMass.store(0.0f, std::memory_order_relaxed);
         g_halo3ContactNativeSamples.store(0, std::memory_order_relaxed);
@@ -10304,6 +10311,11 @@ namespace
                     weaponTransform;
                 unconstrainedWeaponTransform.position =
                     weaponTransform.position - g_halo3ContactWallOffset;
+                const bool previousWallPoseValid =
+                    g_halo3ContactPreviousWallPoseValid &&
+                    g_halo3ContactWallWeaponHandle == weaponHandle &&
+                    PhysicalContactTransformFinite(
+                        g_halo3ContactPreviousWallTransform);
                 std::array<PhysicalContactWallPlane, 64> wallPlanes{};
                 size_t wallPlaneCount = 0;
                 size_t wallVertexCount = 0;
@@ -10343,16 +10355,74 @@ namespace
                             native.fraction = 1.0f;
                             g_halo3ContactWallRays.fetch_add(
                                 1, std::memory_order_relaxed);
-                            if (!g_halo3CollisionTestVector(
+                            const bool cameraBlocked =
+                                g_halo3CollisionTestVector(
                                     1ull, false, point, delta, unitHandle,
-                                    weaponHandle, -1, &native) ||
+                                    weaponHandle, -1, &native) &&
+                                native.type >= 0 && native.type < 4 &&
+                                std::isfinite(native.fraction) &&
+                                native.fraction >= 0.0f &&
+                                native.fraction <= 1.0f;
+                            if (cameraBlocked)
+                            {
+                                const PhysicalContactVec3 surfacePoint =
+                                    camera + ray * native.fraction;
+                                PhysicalContactVec3 normal =
+                                    PhysicalContactNormalize(
+                                        {native.normal[0], native.normal[1],
+                                         native.normal[2]},
+                                        camera - surfacePoint);
+                                if (!PhysicalContactFinite(surfacePoint) ||
+                                    !PhysicalContactFinite(normal))
+                                    continue;
+                                if (PhysicalContactDot(
+                                        camera - surfacePoint, normal) < 0.0f)
+                                    normal = normal * -1.0f;
+                                wallPlanes[wallPlaneCount++] = {
+                                    wallPoint, surfacePoint, normal,
+                                    clearance};
+                                continue;
+                            }
+
+                            // A current camera ray cannot detect a thin wall
+                            // crossed sideways when the final point is visible
+                            // again. Sweep this exact authored vertex from its
+                            // prior unconstrained pose to close that tunnel.
+                            if (!previousWallPoseValid)
+                                continue;
+                            const PhysicalContactVec3 previousWallPoint =
+                                PhysicalContactTransformPoint(
+                                    g_halo3ContactPreviousWallTransform,
+                                    child.vertices[vertexIndex]);
+                            const PhysicalContactVec3 motionDelta =
+                                wallPoint - previousWallPoint;
+                            const float minimumMotion = 0.005f * worldScale;
+                            if (!PhysicalContactFinite(previousWallPoint) ||
+                                !PhysicalContactFinite(motionDelta) ||
+                                PhysicalContactLengthSquared(motionDelta) <=
+                                    minimumMotion * minimumMotion)
+                                continue;
+                            const float motionPoint[3] = {
+                                previousWallPoint.x, previousWallPoint.y,
+                                previousWallPoint.z};
+                            const float motionVector[3] = {
+                                motionDelta.x, motionDelta.y, motionDelta.z};
+                            native = {};
+                            native.type = -1;
+                            native.fraction = 1.0f;
+                            g_halo3ContactWallMotionRays.fetch_add(
+                                1, std::memory_order_relaxed);
+                            if (!g_halo3CollisionTestVector(
+                                    1ull, false, motionPoint, motionVector,
+                                    unitHandle, weaponHandle, -1, &native) ||
                                 native.type < 0 || native.type >= 4 ||
                                 !std::isfinite(native.fraction) ||
                                 native.fraction < 0.0f ||
                                 native.fraction > 1.0f)
                                 continue;
                             const PhysicalContactVec3 surfacePoint =
-                                camera + ray * native.fraction;
+                                previousWallPoint +
+                                motionDelta * native.fraction;
                             PhysicalContactVec3 normal =
                                 PhysicalContactNormalize(
                                     {native.normal[0], native.normal[1],
@@ -10388,6 +10458,10 @@ namespace
                 g_halo3ContactWallUpdateMs = nowMs;
                 Halo3PublishWeaponWallOffset(
                     g_halo3ContactWallOffset, nowMs);
+                g_halo3ContactPreviousWallTransform =
+                    unconstrainedWeaponTransform;
+                g_halo3ContactWallWeaponHandle = weaponHandle;
+                g_halo3ContactPreviousWallPoseValid = true;
                 const float setbackMeters = PhysicalContactLength(
                     g_halo3ContactWallOffset) / worldScale;
                 g_halo3ContactWallSetbackMeters.store(
@@ -10401,6 +10475,8 @@ namespace
             {
                 g_halo3ContactWallOffset = {};
                 g_halo3ContactWallUpdateMs = 0;
+                g_halo3ContactPreviousWallPoseValid = false;
+                g_halo3ContactWallWeaponHandle = -1;
                 g_halo3ContactWallVertices.store(
                     0, std::memory_order_relaxed);
                 g_halo3ContactWallPlanes.store(
@@ -10970,6 +11046,7 @@ namespace
             "unsupportedShapes=%llu "
             "nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm wallRays=%llu "
+            "wallMotionRays=%llu "
             "wallVertices=%u wallPlanes=%u",
             stageName,
             g_halo3ContactEligibleObjects.load(std::memory_order_relaxed),
@@ -11010,6 +11087,8 @@ namespace
             g_halo3ContactWallSetbackMeters.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactWallRays.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactWallMotionRays.load(
                 std::memory_order_relaxed),
             g_halo3ContactWallVertices.load(std::memory_order_relaxed),
             g_halo3ContactWallPlanes.load(std::memory_order_relaxed));

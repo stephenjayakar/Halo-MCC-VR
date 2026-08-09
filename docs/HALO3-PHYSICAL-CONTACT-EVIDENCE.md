@@ -387,6 +387,18 @@ its exact authored rounded radius plus `5 mm` visual clearance. Release remains
 bounded at `1.5 m/s`. The 44-tag census proves every held weapon uses at most
 20 vertices. Runtime storage allows 64 vertices without allocation.
 
+A camera-to-current-vertex ray alone does not prove continuous wall contact. A
+fast sideways motion can cross thin structure and end with the vertex visible
+again. The continuous-wall candidate retains the previous unconstrained weapon
+transform. When a current camera ray is clear, it sweeps that same authored
+vertex from its previous position to its current position through the native
+structure query. A motion hit contributes the same camera-facing surface plane
+to the rigid solver. Motion below `5 mm` per sample skips the extra query; it
+cannot tunnel a thicker surface during that sample, and current occlusion still
+handles penetration. One vertex contributes at most one plane, so fixed storage
+remains bounded at 64 planes. The log separates `wallRays` and
+`wallMotionRays` for headset performance verification.
+
 Animated bipeds do not expose one root convex. The earlier branch traced three
 bounds-derived motion points and two non-temporal spine lines through Halo 3's
 native object query. Fractions from those different lines were not comparable.

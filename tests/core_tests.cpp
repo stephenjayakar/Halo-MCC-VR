@@ -9099,6 +9099,13 @@ int main()
         const PhysicalContactWallConstraint wallCornerClamped =
             PhysicalContactSolveWallPlanes(
                 cornerPlanes.data(), cornerPlanes.size(), 1.0f);
+        // A current camera ray can see the final point after a fast sideways
+        // pass through a thin wall. The motion sweep supplies this plane. The
+        // same rigid solver must return the point to the camera-side half-space.
+        const PhysicalContactWallPlane sideTunnelPlane{
+            {0.5f, 1.0f, 0}, {0.5f, 0, 0}, {0, -1.0f, 0}, 0.10f};
+        const PhysicalContactWallConstraint sideTunnelResult =
+            PhysicalContactSolveWallPlanes(&sideTunnelPlane, 1, 3.0f);
         const PhysicalContactWallPlane invalidPlane{
             {2.0f, 0, 0}, {1.0f, 0, 0}, {}, 0.10f};
         const PhysicalContactWallConstraint invalidPlaneResult =
@@ -9129,14 +9136,16 @@ int main()
               wallCornerClamped.constrained &&
               std::fabs(wallCornerClamped.setbackWorldUnits - 1.0f) <
                   1.0e-6f &&
+              sideTunnelResult.constrained &&
+              std::fabs(sideTunnelResult.offset.y + 1.10f) < 1.0e-6f &&
               !invalidPlaneResult.constrained &&
               std::fabs(wallEngage.x + 0.60f) < 1.0e-6f &&
               std::fabs(wallRelease.x + 0.325f) < 1.0e-6f &&
               PhysicalContactLengthSquared(wallReleased) < 1.0e-10f &&
               PhysicalContactLengthSquared(wallBadTiming) < 1.0e-10f,
-            "Wall contact solves exact rigid surface planes and corners, "
-            "includes clearance, engages immediately, releases smoothly, "
-            "clamps travel, and rejects invalid data");
+            "Wall contact solves exact rigid surface planes, sideways "
+            "tunnelling, and corners, includes clearance, engages immediately, "
+            "releases smoothly, clamps travel, and rejects invalid data");
 
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&
