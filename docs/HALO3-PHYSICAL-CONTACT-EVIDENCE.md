@@ -186,6 +186,18 @@ proved that the call supplied empty string ID 0 rather than ordinary `melee`
 string ID `0x0A`; the corrected candidate changes only that selector argument
 and re-enables the independently isolated authored-melee transaction.
 
+Candidate `d1f91429b2d0382c075b446cba7dbdcc1dda50e6` proved the corrected
+selector argument in the same authoritative Construct Forge rig. It returned
+real authored AR datums (`damage=0xEBF10A7B`, `response=0xEAEA0974`) instead of
+the previous invalid sentinels. A later call inside the contained native
+damage/effects transaction raised a structured exception, reported
+`meleeStatus=3`, and disabled melee alone; MCC remained responsive and the
+slow-contact impulse path remained active. The preserved log is
+`out/debug-openxr/d1f9142-forge-authored-tags-contained-fault.log`. This is a
+failed behavioral candidate and is disabled again before downstream-call
+isolation. The selector value is now proven; the remaining fault is after tag
+selection.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

@@ -6076,7 +6076,7 @@ namespace
     // 0x0A as `melee`; the official and retail selectors both route that exact
     // value to the authored first-hit damage/response pair without a lunge.
     constexpr int32_t kHalo3OrdinaryMeleeStringId = 0x0A;
-    constexpr bool kEnableHalo3PhysicalMeleeCandidate = true;
+    constexpr bool kEnableHalo3PhysicalMeleeCandidate = false;
     PhysicalContactDebounce g_halo3ContactDebounce;
     uint64_t g_halo3ContactLastMotionSerial = 0;
     uint64_t g_halo3ContactLastMeleeMs = 0;
