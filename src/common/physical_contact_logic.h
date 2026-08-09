@@ -67,6 +67,71 @@ inline PhysicalContactVec3 PhysicalContactCross(
         a.x * b.y - a.y * b.x};
 }
 
+struct PhysicalContactWallConstraint
+{
+    bool constrained = false;
+    float setbackWorldUnits = 0.0f;
+    PhysicalContactVec3 offset{};
+};
+
+// Convert a native camera-to-weapon structure hit into one rigid translation
+// for the whole visible weapon. The clearance is measured back from the hit
+// along the same camera ray, so a blocked tip is pulled toward the player's
+// view instead of clipped or shortened independently from the grip.
+inline PhysicalContactWallConstraint PhysicalContactWallOffsetForRay(
+    PhysicalContactVec3 camera, PhysicalContactVec3 weaponPoint,
+    float hitFraction, float clearanceWorldUnits)
+{
+    PhysicalContactWallConstraint result{};
+    if (!PhysicalContactFinite(camera) ||
+        !PhysicalContactFinite(weaponPoint) ||
+        !std::isfinite(hitFraction) || hitFraction < 0.0f ||
+        hitFraction > 1.0f || !std::isfinite(clearanceWorldUnits) ||
+        clearanceWorldUnits < 0.0f)
+        return result;
+
+    const PhysicalContactVec3 ray = weaponPoint - camera;
+    const float length = PhysicalContactLength(ray);
+    if (!std::isfinite(length) || length <= 1.0e-5f)
+        return result;
+    const float allowedDistance = std::clamp(
+        length * hitFraction - clearanceWorldUnits, 0.0f, length);
+    const float setback = length - allowedDistance;
+    if (!std::isfinite(setback) || setback <= 1.0e-5f)
+        return result;
+
+    result.offset = ray * (-setback / length);
+    result.setbackWorldUnits = setback;
+    result.constrained = PhysicalContactFinite(result.offset);
+    return result;
+}
+
+// Blocking engages in one update so the weapon cannot visibly tunnel. Release
+// moves toward the unconstrained controller pose at a bounded physical speed,
+// avoiding a one-frame pop once the muzzle clears an edge.
+inline PhysicalContactVec3 PhysicalContactUpdateWallOffset(
+    PhysicalContactVec3 currentOffset, PhysicalContactVec3 requestedOffset,
+    bool structureBlocked, float elapsedSeconds, float worldUnitsPerMeter)
+{
+    if (!PhysicalContactFinite(currentOffset) ||
+        !PhysicalContactFinite(requestedOffset) ||
+        !std::isfinite(elapsedSeconds) || elapsedSeconds < 0.0f ||
+        elapsedSeconds > 0.1f || !std::isfinite(worldUnitsPerMeter) ||
+        worldUnitsPerMeter <= 0.0f)
+        return {};
+    if (structureBlocked)
+        return requestedOffset;
+
+    const float currentLength = PhysicalContactLength(currentOffset);
+    if (!std::isfinite(currentLength) || currentLength <= 1.0e-5f)
+        return {};
+    constexpr float kReleaseMetersPerSecond = 1.50f;
+    const float release = std::min(
+        currentLength,
+        kReleaseMetersPerSecond * worldUnitsPerMeter * elapsedSeconds);
+    return currentOffset * ((currentLength - release) / currentLength);
+}
+
 struct PhysicalContactPointVelocity
 {
     bool valid = false;

@@ -8885,6 +8885,46 @@ int main()
             "correction, preserves tangential motion, does not accumulate "
             "once the target follows, and corrects reversed normals");
 
+        const PhysicalContactWallConstraint wallTip =
+            PhysicalContactWallOffsetForRay(
+                {}, {2.0f, 0, 0}, 0.75f, 0.10f);
+        const PhysicalContactWallConstraint wallDiagonal =
+            PhysicalContactWallOffsetForRay(
+                {}, {0, 3.0f, 4.0f}, 0.50f, 0.25f);
+        const PhysicalContactWallConstraint wallClear =
+            PhysicalContactWallOffsetForRay(
+                {}, {2.0f, 0, 0}, 1.0f, 0.0f);
+        const PhysicalContactWallConstraint wallInvalid =
+            PhysicalContactWallOffsetForRay(
+                {}, {2.0f, 0, 0},
+                std::numeric_limits<float>::quiet_NaN(), 0.10f);
+        const PhysicalContactVec3 wallEngage =
+            PhysicalContactUpdateWallOffset(
+                {-0.10f, 0, 0}, wallTip.offset, true, 0.01f, 0.5f);
+        const PhysicalContactVec3 wallRelease =
+            PhysicalContactUpdateWallOffset(
+                {-0.40f, 0, 0}, {}, false, 0.10f, 0.5f);
+        const PhysicalContactVec3 wallReleased =
+            PhysicalContactUpdateWallOffset(
+                {-0.02f, 0, 0}, {}, false, 0.10f, 0.5f);
+        const PhysicalContactVec3 wallBadTiming =
+            PhysicalContactUpdateWallOffset(
+                {-0.40f, 0, 0}, {}, false, 0.20f, 0.5f);
+        Check(wallTip.constrained &&
+              std::fabs(wallTip.setbackWorldUnits - 0.60f) < 1.0e-6f &&
+              std::fabs(wallTip.offset.x + 0.60f) < 1.0e-6f &&
+              wallDiagonal.constrained &&
+              std::fabs(wallDiagonal.setbackWorldUnits - 2.75f) < 1.0e-6f &&
+              std::fabs(wallDiagonal.offset.y + 1.65f) < 1.0e-6f &&
+              std::fabs(wallDiagonal.offset.z + 2.20f) < 1.0e-6f &&
+              !wallClear.constrained && !wallInvalid.constrained &&
+              std::fabs(wallEngage.x + 0.60f) < 1.0e-6f &&
+              std::fabs(wallRelease.x + 0.325f) < 1.0e-6f &&
+              PhysicalContactLengthSquared(wallReleased) < 1.0e-10f &&
+              PhysicalContactLengthSquared(wallBadTiming) < 1.0e-10f,
+            "Wall contact keeps grip and tip rigid, includes surface clearance, "
+            "engages immediately, releases smoothly, and rejects invalid data");
+
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&
               !PhysicalContactGameModeAllowed(2, 1, false) &&
