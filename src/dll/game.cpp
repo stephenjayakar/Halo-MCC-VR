@@ -6296,6 +6296,7 @@ namespace
     std::atomic<float> g_halo3ContactWallSetbackMeters{0.0f};
     std::atomic<uint64_t> g_halo3ContactWallRays{0};
     std::atomic<uint64_t> g_halo3ContactWallMotionRays{0};
+    std::atomic<uint64_t> g_halo3ContactWallObjectPlanes{0};
     std::atomic<uint32_t> g_halo3ContactWallVertices{0};
     std::atomic<uint32_t> g_halo3ContactWallPlanes{0};
     std::atomic<uint64_t> g_halo3ContactAuthoredShapeHits{0};
@@ -10645,8 +10646,70 @@ namespace
                 }
             }
             const PhysicalContactVec3 tip = grip + forward * capsuleLength;
-            // Constrain the final rendered weapon against native BSP/instance
-            // structure. The palette publication already includes the prior
+            // The collision query packs low collision flags and high object
+            // flags. H3EK's generated all-object initializer proves 0x7FFE;
+            // collision_test_vector_internal proves bit zero is the object
+            // query master enable. Ask for exact structure and every object.
+            constexpr uint64_t kContactObjectFlags =
+                uint64_t{0x7FFF} << 32;
+            constexpr uint64_t kWallCollisionFlags =
+                kContactObjectFlags | 1ull;
+            int32_t cachedWallObjectHandle = -1;
+            bool cachedWallObjectValid = false;
+            bool cachedWallObjectBlocks = false;
+            const auto nativeHitBlocksWall =
+                [&](const Halo3CollisionResult& native) -> bool
+            {
+                if (native.type >= 0 && native.type < 4)
+                    return true;
+                if (native.type != 4 || native.objectHandle == -1)
+                    return false;
+                if (cachedWallObjectValid &&
+                    cachedWallObjectHandle == native.objectHandle)
+                    return cachedWallObjectBlocks;
+
+                cachedWallObjectValid = true;
+                cachedWallObjectHandle = native.objectHandle;
+                cachedWallObjectBlocks = false;
+                const uint32_t objectIndex =
+                    static_cast<uint32_t>(native.objectHandle) & 0xFFFFu;
+                const uint32_t objectLimit = std::min(
+                    header.firstUnallocated, header.maximumCount);
+                if (objectIndex >= objectLimit)
+                    return false;
+                auto* objectEntry = entries +
+                    static_cast<size_t>(objectIndex) *
+                        kHalo3ObjectEntryStride;
+                const bool identifierMatches =
+                    *reinterpret_cast<const uint16_t*>(objectEntry) ==
+                    static_cast<uint16_t>(
+                        static_cast<uint32_t>(native.objectHandle) >> 16);
+                auto* objectData = identifierMatches
+                    ? *reinterpret_cast<unsigned char**>(
+                          objectEntry + kHalo3ObjectEntryDataOffset)
+                    : nullptr;
+                const bool validRoot = objectData &&
+                    *reinterpret_cast<const int32_t*>(
+                        objectData + kHalo3ObjectParentOffset) == -1;
+                const bool excluded = native.objectHandle == unitHandle ||
+                    native.objectHandle == weaponHandle;
+                void* component = nullptr;
+                int32_t bodyIndex = -1;
+                float massKilograms = 0.0f;
+                uint8_t motionType = 0;
+                const bool bodyResolved = validRoot &&
+                    Halo3ContactMassForObjectData(
+                        objectData, component, bodyIndex, massKilograms,
+                        &motionType);
+                cachedWallObjectBlocks =
+                    PhysicalContactObjectBlocksAsStatic(
+                        validRoot, excluded, bodyResolved, motionType);
+                return cachedWallObjectBlocks;
+            };
+
+            // Constrain the final rendered weapon against native BSP,
+            // instanced structure, and exact static object collision. The
+            // palette publication already includes the prior
             // frame's rigid wall translation, so remove that translation before
             // querying. This prevents the filter from alternately treating its
             // own correction as the unconstrained controller pose.
@@ -10707,9 +10770,10 @@ namespace
                                 1, std::memory_order_relaxed);
                             const bool cameraBlocked =
                                 g_halo3CollisionTestVector(
-                                    1ull, false, point, delta, unitHandle,
+                                    kWallCollisionFlags, false, point, delta,
+                                    unitHandle,
                                     weaponHandle, -1, &native) &&
-                                native.type >= 0 && native.type < 4 &&
+                                nativeHitBlocksWall(native) &&
                                 std::isfinite(native.fraction) &&
                                 native.fraction >= 0.0f &&
                                 native.fraction <= 1.0f;
@@ -10731,6 +10795,9 @@ namespace
                                 wallPlanes[wallPlaneCount++] = {
                                     wallPoint, surfacePoint, normal,
                                     clearance};
+                                if (native.type == 4)
+                                    g_halo3ContactWallObjectPlanes.fetch_add(
+                                        1, std::memory_order_relaxed);
                                 continue;
                             }
 
@@ -10763,9 +10830,10 @@ namespace
                             g_halo3ContactWallMotionRays.fetch_add(
                                 1, std::memory_order_relaxed);
                             if (!g_halo3CollisionTestVector(
-                                    1ull, false, motionPoint, motionVector,
-                                    unitHandle, weaponHandle, -1, &native) ||
-                                native.type < 0 || native.type >= 4 ||
+                                    kWallCollisionFlags, false, motionPoint,
+                                    motionVector, unitHandle, weaponHandle, -1,
+                                    &native) ||
+                                !nativeHitBlocksWall(native) ||
                                 !std::isfinite(native.fraction) ||
                                 native.fraction < 0.0f ||
                                 native.fraction > 1.0f)
@@ -10786,6 +10854,9 @@ namespace
                                 normal = normal * -1.0f;
                             wallPlanes[wallPlaneCount++] = {
                                 wallPoint, surfacePoint, normal, clearance};
+                            if (native.type == 4)
+                                g_halo3ContactWallObjectPlanes.fetch_add(
+                                    1, std::memory_order_relaxed);
                         }
                     }
                 }
@@ -10889,8 +10960,6 @@ namespace
             // collision_test_vector_internal proves _collision_test_objects_bit
             // belongs to object_flags. Therefore high bit zero must be ORed
             // with the type mask: 0x7FFF.
-            constexpr uint64_t kContactObjectFlags =
-                uint64_t{0x7FFF} << 32;
             // The validation target is normally resting on map structure. Its
             // opt-in headless probe isolates the object branch so a coplanar
             // floor cannot win the closest-hit race. Production retains the
@@ -11473,7 +11542,7 @@ namespace
             "rejectVelocity=%llu candidate=0x%08X candidateNormal=%u "
             "shapeSource=%u nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm wallRays=%llu "
-            "wallMotionRays=%llu "
+            "wallMotionRays=%llu wallObjectPlanes=%llu "
             "wallVertices=%u wallPlanes=%u",
             stageName,
             g_halo3ContactEligibleObjects.load(std::memory_order_relaxed),
@@ -11537,6 +11606,8 @@ namespace
             (unsigned long long)g_halo3ContactWallRays.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactWallMotionRays.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactWallObjectPlanes.load(
                 std::memory_order_relaxed),
             g_halo3ContactWallVertices.load(std::memory_order_relaxed),
             g_halo3ContactWallPlanes.load(std::memory_order_relaxed));

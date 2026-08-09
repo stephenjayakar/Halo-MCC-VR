@@ -1149,6 +1149,19 @@ inline bool PhysicalContactMotionTypeIsDynamic(uint8_t motionType)
     return (motionType >= 1 && motionType <= 5) || motionType == 8;
 }
 
+// Native object collision also reports scenery, machines, and fixed physics
+// objects. They are exact visual blockers, but a dynamic rigid body must stay
+// in the impulse path. If a valid root object has no resolvable movable body,
+// fail closed for wall rendering and leave it untouched by physics contact.
+inline bool PhysicalContactObjectBlocksAsStatic(
+    bool validRootObject, bool excludedObject, bool bodyResolved,
+    uint8_t motionType)
+{
+    if (!validRootObject || excludedObject)
+        return false;
+    return !bodyResolved || !PhysicalContactMotionTypeIsDynamic(motionType);
+}
+
 // A bounded inelastic collision response. Native Halo masses decide how much
 // momentum the held weapon transfers. The engine's point-impulse function then
 // uses the target's authored mass and inertia to produce linear and angular

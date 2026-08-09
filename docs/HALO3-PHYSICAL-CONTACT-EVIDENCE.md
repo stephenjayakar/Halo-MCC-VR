@@ -476,6 +476,17 @@ handles penetration. One vertex contributes at most one plane, so fixed storage
 remains bounded at 64 planes. The log separates `wallRays` and
 `wallMotionRays` for headset performance verification.
 
+The first exact-wall implementation passed only low structure bit `1`. That
+explains the headset split where map and instanced walls blocked correctly but
+Forge scenery walls did not: native type-4 object collision was never queried.
+The static-object candidate adds the already proven high `0x7FFF` all-object
+flags to the same camera and motion rays. A validated root object with a dynamic
+Havok motion type stays in the impulse path. A fixed, keyframed, or unresolved
+root object contributes Halo's returned surface point and normal to the rigid
+wall solver and receives no impulse or damage. Invalid, attached, player, and
+held-weapon handles do not constrain the weapon. `wallObjectPlanes` records
+accepted native type-4 planes. Headset acceptance remains pending.
+
 Animated bipeds do not expose one root convex. The earlier branch traced three
 bounds-derived motion points and two non-temporal spine lines through Halo 3's
 native object query. Fractions from those different lines were not comparable.

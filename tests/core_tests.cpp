@@ -9199,6 +9199,22 @@ int main()
             "Only official Havok dynamic motion types accept physical-contact "
             "impulses; invalid, keyframed, and fixed bodies do not");
 
+        Check(PhysicalContactObjectBlocksAsStatic(
+                  true, false, false, 0) &&
+              PhysicalContactObjectBlocksAsStatic(
+                  true, false, true, 6) &&
+              PhysicalContactObjectBlocksAsStatic(
+                  true, false, true, 7) &&
+              !PhysicalContactObjectBlocksAsStatic(
+                  true, false, true, 4) &&
+              !PhysicalContactObjectBlocksAsStatic(
+                  false, false, false, 0) &&
+              !PhysicalContactObjectBlocksAsStatic(
+                  true, true, false, 0),
+            "Exact native object collision blocks unresolved, keyframed, and "
+            "fixed root objects while dynamic, invalid, and excluded objects "
+            "remain outside the wall solver");
+
         const PhysicalContactConstraintImpulse sustainedGentle =
             PhysicalContactSustainedImpulse(
                 2.76f, 0.382f, {0.20f, 0, 0}, {-1, 0, 0},
