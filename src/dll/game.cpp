@@ -9206,6 +9206,11 @@ namespace
             g_halo3ContactDebugRig.load(std::memory_order_acquire);
         const bool debugMelee =
             g_halo3ContactDebugMelee.load(std::memory_order_acquire);
+        constexpr float kDebugCycleMs = 1000.0f;
+        constexpr float kDebugAngularRate = 6.28318530718f;
+        const float debugPhase = static_cast<float>(nowMs % 1000u) *
+            (kDebugAngularRate / kDebugCycleMs);
+        const float debugMaxSpeed = debugMelee ? 2.25f : 0.90f;
         bool paused = true;
         int32_t scene = -1, shot = -1;
         const bool gate = kEnableHalo3PhysicalContactCandidate &&
@@ -9232,10 +9237,8 @@ namespace
         bool haveMotion = false;
         if (debugRig && gate)
         {
-            const float phase = static_cast<float>(nowMs % 10472u) *
-                (6.28318530718f / 10472.0f);
-            const float speed = (debugMelee ? 2.25f : 0.90f) *
-                std::fabs(std::cos(phase));
+            const float speed = debugMaxSpeed *
+                std::fabs(std::cos(debugPhase));
             motion.poseValid = true;
             motion.linearVelocityValid = true;
             motion.angularVelocityValid = true;
@@ -9632,6 +9635,17 @@ namespace
                     forward = PhysicalContactNormalize(target - camera,
                                                        forward);
                     grip = target - forward * (targetRadius + 0.10f);
+                    // Keep the synthetic controller velocity and the visible
+                    // weapon pose describing the same motion. The older rig
+                    // pinned the grip to the target, so the contact-point
+                    // classifier correctly measured zero even though its
+                    // metadata claimed a fast controller. This one-second
+                    // sinusoid reaches debugMaxSpeed in metres per second and
+                    // naturally separates from the target once per cycle.
+                    const float amplitude =
+                        worldScale * debugMaxSpeed / kDebugAngularRate;
+                    grip = grip + forward *
+                        (amplitude * std::sin(debugPhase));
                 }
             }
             const PhysicalContactVec3 tip = grip + forward * capsuleLength;
