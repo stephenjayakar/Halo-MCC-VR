@@ -6155,6 +6155,10 @@ namespace
     // value to the authored first-hit damage/response pair without a lunge.
     constexpr int32_t kHalo3OrdinaryMeleeStringId = 0x0A;
     constexpr bool kEnableHalo3PhysicalMeleeCandidate = true;
+    // Headset result 2026-08-08: the one-shot velocity kick moved the correct
+    // rigid body but felt like a "spank" and sent props flying. Preserve the
+    // rejected path for evidence while the continuous response replaces it.
+    constexpr bool kEnableHalo3FirstContactVelocityKick = false;
     PhysicalContactDebounce g_halo3ContactDebounce;
     uint64_t g_halo3ContactLastMotionSerial = 0;
     uint64_t g_halo3ContactLastMeleeMs = 0;
@@ -9914,7 +9918,7 @@ namespace
                 contact->meleeArmed, nowMs, g_halo3ContactLastMeleeMs);
             uint32_t commandFlags = 0;
             PhysicalContactVec3 worldVelocity{};
-            if (firstContact)
+            if (firstContact && kEnableHalo3FirstContactVelocityKick)
             {
                 if (debugRig &&
                     g_halo3ContactDebugTarget.load(
