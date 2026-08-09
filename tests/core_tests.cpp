@@ -9085,6 +9085,66 @@ int main()
             "produce bounded inelastic momentum, reject invalid or tangential "
             "input, and correct reversed normals");
 
+        const PhysicalContactConstraintImpulse sustainedGentle =
+            PhysicalContactSustainedImpulse(
+                2.76f, 0.382f, {0.20f, 0, 0}, {-1, 0, 0},
+                0.0f, 1.0f / 120.0f, 0.5f);
+        const PhysicalContactConstraintImpulse sustainedFollowing =
+            PhysicalContactSustainedImpulse(
+                2.76f, 0.382f, {0, 0, 0}, {-1, 0, 0},
+                0.0f, 1.0f / 120.0f, 0.5f);
+        const PhysicalContactConstraintImpulse sustainedSeparating =
+            PhysicalContactSustainedImpulse(
+                2.76f, 0.382f, {-0.20f, 0, 0}, {-1, 0, 0},
+                0.0f, 1.0f / 120.0f, 0.5f);
+        const PhysicalContactConstraintImpulse sustainedFriction =
+            PhysicalContactSustainedImpulse(
+                2.76f, 0.382f, {0.10f, 0.50f, 0}, {-1, 0, 0},
+                0.003f, 1.0f / 120.0f, 0.5f);
+        const PhysicalContactConstraintImpulse sustainedUnloadedTangent =
+            PhysicalContactSustainedImpulse(
+                2.76f, 0.382f, {0, 0.50f, 0}, {-1, 0, 0},
+                0.0f, 1.0f / 120.0f, 0.5f);
+        const PhysicalContactConstraintImpulse sustainedPenetration =
+            PhysicalContactSustainedImpulse(
+                2.76f, 0.382f, {0, 0.50f, 0}, {-1, 0, 0},
+                0.005f, 1.0f / 120.0f, 0.5f);
+        const PhysicalContactConstraintImpulse sustainedMongoose =
+            PhysicalContactSustainedImpulse(
+                2.76f, 500.0f, {0.20f, 0, 0}, {-1, 0, 0},
+                0.0f, 1.0f / 120.0f, 0.5f);
+        const PhysicalContactConstraintImpulse sustainedInvalid =
+            PhysicalContactSustainedImpulse(
+                0.0f, 0.382f, {0.20f, 0, 0}, {-1, 0, 0},
+                0.0f, 1.0f / 120.0f, 0.5f);
+        Check(sustainedGentle.apply &&
+              sustainedGentle.approachMetersPerSecond > 0.199f &&
+              sustainedGentle.worldImpulse.x > 0.0f &&
+              sustainedGentle.normalImpulseKilogramMetersPerSecond <=
+                  0.382f * 0.08f + 1.0e-6f &&
+              !sustainedFollowing.apply && !sustainedSeparating.apply &&
+              sustainedFriction.apply &&
+              sustainedFriction.normalImpulseKilogramMetersPerSecond > 0.0f &&
+              sustainedFriction.tangentImpulseKilogramMetersPerSecond > 0.0f &&
+              sustainedFriction.tangentImpulseKilogramMetersPerSecond <=
+                  sustainedFriction.normalImpulseKilogramMetersPerSecond *
+                      0.80f + 1.0e-6f &&
+              !sustainedUnloadedTangent.apply &&
+              sustainedPenetration.apply &&
+              sustainedPenetration.worldImpulse.x > 0.0f &&
+              sustainedPenetration.worldImpulse.y > 0.0f &&
+              sustainedMongoose.apply &&
+              sustainedMongoose.normalImpulseKilogramMetersPerSecond >
+                  sustainedGentle.normalImpulseKilogramMetersPerSecond &&
+              sustainedMongoose.normalImpulseKilogramMetersPerSecond /
+                      500.0f <
+                  sustainedGentle.normalImpulseKilogramMetersPerSecond /
+                      0.382f &&
+              !sustainedInvalid.apply,
+            "Sustained native point contact adds bounded normal load and "
+            "Coulomb friction, follows light bodies, resists heavy vehicles, "
+            "and releases without a separating kick");
+
         const PhysicalContactWallConstraint wallTip =
             PhysicalContactWallOffsetForRay(
                 {}, {2.0f, 0, 0}, 0.75f, 0.10f);

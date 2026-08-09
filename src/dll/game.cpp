@@ -6272,6 +6272,11 @@ namespace
     std::atomic<uint32_t> g_halo3ContactNativeSamples{0};
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
+    std::atomic<float> g_halo3ContactPenetrationMeters{0.0f};
+    std::atomic<float> g_halo3ContactNormalImpulse{0.0f};
+    std::atomic<float> g_halo3ContactTangentImpulse{0.0f};
+    std::atomic<int32_t> g_halo3ContactTargetHandle{-1};
+    std::atomic<uint32_t> g_halo3ContactTargetKind{0xFFFFFFFFu};
     std::atomic<int32_t> g_halo3ContactCommandHandle{-1};
     std::atomic<float> g_halo3ContactCommandVelocity[3]{};
     std::atomic<uint32_t> g_halo3ContactCommandGeneration{0};
@@ -9414,6 +9419,13 @@ namespace
         g_halo3ContactPreviousWallPoseValid = false;
         g_halo3ContactWeaponMass.store(0.0f, std::memory_order_relaxed);
         g_halo3ContactTargetMass.store(0.0f, std::memory_order_relaxed);
+        g_halo3ContactPenetrationMeters.store(
+            0.0f, std::memory_order_relaxed);
+        g_halo3ContactNormalImpulse.store(0.0f, std::memory_order_relaxed);
+        g_halo3ContactTangentImpulse.store(0.0f, std::memory_order_relaxed);
+        g_halo3ContactTargetHandle.store(-1, std::memory_order_relaxed);
+        g_halo3ContactTargetKind.store(
+            0xFFFFFFFFu, std::memory_order_relaxed);
         g_halo3ContactNativeSamples.store(0, std::memory_order_relaxed);
         Halo3PublishWeaponWallOffset({}, 0);
         g_halo3ContactWallSetbackMeters.store(0.0f,
@@ -10526,6 +10538,7 @@ namespace
             uint16_t nativeMaterial = 0;
             float nativeMaterialFraction = 1.0f;
             PhysicalContactVec3 closestWeaponPoint{};
+            float closestPenetrationMeters = 0.0f;
             bool closestUsesAuthoredShape = false;
             bool closestUsesRigidWeaponPoint = false;
             bool closestNormalReliable = false;
@@ -10808,6 +10821,11 @@ namespace
                     PhysicalContactConvexSupport(
                         closestTargetShape, closestTargetTransform,
                         closest.normal);
+                closestPenetrationMeters = std::max(
+                    0.0f,
+                    -PhysicalContactDot(
+                        closestWeaponPoint - targetPoint,
+                        closest.normal) / worldScale);
                 // Use the exact target surface for the native point impulse.
                 // The current weapon support point is only the matching
                 // material point used to measure rigid weapon velocity.
@@ -10934,21 +10952,35 @@ namespace
                 Halo3ContactMassForObjectData(
                     closestData, targetComponent, targetBodyIndex,
                     targetMass);
-            const PhysicalContactMassImpulse massImpulse =
+            const PhysicalContactConstraintImpulse constraintImpulse =
                 haveNativeMasses
-                ? PhysicalContactMassAwareImpulse(
+                ? PhysicalContactSustainedImpulse(
                       weaponMass, targetMass, relativeVelocity,
-                      closest.normal, worldScale)
-                : PhysicalContactMassImpulse{};
+                      closest.normal, closestPenetrationMeters, dt,
+                      worldScale)
+                : PhysicalContactConstraintImpulse{};
             g_halo3ContactWeaponMass.store(
                 haveNativeMasses ? weaponMass : 0.0f,
                 std::memory_order_relaxed);
             g_halo3ContactTargetMass.store(
                 haveNativeMasses ? targetMass : 0.0f,
                 std::memory_order_relaxed);
-            if (massImpulse.apply)
+            g_halo3ContactPenetrationMeters.store(
+                closestPenetrationMeters, std::memory_order_relaxed);
+            g_halo3ContactNormalImpulse.store(
+                constraintImpulse.normalImpulseKilogramMetersPerSecond,
+                std::memory_order_relaxed);
+            g_halo3ContactTangentImpulse.store(
+                constraintImpulse.tangentImpulseKilogramMetersPerSecond,
+                std::memory_order_relaxed);
+            g_halo3ContactTargetHandle.store(
+                closestHandle, std::memory_order_relaxed);
+            g_halo3ContactTargetKind.store(
+                *(closestEntry + kHalo3ObjectEntryKindOffset),
+                std::memory_order_relaxed);
+            if (constraintImpulse.apply)
             {
-                worldVelocity = massImpulse.worldImpulse;
+                worldVelocity = constraintImpulse.worldImpulse;
                 commandFlags |= kHalo3ContactCommandPointImpulse;
             }
 
@@ -11042,7 +11074,8 @@ namespace
             "sweeps=%llu hits=%llu impulses=%llu melees=%llu "
             "command=%llu applied=%llu commandStatus=%u meleeStatus=%u "
             "damage=0x%08X response=0x%08X rawMaterial=%u material=%u "
-            "weaponMass=%.3f targetMass=%.3f "
+            "target=0x%08X kind=%u weaponMass=%.3f targetMass=%.3f "
+            "depth=%.4fm normalImpulse=%.5f tangentImpulse=%.5f "
             "authoredShapeHits=%llu animatedBodyHits=%llu "
             "unsupportedShapes=%llu "
             "nativeSamples=%u "
@@ -11074,8 +11107,15 @@ namespace
                 std::memory_order_relaxed)),
             static_cast<uint32_t>(g_halo3ContactMeleeMaterial.load(
                 std::memory_order_relaxed)),
+            static_cast<uint32_t>(g_halo3ContactTargetHandle.load(
+                std::memory_order_relaxed)),
+            g_halo3ContactTargetKind.load(std::memory_order_relaxed),
             g_halo3ContactWeaponMass.load(std::memory_order_relaxed),
             g_halo3ContactTargetMass.load(std::memory_order_relaxed),
+            g_halo3ContactPenetrationMeters.load(
+                std::memory_order_relaxed),
+            g_halo3ContactNormalImpulse.load(std::memory_order_relaxed),
+            g_halo3ContactTangentImpulse.load(std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactAuthoredShapeHits.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactAnimatedBodyHits.load(

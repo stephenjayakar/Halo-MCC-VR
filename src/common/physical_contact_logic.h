@@ -1089,6 +1089,105 @@ inline PhysicalContactMassImpulse PhysicalContactMassAwareImpulse(
     return result;
 }
 
+struct PhysicalContactConstraintImpulse
+{
+    bool apply = false;
+    float approachMetersPerSecond = 0.0f;
+    float penetrationMeters = 0.0f;
+    float normalImpulseKilogramMetersPerSecond = 0.0f;
+    float tangentImpulseKilogramMetersPerSecond = 0.0f;
+    PhysicalContactVec3 worldImpulse{};
+};
+
+// A sustained point-contact constraint for a kinematic VR weapon. Each sample
+// corrects only a small part of the relative velocity. Penetration supplies a
+// bounded normal load. Coulomb-limited tangential force then lets the weapon
+// carry or scoop a light body without giving a heavy body the same response.
+inline PhysicalContactConstraintImpulse PhysicalContactSustainedImpulse(
+    float weaponMassKilograms, float targetMassKilograms,
+    PhysicalContactVec3 relativeMetersPerSecond,
+    PhysicalContactVec3 contactNormal, float penetrationMeters,
+    float elapsedSeconds, float worldUnitsPerMeter)
+{
+    PhysicalContactConstraintImpulse result{};
+    if (!std::isfinite(weaponMassKilograms) ||
+        !std::isfinite(targetMassKilograms) ||
+        weaponMassKilograms <= 0.001f || targetMassKilograms <= 0.001f ||
+        weaponMassKilograms > 1000000.0f ||
+        targetMassKilograms > 1000000.0f ||
+        !PhysicalContactFinite(relativeMetersPerSecond) ||
+        !PhysicalContactFinite(contactNormal) ||
+        !std::isfinite(penetrationMeters) || penetrationMeters < 0.0f ||
+        penetrationMeters > 10.0f || !std::isfinite(elapsedSeconds) ||
+        elapsedSeconds <= 0.0f || elapsedSeconds > 0.1f ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f)
+        return result;
+
+    // The contact normal points from the target surface toward the weapon.
+    // Keep that orientation stable while the bodies separate. Flipping it to
+    // oppose every relative velocity would pull or kick a released object.
+    const PhysicalContactVec3 outward = PhysicalContactNormalize(
+        contactNormal, {});
+    if (PhysicalContactLengthSquared(outward) <= 1.0e-12f)
+        return result;
+    const PhysicalContactVec3 inward = outward * -1.0f;
+    const float signedApproach = PhysicalContactDot(
+        relativeMetersPerSecond, inward);
+    const float approach = std::max(signedApproach, 0.0f);
+    const float reducedMass =
+        weaponMassKilograms * targetMassKilograms /
+        (weaponMassKilograms + targetMassKilograms);
+
+    constexpr float kVelocityFollowFraction = 0.20f;
+    constexpr float kPenetrationCorrectionFraction = 0.15f;
+    constexpr float kMaximumPenetrationSpeed = 0.25f;
+    constexpr float kMaximumTargetDeltaPerSample = 0.08f;
+    constexpr float kFriction = 0.80f;
+    const float penetrationSpeed = std::min(
+        penetrationMeters * kPenetrationCorrectionFraction / elapsedSeconds,
+        kMaximumPenetrationSpeed);
+    const float normalCorrectionSpeed = std::max(
+        approach * kVelocityFollowFraction, penetrationSpeed);
+    float normalImpulse = reducedMass * normalCorrectionSpeed;
+    normalImpulse = std::min(
+        normalImpulse,
+        targetMassKilograms * kMaximumTargetDeltaPerSample);
+
+    const PhysicalContactVec3 tangentVelocity =
+        relativeMetersPerSecond -
+        outward * PhysicalContactDot(relativeMetersPerSecond, outward);
+    const float tangentSpeed = PhysicalContactLength(tangentVelocity);
+    float tangentImpulse = reducedMass * tangentSpeed *
+        kVelocityFollowFraction;
+    tangentImpulse = std::min(tangentImpulse, normalImpulse * kFriction);
+    const PhysicalContactVec3 tangentDirection = tangentSpeed > 1.0e-5f
+        ? tangentVelocity * (1.0f / tangentSpeed)
+        : PhysicalContactVec3{};
+    PhysicalContactVec3 impulse =
+        inward * normalImpulse + tangentDirection * tangentImpulse;
+    const float maximumImpulse =
+        targetMassKilograms * kMaximumTargetDeltaPerSample;
+    const float impulseLength = PhysicalContactLength(impulse);
+    if (impulseLength > maximumImpulse)
+    {
+        const float scale = maximumImpulse / impulseLength;
+        impulse = impulse * scale;
+        normalImpulse *= scale;
+        tangentImpulse *= scale;
+    }
+    if (!PhysicalContactFinite(impulse) ||
+        PhysicalContactLengthSquared(impulse) <= 1.0e-10f)
+        return result;
+
+    result.approachMetersPerSecond = approach;
+    result.penetrationMeters = penetrationMeters;
+    result.normalImpulseKilogramMetersPerSecond = normalImpulse;
+    result.tangentImpulseKilogramMetersPerSecond = tangentImpulse;
+    result.worldImpulse = impulse * worldUnitsPerMeter;
+    result.apply = PhysicalContactFinite(result.worldImpulse);
+    return result;
+}
+
 // Retail Halo 3 game-options enums: mode 1 campaign, mode 2 multiplayer.
 // Halo 3 MCC's solo Forge host reports simulation 5 (distributed server), not
 // simulation 1 (local). Admit the authoritative Forge host and reject every

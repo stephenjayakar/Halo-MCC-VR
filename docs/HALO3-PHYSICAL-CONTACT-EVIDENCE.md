@@ -86,13 +86,19 @@ reports `0.002`, or about `500 kg`, while a loose object reports `2.615`, or
 about `0.382 kg`. Missing, stale, non-root, invalid, or non-finite mass data
 rejects only that contact command.
 
-The response is a bounded inelastic collision. It computes reduced mass
-`weaponMass * targetMass / (weaponMass + targetMass)` and multiplies it by
-inward relative contact speed. The result is converted from metres to Halo
-world units and sent to the native point-impulse wrapper at the exact authored
-contact point. Halo then applies the target's own mass and inertia. Approach is
-capped at `8.0 m/s`, and target velocity change is capped at `2.5 m/s` for
-runtime safety. No guessed weapon or target mass is used.
+The rejected response used one bounded inelastic collision impulse. In the
+headset it felt like a hit instead of continuous contact. It also had no
+tangential force, so it could not scoop or carry a light object.
+
+The replacement is a sustained point-contact constraint. Each valid overlap
+matches 20 percent of inward relative speed. Penetration adds a bounded normal
+correction. A Coulomb limit of `0.80 * normal impulse` supplies tangential
+friction only while the shapes press together. The target velocity change is
+capped at `0.08 m/s` per sample. A separating weapon produces no impulse, so
+the body keeps its last native linear and angular velocity when released. The
+result is converted from metres to Halo world units and sent to the native
+point-impulse wrapper at the exact authored target support point. Halo applies
+the target's own mass and inertia. No guessed weapon or target mass is used.
 
 The collision query's first argument packs two 32-bit flag sets: collision
 flags in the low dword and object-type flags in the high dword. The official
@@ -234,8 +240,9 @@ one native point-impulse command per sample above 0.05 m/s; the simulation
 owner re-resolves the target component and body before applying it. Authored convex
 contact admits only root engine object kinds that can own movable physics. The
 native point-impulse path remains the final authority for whether the exact
-object owns a rigid body. Authored masses and relative speed determine the
-bounded momentum transfer. Classification maps the exact current weapon contact point into
+object owns a rigid body. Authored masses, inward speed, penetration, and
+tangential speed determine the bounded contact constraint. Classification maps
+the exact current weapon contact point into
 the previous full visible transform. This includes translation, pitch, yaw,
 roll, and scale over the exact bounded timestamp delta. It subtracts target
 surface velocity from the two native accessors,
@@ -380,6 +387,15 @@ measures velocity at the matching current weapon support point and applies the
 native point impulse at the exact target support surface. Pure tests distinguish
 a swept plane from existing overlap and verify normal retention and cleanup.
 
+The sustained-contact candidate keeps that plane orientation during release.
+It does not flip the normal to oppose a separating velocity. Pure tests cover
+gentle inward motion, a target already following the weapon, clean separation,
+penetration-only load, loaded and unloaded tangential motion, friction limits,
+light props, a `500 kg` vehicle, invalid mass, and the `0.08 m/s` per-sample
+target-delta cap. Runtime telemetry now records the exact target handle and
+kind, penetration depth, normal impulse, tangential impulse, and converted
+weapon and target masses.
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure
@@ -436,7 +452,8 @@ grazing misses, the noise floor, slow pushes, exact melee threshold crossing,
 contact-fraction point velocity, rotational tip speed, target angular surface
 velocity, world-scale conversion, invalid timing/data,
 finite-value rejection, movable/static classification, mass response,
-point-impulse clamping,
+point-impulse clamping, sustained normal contact, loaded tangential friction,
+clean separation,
 per-target overlap debounce, separation rearming, reset on weapon/tracking
 change, 250 ms cooldown eligibility, timestamp-underflow rejection, exact
 convex translation/rotation/tunnelling, grazing rejection, and unsupported
