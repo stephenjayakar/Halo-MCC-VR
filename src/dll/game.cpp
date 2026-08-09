@@ -6340,6 +6340,8 @@ namespace
     std::atomic<uint16_t> g_halo3ContactMeleeMaterial{0xFFFFu};
     std::atomic<bool> g_halo3ContactDebugRig{false};
     std::atomic<bool> g_halo3ContactDebugMelee{false};
+    std::atomic<bool> g_halo3ContactDebugScoop{false};
+    uint64_t g_halo3ContactDebugScoopStartMs = 0;
     std::atomic<int32_t> g_halo3ContactDebugAimTarget{-1};
     std::atomic<uint32_t> g_halo3ContactDebugAimKind{0xFFFFFFFFu};
     std::atomic<int32_t> g_halo3ContactDebugTarget{-1};
@@ -10066,6 +10068,8 @@ namespace
             g_halo3ContactDebugRig.load(std::memory_order_acquire);
         const bool debugMelee =
             g_halo3ContactDebugMelee.load(std::memory_order_acquire);
+        const bool debugScoop =
+            g_halo3ContactDebugScoop.load(std::memory_order_acquire);
         constexpr float kDebugCycleMs = 1000.0f;
         constexpr float kDebugAngularRate = 6.28318530718f;
         const float debugPhase = static_cast<float>(nowMs % 1000u) *
@@ -10544,6 +10548,7 @@ namespace
                 {
                     g_halo3ContactDebugAnchorValid = false;
                     g_halo3ContactDebugAnchorHandle = -1;
+                    g_halo3ContactDebugScoopStartMs = 0;
                 }
                 else if (aimTarget != -1 && anchoredHandle == -1)
                 {
@@ -10559,6 +10564,7 @@ namespace
                         g_halo3ContactDebugAnchorHandle = aimTarget;
                         g_halo3ContactDebugAnchorTransform = anchorTransform;
                         g_halo3ContactDebugAnchorForward = anchorForward;
+                        g_halo3ContactDebugScoopStartMs = nowMs;
                     }
                 }
                 g_halo3ContactDebugAimTarget.store(
@@ -10650,23 +10656,51 @@ namespace
                         debugAimData, debugTargetShape) &&
                     PhysicalContactTransformFinite(debugTargetTransform))
                 {
-                    const PhysicalContactVec3 weaponFront =
-                        Halo3ContactCompoundSupport(
-                            weaponShape, weaponTransform, forward);
-                    const PhysicalContactVec3 targetNear =
-                        Halo3ContactCompoundSupport(
-                            debugTargetShape, debugTargetTransform,
-                            forward * -1.0f);
-                    // The support points start 2 cm apart. The one-second
-                    // sinusoid then crosses the exact authored target surface,
-                    // reaches debugMaxSpeed, and separates once per cycle.
-                    const float amplitude =
-                        worldScale * debugMaxSpeed / kDebugAngularRate;
-                    const float displacement =
-                        amplitude * std::sin(debugPhase) -
-                        worldScale * 0.02f;
-                    weaponTransform.position = weaponTransform.position +
-                        (targetNear + forward * displacement - weaponFront);
+                    if (debugScoop && g_halo3ContactDebugScoopStartMs &&
+                        nowMs >= g_halo3ContactDebugScoopStartMs)
+                    {
+                        const PhysicalContactVec3 worldUp{0.0f, 0.0f, 1.0f};
+                        const PhysicalContactVec3 weaponTop =
+                            Halo3ContactCompoundSupport(
+                                weaponShape, weaponTransform, worldUp);
+                        const PhysicalContactVec3 targetBottom =
+                            Halo3ContactCompoundSupport(
+                                debugTargetShape, debugTargetTransform,
+                                worldUp * -1.0f);
+                        const float elapsedMs = static_cast<float>(
+                            nowMs - g_halo3ContactDebugScoopStartMs);
+                        const PhysicalContactDebugScoopPose scoop =
+                            PhysicalContactDebugScoopTrajectory(elapsedMs);
+                        const PhysicalContactVec3 desiredWeaponTop =
+                            targetBottom +
+                            worldUp * (worldScale *
+                                (-0.02f + scoop.liftMeters -
+                                 scoop.releaseMeters)) +
+                            weaponTransform.left *
+                                (worldScale * scoop.carryMeters);
+                        weaponTransform.position = weaponTransform.position +
+                            (desiredWeaponTop - weaponTop);
+                    }
+                    else
+                    {
+                        const PhysicalContactVec3 weaponFront =
+                            Halo3ContactCompoundSupport(
+                                weaponShape, weaponTransform, forward);
+                        const PhysicalContactVec3 targetNear =
+                            Halo3ContactCompoundSupport(
+                                debugTargetShape, debugTargetTransform,
+                                forward * -1.0f);
+                        // The support points start 2 cm apart. The one-second
+                        // sinusoid then crosses the exact authored target
+                        // surface, reaches debugMaxSpeed, and separates.
+                        const float amplitude =
+                            worldScale * debugMaxSpeed / kDebugAngularRate;
+                        const float displacement =
+                            amplitude * std::sin(debugPhase) -
+                            worldScale * 0.02f;
+                        weaponTransform.position = weaponTransform.position +
+                            (targetNear + forward * displacement - weaponFront);
+                    }
                     grip = weaponTransform.position;
                 }
             }
@@ -16373,12 +16407,23 @@ namespace
         const bool contactDebugMeleeEnabled = contactDebugMeleeLength > 0 &&
             contactDebugMeleeLength < std::size(contactDebugMeleeValue) &&
             contactDebugMeleeValue[0] != L'0';
+        wchar_t contactDebugScoopValue[8]{};
+        const DWORD contactDebugScoopLength = GetEnvironmentVariableW(
+            L"HALOMCCVR_H3_CONTACT_DEBUG_SCOOP", contactDebugScoopValue,
+            static_cast<DWORD>(std::size(contactDebugScoopValue)));
+        const bool contactDebugScoopEnabled = contactDebugScoopLength > 0 &&
+            contactDebugScoopLength < std::size(contactDebugScoopValue) &&
+            contactDebugScoopValue[0] != L'0';
         const bool contactDebugRigEnabled =
-            contactDebugEnabled || contactDebugMeleeEnabled;
+            contactDebugEnabled || contactDebugMeleeEnabled ||
+            contactDebugScoopEnabled;
         g_halo3ContactDebugRig.store(
             contactDebugRigEnabled, std::memory_order_release);
         g_halo3ContactDebugMelee.store(
             contactDebugMeleeEnabled, std::memory_order_release);
+        g_halo3ContactDebugScoop.store(
+            contactDebugScoopEnabled, std::memory_order_release);
+        g_halo3ContactDebugScoopStartMs = 0;
         g_halo3ContactDebugTarget.store(-1, std::memory_order_release);
         g_halo3ContactDebugAnchorValid = false;
         g_halo3ContactDebugAnchorGeneration = 0;
@@ -16420,6 +16465,10 @@ namespace
         if (contactDebugMeleeEnabled)
             LOG("H3 physical contact DEBUG MELEE enabled by environment; "
                 "synthetic controller speed can cross the authored melee threshold");
+        if (contactDebugScoopEnabled)
+            LOG("H3 physical contact DEBUG SCOOP enabled by environment; "
+                "one-shot sub-melee lift, carry, separation, and object-state "
+                "readback active");
         LocateNativePauseFlag(base, size);
         LocateCinematicState(base, size);
         uintptr_t hit = sig::Find(base, size, kCamCopySig);

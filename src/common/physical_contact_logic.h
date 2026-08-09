@@ -1056,6 +1056,29 @@ inline PhysicalContactDebugTargetRank PhysicalContactRankDebugTarget(
     return result;
 }
 
+struct PhysicalContactDebugScoopPose
+{
+    float liftMeters = 0.0f;
+    float carryMeters = 0.0f;
+    float releaseMeters = 0.0f;
+};
+
+inline PhysicalContactDebugScoopPose PhysicalContactDebugScoopTrajectory(
+    float elapsedMilliseconds)
+{
+    if (!std::isfinite(elapsedMilliseconds) || elapsedMilliseconds < 0.0f)
+        return {};
+    const auto smoothStep = [](float value) -> float
+    {
+        const float t = std::clamp(value, 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    };
+    return {
+        0.35f * smoothStep((elapsedMilliseconds - 1000.0f) / 1500.0f),
+        0.35f * smoothStep((elapsedMilliseconds - 2500.0f) / 1500.0f),
+        0.30f * smoothStep((elapsedMilliseconds - 4000.0f) / 750.0f)};
+}
+
 inline float PhysicalContactImpulseDeltaMetersPerSecond(float speed)
 {
     return std::clamp(speed * 0.5f, 0.0f, 1.5f);

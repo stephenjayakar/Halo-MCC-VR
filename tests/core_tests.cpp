@@ -9117,6 +9117,44 @@ int main()
             "Forge contact validation prefers a settled light weapon, keeps "
             "an existing anchor, and rejects invalid motion data");
 
+        float maximumScoopSpeed = 0.0f;
+        PhysicalContactDebugScoopPose priorScoop =
+            PhysicalContactDebugScoopTrajectory(0.0f);
+        for (int milliseconds = 1; milliseconds <= 6000; ++milliseconds)
+        {
+            const PhysicalContactDebugScoopPose scoop =
+                PhysicalContactDebugScoopTrajectory(
+                    static_cast<float>(milliseconds));
+            const float verticalSpeed =
+                std::fabs((scoop.liftMeters - scoop.releaseMeters) -
+                          (priorScoop.liftMeters -
+                           priorScoop.releaseMeters)) * 1000.0f;
+            const float lateralSpeed = std::fabs(
+                scoop.carryMeters - priorScoop.carryMeters) * 1000.0f;
+            maximumScoopSpeed = std::max(
+                maximumScoopSpeed,
+                std::sqrt(verticalSpeed * verticalSpeed +
+                          lateralSpeed * lateralSpeed));
+            priorScoop = scoop;
+        }
+        const PhysicalContactDebugScoopPose scoopReady =
+            PhysicalContactDebugScoopTrajectory(1000.0f);
+        const PhysicalContactDebugScoopPose scoopLifted =
+            PhysicalContactDebugScoopTrajectory(2500.0f);
+        const PhysicalContactDebugScoopPose scoopCarried =
+            PhysicalContactDebugScoopTrajectory(4000.0f);
+        const PhysicalContactDebugScoopPose scoopReleased =
+            PhysicalContactDebugScoopTrajectory(4750.0f);
+        Check(scoopReady.liftMeters == 0.0f &&
+              scoopLifted.liftMeters == 0.35f &&
+              scoopCarried.carryMeters == 0.35f &&
+              scoopReleased.releaseMeters == 0.30f &&
+              maximumScoopSpeed < 0.61f &&
+              PhysicalContactDebugScoopTrajectory(-1.0f).liftMeters == 0.0f,
+            "The one-shot Forge scoop rig approaches, lifts, carries, and "
+            "separates below the 1.50 m/s melee threshold with finite bounded "
+            "motion");
+
         const PhysicalContactPushResponse gentlePush =
             PhysicalContactStablePush(
                 {}, {0.20f, 0, 0}, {-1, 0, 0}, 0.5f);

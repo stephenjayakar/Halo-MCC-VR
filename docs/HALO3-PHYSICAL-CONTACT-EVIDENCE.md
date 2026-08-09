@@ -305,6 +305,15 @@ so stereo correctly disarmed while the isolated contact rig continued in the
 flat game. This is a diagnostic-only configuration and does not bypass Easy
 Anti-Cheat.
 
+The debug rig also has a one-shot scoop mode. After choosing a settled light
+dynamic target, it aligns the exact authored weapon support surface `2 cm`
+below the target, lifts `0.35 m`, carries sideways `0.35 m`, then separates
+downward by `0.30 m`. Smooth-step segments cap the measured trajectory below
+`0.61 m/s`, so this diagnostic cannot cross the `1.50 m/s` melee threshold.
+The existing target position and native velocity readback then distinguish
+lift, carry, release, and retained motion. This environment-only path never
+runs in normal play. Live Forge proof remains pending.
+
 Candidate `1da8395` reported an applied command whose value predated the
 camera-thread publish and was reverted. Candidate `24b0acd` moved the call to
 the XInput thread, where the native setter raised a structured exception, and
