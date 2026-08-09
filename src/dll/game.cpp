@@ -9918,30 +9918,29 @@ namespace
                 contact->meleeArmed, nowMs, g_halo3ContactLastMeleeMs);
             uint32_t commandFlags = 0;
             PhysicalContactVec3 worldVelocity{};
+            if (firstContact && debugRig &&
+                g_halo3ContactDebugTarget.load(
+                    std::memory_order_relaxed) != closestHandle)
+            {
+                const auto* objectPosition = reinterpret_cast<const float*>(
+                    closestData + kHalo3ObjectPositionOffset);
+                const PhysicalContactVec3 initial{
+                    objectPosition[0], objectPosition[1], objectPosition[2]};
+                if (PhysicalContactFinite(initial))
+                {
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        g_halo3ContactDebugInitialPosition[axis].store(
+                            objectPosition[axis], std::memory_order_relaxed);
+                        g_halo3ContactDebugCurrentPosition[axis].store(
+                            objectPosition[axis], std::memory_order_relaxed);
+                    }
+                    g_halo3ContactDebugTarget.store(
+                        closestHandle, std::memory_order_release);
+                }
+            }
             if (firstContact && kEnableHalo3FirstContactVelocityKick)
             {
-                if (debugRig &&
-                    g_halo3ContactDebugTarget.load(
-                        std::memory_order_relaxed) != closestHandle)
-                {
-                    const auto* objectPosition =
-                        reinterpret_cast<const float*>(
-                            closestData + kHalo3ObjectPositionOffset);
-                    const PhysicalContactVec3 initial{
-                        objectPosition[0], objectPosition[1], objectPosition[2]};
-                    if (PhysicalContactFinite(initial))
-                    {
-                        for (int axis = 0; axis < 3; ++axis)
-                        {
-                            g_halo3ContactDebugInitialPosition[axis].store(
-                                objectPosition[axis], std::memory_order_relaxed);
-                            g_halo3ContactDebugCurrentPosition[axis].store(
-                                objectPosition[axis], std::memory_order_relaxed);
-                        }
-                        g_halo3ContactDebugTarget.store(
-                            closestHandle, std::memory_order_release);
-                    }
-                }
                 worldVelocity = {
                     targetLinear[0], targetLinear[1], targetLinear[2]};
                 const float delta =
@@ -9954,6 +9953,15 @@ namespace
                     worldVelocity = worldVelocity * (maximum / magnitude);
                 if (PhysicalContactFinite(worldVelocity))
                     commandFlags |= kHalo3ContactCommandImpulse;
+            }
+
+            const PhysicalContactPushResponse push = PhysicalContactStablePush(
+                {targetLinear[0], targetLinear[1], targetLinear[2]},
+                relativeVelocity, closest.normal, worldScale);
+            if (push.apply)
+            {
+                worldVelocity = push.worldVelocity;
+                commandFlags |= kHalo3ContactCommandImpulse;
             }
 
             if (requestMelee)

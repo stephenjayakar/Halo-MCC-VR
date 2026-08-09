@@ -246,6 +246,66 @@ inline float PhysicalContactImpulseDeltaMetersPerSecond(float speed)
     return std::clamp(speed * 0.5f, 0.0f, 1.5f);
 }
 
+struct PhysicalContactPushResponse
+{
+    bool apply = false;
+    float approachMetersPerSecond = 0.0f;
+    float desiredMetersPerSecond = 0.0f;
+    PhysicalContactVec3 worldVelocity{};
+};
+
+// A contact constraint, not a hit impulse. Match only a small, capped portion
+// of the weapon's velocity into the surface and preserve every tangential
+// component Halo already owns. Re-evaluating this from native target velocity
+// on each overlapping sample lets a resting prop follow a gentle hand while
+// preventing velocity from accumulating once it is already moving with it.
+inline PhysicalContactPushResponse PhysicalContactStablePush(
+    PhysicalContactVec3 targetWorldVelocity,
+    PhysicalContactVec3 relativeMetersPerSecond,
+    PhysicalContactVec3 contactNormal, float worldUnitsPerMeter)
+{
+    PhysicalContactPushResponse result{};
+    if (!PhysicalContactFinite(targetWorldVelocity) ||
+        !PhysicalContactFinite(relativeMetersPerSecond) ||
+        !PhysicalContactFinite(contactNormal) ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f)
+        return result;
+
+    const PhysicalContactVec3 relativeDirection = PhysicalContactNormalize(
+        relativeMetersPerSecond, {1.0f, 0.0f, 0.0f});
+    PhysicalContactVec3 outward = PhysicalContactNormalize(
+        contactNormal, relativeDirection * -1.0f);
+    // Native and fallback normals should face the incoming weapon. Correct a
+    // reversed provider normal locally instead of ever pushing a target back
+    // toward the hand.
+    if (PhysicalContactDot(relativeMetersPerSecond, outward) > 0.0f)
+        outward = outward * -1.0f;
+    const PhysicalContactVec3 pushDirection = outward * -1.0f;
+    const float approach = PhysicalContactDot(
+        relativeMetersPerSecond, pushDirection);
+    if (!std::isfinite(approach) || approach < 0.05f)
+        return result;
+
+    constexpr float kFollowFraction = 0.25f;
+    constexpr float kMaximumPushMetersPerSecond = 0.30f;
+    constexpr float kMaximumCorrectionPerSample = 0.08f;
+    const float desired = std::min(
+        approach * kFollowFraction, kMaximumPushMetersPerSecond);
+    const float current = PhysicalContactDot(
+        targetWorldVelocity, pushDirection) / worldUnitsPerMeter;
+    const float correction = std::clamp(
+        desired - current, 0.0f, kMaximumCorrectionPerSample);
+    if (!std::isfinite(current) || correction <= 1.0e-5f)
+        return result;
+
+    result.worldVelocity = targetWorldVelocity +
+        pushDirection * (correction * worldUnitsPerMeter);
+    result.approachMetersPerSecond = approach;
+    result.desiredMetersPerSecond = desired;
+    result.apply = PhysicalContactFinite(result.worldVelocity);
+    return result;
+}
+
 // Retail Halo 3 game-options enums: mode 1 campaign, mode 2 multiplayer.
 // Halo 3 MCC's solo Forge host reports simulation 5 (distributed server), not
 // simulation 1 (local). Admit the authoritative Forge host and reject every

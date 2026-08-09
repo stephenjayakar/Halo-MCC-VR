@@ -8852,6 +8852,39 @@ int main()
             "Capsule fallback pushes movable rigid-body kinds only and clamps "
             "velocity-scaled impulse strength");
 
+        const PhysicalContactPushResponse gentlePush =
+            PhysicalContactStablePush(
+                {}, {0.20f, 0, 0}, {-1, 0, 0}, 0.5f);
+        const PhysicalContactPushResponse fastPush =
+            PhysicalContactStablePush(
+                {0, 0.30f, 0}, {4.0f, 0, 0}, {-1, 0, 0}, 0.5f);
+        const PhysicalContactPushResponse alreadyFollowing =
+            PhysicalContactStablePush(
+                {0.025f, 0, 0}, {0.15f, 0, 0}, {-1, 0, 0}, 0.5f);
+        const PhysicalContactPushResponse tangential =
+            PhysicalContactStablePush(
+                {}, {0, 1.0f, 0}, {-1, 0, 0}, 0.5f);
+        const PhysicalContactPushResponse reversedNormal =
+            PhysicalContactStablePush(
+                {}, {0.20f, 0, 0}, {1, 0, 0}, 0.5f);
+        Check(gentlePush.apply &&
+              std::fabs(gentlePush.approachMetersPerSecond - 0.20f) <
+                  1.0e-6f &&
+              std::fabs(gentlePush.desiredMetersPerSecond - 0.05f) <
+                  1.0e-6f &&
+              std::fabs(gentlePush.worldVelocity.x - 0.025f) < 1.0e-6f &&
+              fastPush.apply &&
+              std::fabs(fastPush.desiredMetersPerSecond - 0.30f) <
+                  1.0e-6f &&
+              std::fabs(fastPush.worldVelocity.x - 0.04f) < 1.0e-6f &&
+              std::fabs(fastPush.worldVelocity.y - 0.30f) < 1.0e-6f &&
+              !alreadyFollowing.apply && !tangential.apply &&
+              reversedNormal.apply &&
+              std::fabs(reversedNormal.worldVelocity.x - 0.025f) < 1.0e-6f,
+            "Continuous contact gently follows inward hand speed, caps each "
+            "correction, preserves tangential motion, does not accumulate "
+            "once the target follows, and corrects reversed normals");
+
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&
               !PhysicalContactGameModeAllowed(2, 1, false) &&
