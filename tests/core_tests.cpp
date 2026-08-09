@@ -9351,6 +9351,18 @@ int main()
             PhysicalContactSustainedImpulse(
                 0.0f, 0.382f, {0.20f, 0, 0}, {-1, 0, 0},
                 0.0f, 1.0f / 120.0f, 0.5f);
+        const PhysicalContactConstraintImpulse sustainedLift =
+            PhysicalContactSustainedImpulse(
+                2.76f, 2.0f, {0, 0, 0.26f}, {0, 0, -1},
+                0.0f, 1.0f / 60.0f, 0.5f);
+        const PhysicalContactConstraintImpulse sustainedCarry =
+            PhysicalContactSustainedImpulse(
+                2.76f, 2.0f, {0.20f, 0, 0}, {0, 0, -1},
+                0.0f, 1.0f / 60.0f, 0.5f);
+        const PhysicalContactConstraintImpulse sustainedLiftRelease =
+            PhysicalContactSustainedImpulse(
+                2.76f, 2.0f, {0, 0, -0.26f}, {0, 0, -1},
+                0.0f, 1.0f / 60.0f, 0.5f);
         Check(sustainedGentle.apply &&
               sustainedGentle.approachMetersPerSecond > 0.199f &&
               sustainedGentle.worldImpulse.x > 0.0f &&
@@ -9374,10 +9386,17 @@ int main()
                       500.0f <
                   sustainedGentle.normalImpulseKilogramMetersPerSecond /
                       0.382f &&
+              sustainedLift.apply && sustainedLift.worldImpulse.z > 0.0f &&
+              sustainedLift.normalImpulseKilogramMetersPerSecond >=
+                  2.0f * 9.80f / 60.0f &&
+              sustainedCarry.apply && sustainedCarry.worldImpulse.x > 0.0f &&
+              sustainedCarry.worldImpulse.z > 0.0f &&
+              !sustainedLiftRelease.apply &&
               !sustainedInvalid.apply,
             "Sustained native point contact adds bounded normal load and "
-            "Coulomb friction, follows light bodies, resists heavy vehicles, "
-            "and releases without a separating kick");
+            "Coulomb friction, supports an exact upward contact by native "
+            "target mass, resists heavy vehicles, and releases without a "
+            "separating kick");
 
         const PhysicalContactWallConstraint wallTip =
             PhysicalContactWallOffsetForRay(

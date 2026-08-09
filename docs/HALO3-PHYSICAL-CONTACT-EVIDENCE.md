@@ -476,6 +476,16 @@ derivative of the same smooth lift, lateral carry, and downward separation
 trajectory. This changes only the environment-gated validation path; normal
 tracked contact remains driven by the OpenXR controller snapshot.
 
+The corrected-velocity run then selected a `2.764 kg` loose kind-2 weapon and
+reported the expected vertical path speed (`0.26 m/s` at the sampled point).
+It still stayed at `(-1.843, -0.858, 3.117)` after 88 accepted point impulses.
+The previous per-sample cap was `0.08 m/s`, below one 60 Hz gravity step, so
+the floor solver removed every upward correction before the following sample.
+The sustained constraint now adds `target mass * 9.81 m/s^2 * dt`, projected
+onto the exact upward contact normal, while the weapon is not separating. The
+existing velocity correction remains capped separately. Side contacts add no
+weight support, and downward separation removes it immediately.
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure

@@ -1274,13 +1274,16 @@ struct PhysicalContactConstraintImpulse
 
 // A sustained point-contact constraint for a kinematic VR weapon. Each sample
 // corrects only a small part of the relative velocity. Penetration supplies a
-// bounded normal load. Coulomb-limited tangential force then lets the weapon
-// carry or scoop a light body without giving a heavy body the same response.
+// bounded normal load. An upward-facing contact also supports the target's
+// native mass against standard Halo gravity while the weapon is not separating.
+// Coulomb-limited tangential force then lets the weapon carry or scoop a light
+// body without giving a heavy body the same response.
 inline PhysicalContactConstraintImpulse PhysicalContactSustainedImpulse(
     float weaponMassKilograms, float targetMassKilograms,
     PhysicalContactVec3 relativeMetersPerSecond,
     PhysicalContactVec3 contactNormal, float penetrationMeters,
-    float elapsedSeconds, float worldUnitsPerMeter)
+    float elapsedSeconds, float worldUnitsPerMeter,
+    PhysicalContactVec3 worldUp = {0.0f, 0.0f, 1.0f})
 {
     PhysicalContactConstraintImpulse result{};
     if (!std::isfinite(weaponMassKilograms) ||
@@ -1290,6 +1293,7 @@ inline PhysicalContactConstraintImpulse PhysicalContactSustainedImpulse(
         targetMassKilograms > 1000000.0f ||
         !PhysicalContactFinite(relativeMetersPerSecond) ||
         !PhysicalContactFinite(contactNormal) ||
+        !PhysicalContactFinite(worldUp) ||
         !std::isfinite(penetrationMeters) || penetrationMeters < 0.0f ||
         penetrationMeters > 10.0f || !std::isfinite(elapsedSeconds) ||
         elapsedSeconds <= 0.0f || elapsedSeconds > 0.1f ||
@@ -1304,6 +1308,9 @@ inline PhysicalContactConstraintImpulse PhysicalContactSustainedImpulse(
     if (PhysicalContactLengthSquared(outward) <= 1.0e-12f)
         return result;
     const PhysicalContactVec3 inward = outward * -1.0f;
+    const PhysicalContactVec3 up = PhysicalContactNormalize(worldUp, {});
+    if (PhysicalContactLengthSquared(up) <= 1.0e-12f)
+        return result;
     const float signedApproach = PhysicalContactDot(
         relativeMetersPerSecond, inward);
     const float approach = std::max(signedApproach, 0.0f);
@@ -1315,16 +1322,29 @@ inline PhysicalContactConstraintImpulse PhysicalContactSustainedImpulse(
     constexpr float kPenetrationCorrectionFraction = 0.15f;
     constexpr float kMaximumPenetrationSpeed = 0.25f;
     constexpr float kMaximumTargetDeltaPerSample = 0.08f;
+    constexpr float kStandardGravityMetersPerSecondSquared = 9.81f;
     constexpr float kFriction = 0.80f;
     const float penetrationSpeed = std::min(
         penetrationMeters * kPenetrationCorrectionFraction / elapsedSeconds,
         kMaximumPenetrationSpeed);
     const float normalCorrectionSpeed = std::max(
         approach * kVelocityFollowFraction, penetrationSpeed);
-    float normalImpulse = reducedMass * normalCorrectionSpeed;
+    // The native floor solver removes a small upward velocity correction on
+    // the next tick. Counter only the component of gravity that loads this
+    // exact contact. Stop the support as soon as the weapon separates, so a
+    // released prop keeps Halo's own ballistic motion.
+    const float upwardLoad = std::max(
+        0.0f, PhysicalContactDot(inward, up));
+    const float gravitySupportDelta = signedApproach >= -0.01f
+        ? kStandardGravityMetersPerSecondSquared * elapsedSeconds *
+              upwardLoad
+        : 0.0f;
+    float normalImpulse = reducedMass * normalCorrectionSpeed +
+        targetMassKilograms * gravitySupportDelta;
     normalImpulse = std::min(
         normalImpulse,
-        targetMassKilograms * kMaximumTargetDeltaPerSample);
+        targetMassKilograms *
+            (kMaximumTargetDeltaPerSample + gravitySupportDelta));
 
     const PhysicalContactVec3 tangentVelocity =
         relativeMetersPerSecond -
@@ -1339,7 +1359,8 @@ inline PhysicalContactConstraintImpulse PhysicalContactSustainedImpulse(
     PhysicalContactVec3 impulse =
         inward * normalImpulse + tangentDirection * tangentImpulse;
     const float maximumImpulse =
-        targetMassKilograms * kMaximumTargetDeltaPerSample;
+        targetMassKilograms *
+        (kMaximumTargetDeltaPerSample + gravitySupportDelta);
     const float impulseLength = PhysicalContactLength(impulse);
     if (impulseLength > maximumImpulse)
     {
