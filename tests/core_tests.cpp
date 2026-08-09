@@ -9057,7 +9057,15 @@ int main()
         const PhysicalContactMassImpulse clampedMassImpulse =
             PhysicalContactMassAwareImpulse(
                 100.0f, 1.0f, {100.0f, 0, 0}, {-1, 0, 0}, 0.5f);
-        Check(equalMassImpulse.apply &&
+        const float mongooseMass =
+            PhysicalContactMassFromInverseMass(0.002f);
+        const float looseWeaponMass =
+            PhysicalContactMassFromInverseMass(2.615f);
+        const float invalidInverseMass =
+            PhysicalContactMassFromInverseMass(0.0f);
+        Check(std::fabs(mongooseMass - 500.0f) < 1.0e-4f &&
+              std::fabs(looseWeaponMass - (1.0f / 2.615f)) < 1.0e-6f &&
+              invalidInverseMass == 0.0f && equalMassImpulse.apply &&
               std::fabs(equalMassImpulse.impulseKilogramMetersPerSecond -
                         2.0f) < 1.0e-6f &&
               std::fabs(equalMassImpulse.worldImpulse.x - 1.0f) < 1.0e-6f &&
@@ -9073,8 +9081,9 @@ int main()
               clampedMassImpulse.apply &&
               std::fabs(clampedMassImpulse.impulseKilogramMetersPerSecond -
                         2.5f) < 1.0e-6f,
-            "Native masses produce bounded inelastic momentum, reject invalid "
-            "or tangential input, and correct reversed normals");
+            "Havok inverse masses convert to body masses before native masses "
+            "produce bounded inelastic momentum, reject invalid or tangential "
+            "input, and correct reversed normals");
 
         const PhysicalContactWallConstraint wallTip =
             PhysicalContactWallOffsetForRay(

@@ -1024,6 +1024,18 @@ struct PhysicalContactMassImpulse
     PhysicalContactVec3 worldImpulse{};
 };
 
+// Havok stores inverse mass in hkpMotion. H3EK's hkpRigidBody::getMass leaf
+// reads that field and returns 1.0 / inverseMass. Keep this conversion in one
+// tested helper so a heavy body cannot be mistaken for a light body.
+inline float PhysicalContactMassFromInverseMass(float inverseMass)
+{
+    if (!std::isfinite(inverseMass) || inverseMass <= 1.0e-6f)
+        return 0.0f;
+    const float mass = 1.0f / inverseMass;
+    return std::isfinite(mass) && mass > 0.001f && mass <= 1000000.0f
+        ? mass : 0.0f;
+}
+
 // A bounded inelastic collision response. Native Halo masses decide how much
 // momentum the held weapon transfers. The engine's point-impulse function then
 // uses the target's authored mass and inertia to produce linear and angular

@@ -79,9 +79,12 @@ datum. The unique retail accessor loads the component-array global at function
 `+0x6C`, then resolves `elements + index * 0xC0`. The root body index is the
 signed byte at component `+0x0C`; body count is `+0x28`; body records are at
 `+0x20` with stride `0x60`; the body wrapper is record `+0x50`; and authored
-mass is wrapper `+0x1DC`. Official `0x078AF0` reads that same mass when
-computing inverse mass. Missing, stale, non-root, invalid, or non-finite mass
-data rejects only that contact command.
+inverse mass is wrapper `+0x1DC`. Official `hkpRigidBody::getMass` at
+`0x078AF0` reads its motion's inverse-mass field at `+0xEC` and returns
+`1.0 / inverseMass`. The runtime values close the identity: the Mongoose body
+reports `0.002`, or about `500 kg`, while a loose object reports `2.615`, or
+about `0.382 kg`. Missing, stale, non-root, invalid, or non-finite mass data
+rejects only that contact command.
 
 The response is a bounded inelastic collision. It computes reduced mass
 `weaponMass * targetMass / (weaponMass + targetMass)` and multiplies it by

@@ -7024,9 +7024,10 @@ namespace
             0x50);
         if (!bodyWrapper)
             return false;
-        const float mass = *reinterpret_cast<const float*>(
+        const float inverseMass = *reinterpret_cast<const float*>(
             bodyWrapper + 0x1DC);
-        if (!std::isfinite(mass) || mass <= 0.001f || mass > 1000000.0f)
+        const float mass = PhysicalContactMassFromInverseMass(inverseMass);
+        if (mass <= 0.0f)
             return false;
         component = resolved;
         bodyIndex = resolvedBodyIndex;
