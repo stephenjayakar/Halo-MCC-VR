@@ -9175,6 +9175,12 @@ int main()
             PhysicalContactDebugScoopTrajectory(4000.0f);
         const PhysicalContactDebugScoopPose scoopReleased =
             PhysicalContactDebugScoopTrajectory(4750.0f);
+        const bool debugTargetMovedEnough =
+            PhysicalContactDebugTargetMovedEnough(
+                {1.0f, 2.0f, 3.0f}, {1.02f, 2.0f, 3.0f}, 0.328f);
+        const bool debugTargetStayedAnchored =
+            !PhysicalContactDebugTargetMovedEnough(
+                {1.0f, 2.0f, 3.0f}, {1.01f, 2.0f, 3.0f}, 0.328f);
         Check(scoopReady.liftMeters == 0.0f &&
               scoopLifted.liftMeters == 0.35f &&
               scoopCarried.carryMeters == 0.35f &&
@@ -9185,10 +9191,14 @@ int main()
               scoopLifted.liftMetersPerSecond == 0.0f &&
               scoopCarried.carryMetersPerSecond == 0.0f &&
               scoopReleased.releaseMetersPerSecond == 0.0f &&
+              debugTargetMovedEnough && debugTargetStayedAnchored &&
+              !PhysicalContactDebugTargetMovedEnough(
+                  {}, {}, std::numeric_limits<float>::quiet_NaN()) &&
               PhysicalContactDebugScoopTrajectory(-1.0f).liftMeters == 0.0f,
             "The one-shot Forge scoop rig reports the exact lift, carry, and "
             "release velocity, stays below the 1.50 m/s melee threshold, and "
-            "ends every phase at rest");
+            "ends every phase at rest while rejecting anchored targets by "
+            "measured displacement");
 
         const PhysicalContactPushResponse gentlePush =
             PhysicalContactStablePush(

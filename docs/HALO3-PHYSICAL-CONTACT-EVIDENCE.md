@@ -545,6 +545,18 @@ Native melee remains a separate command and is unchanged. This replacement is
 source- and pure-test-verified but awaits the controlled Forge matrix and
 headset acceptance.
 
+The first installed mass-correct run selected a different `2.008 kg` map
+weapon. It accepted 112 velocity responses but moved only `0.010` world units,
+below 5 cm at the live world scale, and returned to rest. Mass and motion type
+alone therefore still cannot distinguish a truly loose body from a Forge
+placement constraint. The validation rig now measures the full scoop result:
+after six seconds it rejects any candidate that moved less than 5 cm, clears
+the anchor and contact state, and continues through a bounded 32-handle reject
+set until it finds a body that actually responds. Normal gameplay selection is
+unchanged. The failed-target log is
+`out/debug-openxr/191fb95-forge-scoop-constrained-target.log` (SHA-256
+`1DF65C1B24A83187D1987AEE00EF90D2360DB65FEE78B7E526F5B96A544CD541`).
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure

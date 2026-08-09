@@ -6342,6 +6342,9 @@ namespace
     std::atomic<bool> g_halo3ContactDebugMelee{false};
     std::atomic<bool> g_halo3ContactDebugScoop{false};
     uint64_t g_halo3ContactDebugScoopStartMs = 0;
+    std::array<int32_t, 32> g_halo3ContactDebugRejectedTargets{};
+    std::atomic<uint32_t> g_halo3ContactDebugRejectedTargetCount{0};
+    std::atomic<bool> g_halo3ContactDebugTargetValidated{false};
     std::atomic<int32_t> g_halo3ContactDebugAimTarget{-1};
     std::atomic<uint32_t> g_halo3ContactDebugAimKind{0xFFFFFFFFu};
     std::atomic<int32_t> g_halo3ContactDebugTarget{-1};
@@ -10488,6 +10491,23 @@ namespace
                         (anchoredHandle != -1 &&
                          handle != anchoredHandle))
                         continue;
+                    bool rejectedDebugTarget = false;
+                    const uint32_t rejectedTargetCount =
+                        g_halo3ContactDebugRejectedTargetCount.load(
+                            std::memory_order_relaxed);
+                    for (uint32_t rejected = 0;
+                         rejected < rejectedTargetCount;
+                         ++rejected)
+                    {
+                        if (g_halo3ContactDebugRejectedTargets[rejected] ==
+                            handle)
+                        {
+                            rejectedDebugTarget = true;
+                            break;
+                        }
+                    }
+                    if (rejectedDebugTarget)
+                        continue;
                     auto* data = *reinterpret_cast<unsigned char**>(
                         entry + kHalo3ObjectEntryDataOffset);
                     if (!data || *reinterpret_cast<const int32_t*>(
@@ -10549,6 +10569,51 @@ namespace
                     g_halo3ContactDebugAnchorValid = false;
                     g_halo3ContactDebugAnchorHandle = -1;
                     g_halo3ContactDebugScoopStartMs = 0;
+                    g_halo3ContactDebugTargetValidated.store(
+                        false, std::memory_order_relaxed);
+                }
+                else if (debugScoop && anchoredHandle != -1 &&
+                         aimTarget == anchoredHandle && debugAimData &&
+                         g_halo3ContactDebugScoopStartMs &&
+                         nowMs >= g_halo3ContactDebugScoopStartMs + 6000 &&
+                         !g_halo3ContactDebugTargetValidated.load(
+                             std::memory_order_relaxed))
+                {
+                    const PhysicalContactTransform currentTransform =
+                        Halo3ContactObjectTransform(debugAimData);
+                    if (PhysicalContactDebugTargetMovedEnough(
+                            g_halo3ContactDebugAnchorTransform.position,
+                            currentTransform.position, worldScale))
+                    {
+                        g_halo3ContactDebugTargetValidated.store(
+                            true, std::memory_order_relaxed);
+                    }
+                    else
+                    {
+                        const uint32_t rejectedTargetCount =
+                            g_halo3ContactDebugRejectedTargetCount.load(
+                                std::memory_order_relaxed);
+                        if (rejectedTargetCount <
+                            g_halo3ContactDebugRejectedTargets.size())
+                        {
+                            g_halo3ContactDebugRejectedTargets[
+                                rejectedTargetCount] = anchoredHandle;
+                            g_halo3ContactDebugRejectedTargetCount.store(
+                                rejectedTargetCount + 1,
+                                std::memory_order_relaxed);
+                        }
+                        g_halo3ContactDebugAnchorValid = false;
+                        g_halo3ContactDebugAnchorHandle = -1;
+                        g_halo3ContactDebugScoopStartMs = 0;
+                        g_halo3ContactDebugTargetValidated.store(
+                            false, std::memory_order_relaxed);
+                        g_halo3ContactDebugTarget.store(
+                            -1, std::memory_order_relaxed);
+                        aimTarget = -1;
+                        aimKind = 0xFF;
+                        debugAimData = nullptr;
+                        Halo3ResetPhysicalContact();
+                    }
                 }
                 else if (aimTarget != -1 && anchoredHandle == -1)
                 {
@@ -10565,6 +10630,8 @@ namespace
                         g_halo3ContactDebugAnchorTransform = anchorTransform;
                         g_halo3ContactDebugAnchorForward = anchorForward;
                         g_halo3ContactDebugScoopStartMs = nowMs;
+                        g_halo3ContactDebugTargetValidated.store(
+                            false, std::memory_order_relaxed);
                     }
                 }
                 g_halo3ContactDebugAimTarget.store(
@@ -11782,7 +11849,7 @@ namespace
                 "target=0x%08X "
                 "start=(%.3f %.3f %.3f) now=(%.3f %.3f %.3f) "
                 "moved=%.3f velocity=(%.3f %.3f %.3f) game=%u sim=%u "
-                "cooperative=%u options=%u",
+                "cooperative=%u options=%u rejected=%u validated=%u",
                 static_cast<uint32_t>(
                     g_halo3ContactDebugAimTarget.load(
                         std::memory_order_relaxed)),
@@ -11799,7 +11866,11 @@ namespace
                 (g_halo3ContactDebugGameOptions.load(
                     std::memory_order_relaxed) >> 16) & 1u,
                 g_halo3ContactDebugGameOptions.load(
-                    std::memory_order_relaxed) >> 31);
+                    std::memory_order_relaxed) >> 31,
+                g_halo3ContactDebugRejectedTargetCount.load(
+                    std::memory_order_relaxed),
+                g_halo3ContactDebugTargetValidated.load(
+                    std::memory_order_relaxed) ? 1u : 0u);
             const uint64_t census =
                 g_halo3ContactDebugObjectCensus.load(
                     std::memory_order_relaxed);
@@ -16497,6 +16568,11 @@ namespace
         g_halo3ContactDebugScoop.store(
             contactDebugScoopEnabled, std::memory_order_release);
         g_halo3ContactDebugScoopStartMs = 0;
+        g_halo3ContactDebugRejectedTargets.fill(-1);
+        g_halo3ContactDebugRejectedTargetCount.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugTargetValidated.store(
+            false, std::memory_order_release);
         g_halo3ContactDebugTarget.store(-1, std::memory_order_release);
         g_halo3ContactDebugAnchorValid = false;
         g_halo3ContactDebugAnchorGeneration = 0;

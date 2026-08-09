@@ -1123,6 +1123,21 @@ inline PhysicalContactDebugScoopPose PhysicalContactDebugScoopTrajectory(
         0.30f * smoothStepVelocity(releasePhase, 0.75f)};
 }
 
+inline bool PhysicalContactDebugTargetMovedEnough(
+    PhysicalContactVec3 initialWorldPosition,
+    PhysicalContactVec3 currentWorldPosition, float worldUnitsPerMeter,
+    float requiredMeters = 0.05f)
+{
+    if (!PhysicalContactFinite(initialWorldPosition) ||
+        !PhysicalContactFinite(currentWorldPosition) ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f ||
+        !std::isfinite(requiredMeters) || requiredMeters <= 0.0f)
+        return false;
+    const float movedMeters = PhysicalContactLength(
+        currentWorldPosition - initialWorldPosition) / worldUnitsPerMeter;
+    return std::isfinite(movedMeters) && movedMeters >= requiredMeters;
+}
+
 inline float PhysicalContactImpulseDeltaMetersPerSecond(float speed)
 {
     return std::clamp(speed * 0.5f, 0.0f, 1.5f);
