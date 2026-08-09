@@ -164,7 +164,7 @@ try {
             'authored-bounds-derived-capsule'
         halo3_physical_weapon_melee_speed_default_mps = 1.50
         halo3_physical_weapon_slow_contact_damage = $false
-        halo3_physical_weapon_native_authored_melee = $false
+        halo3_physical_weapon_native_authored_melee = $true
         reach_controller_input_enabled = $true
         reach_render_candidate_compiled = $true
         reach_loaded_image_preflight_enabled = $true

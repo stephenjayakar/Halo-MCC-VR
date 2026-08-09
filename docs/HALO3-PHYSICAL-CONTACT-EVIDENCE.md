@@ -22,7 +22,11 @@ render, input, ODST, or Reach paths.
 | `object_set_velocity` native | `0xAD8050` | `0x39BAD0` | 1 | the official script wrapper at `0x7A88F0` and retail wrapper at `0x1E380C` call their respective native with object handle plus three local velocity floats |
 | `object_set_velocities` world native | `0xA4EAA0` | `0x3411A4` | 1 | both `object_set_velocity` bodies transform the three local floats into a world vector, then call this routine with object handle, world-linear pointer, and null angular pointer; contact already owns a validated, clamped world vector and uses this lower authoritative physics/network path directly |
 | `objects_update` simulation owner | `0xA52920` | `0x34067C` | 1 | retained H3EK `objects.cpp` assertion metadata identifies the body containing the `object_update_absolute_index` transaction; the retail homolog preserves the TLS object table, active-object loops, `object_update_absolute_index` writes, and update-in-progress byte, and the complete runtime signature is unique |
-| `unit_melee_effects` (rejected for damage) | `0xA63390` | `0x35A194` | 1 | official disassembly proves the eight arguments and authored effect selection, but the body only emits the melee contact effects; it is not a damage-applying entry point and remains unbound |
+| `unit_melee_effects` (rejected for damage) | `0xA63390` | `0x35A194` | 1 | official disassembly proves the eight arguments and authored effect selection, but the body only emits melee contact effects; it is not used as the damage entry point and is reached only through Halo's stock wrapper |
+| authored melee tag selector | `0xA5DE20` | `0x35A9A4` | 1 | the official and retail bodies resolve the active weapon and select its ordinary/clang damage and response tag pair; melee type `0` follows the ordinary player-melee branch without entering lunge selection |
+| `damage_owner_from_object` | `0xAA0120` | `0x384A88` | 1 | official assertion/source metadata and both bodies prove the object-handle plus 0x0C-byte owner-output ABI used by Halo's stock melee caller |
+| melee damage application helper | `0xA59860` | `0x35BEFC` | 1 | official assertions name the `damage_owner` and `damage_target` arguments; the retail body copies those records into native damage data, sets the melee damage flags, and enters the engine's damage application path |
+| stock melee effects/response wrapper | stock caller sequence following `0xA596DA` | `0x35BCA0` | 1 | the retail stock melee caller passes the selector's damage/response tags, exact target index, material, point, and normal; the wrapper invokes `unit_melee_effects` and the authored impact response path |
 | `game_is_cooperative` native | `0xCFB7D0` | `0x0F000C` | 1 | official/retail script wrappers call the native; its body first requires game-options byte `+0x10 == 1` (campaign), then returns whether the authoritative player count is greater than one |
 
 The retail signatures embedded in `game.cpp` wildcard only relocation/call
@@ -34,11 +38,21 @@ The active held weapon is read through the already-proven Halo 3 object table:
 the player unit's current weapon slot is `unit+0x262`, handles begin at
 `unit+0x268`, object definition datum is `object+0x00`, and bounds are
 `object+0x1C/+0x28`. The earlier `+0x1B4/+0x22C` damage-effect selection was not
-proven by the native body and is rejected. `unit_melee_effects` actually reads
-weapon-definition fields `+0x8C` and conditionally `+0x49C`; because effects
-alone do not satisfy native melee damage, high-speed contact stays stock until
-the damage-applying path is separately established. No grip, trigger,
-animation, or lunge input is synthesized.
+proven by the native body and is rejected. The authored selector instead reads
+the active weapon's melee parameter blocks at definition offsets `+0x24C`,
+`+0x26C`, `+0x28C`, `+0x2AC`, and `+0x2CC`, with clang data at `+0x2EC`;
+each block supplies damage at `+0x0C` and response at `+0x1C`. It falls back to
+the weapon's default pair and finally the unit's authored melee damage.
+
+Halo's damage helper consumes a 0x0C-byte owner and a 0x3C-byte exact-target
+record. Retail reads target object handle `+0x1C`, damage section `+0x2C`,
+material `+0x30`, scale `+0x34`, and contest/flag bytes `+0x38/+0x39`. Physical
+contact supplies the collision point/normal, exact datum handle, invalid
+surface/node/region/material sentinels, and scale 1.0, matching the stock
+zero-initialized melee record where contact metadata is unavailable. The command
+also carries the weapon handle; the simulation consumer revalidates that the
+same weapon remains active before selecting tags. No grip, trigger, animation,
+melee action, contest, or lunge input is synthesized.
 
 The collision query's first argument packs two 32-bit flag sets: collision
 flags in the low dword and object-type flags in the high dword. The official
@@ -98,24 +112,29 @@ assumption was false and prevented every Forge sweep. Synchronous and
 distributed client roles remain disabled. Any failure resets contact state and
 performs no native write.
 
-Collision remains on the camera callback, but object mutation does not. The
-camera callback publishes a bounded atomic command containing the validated
-target handle, world velocity, generation, timestamp, and serial. The unique
-`objects_update` hook consumes that command immediately before the authoritative
-object update. The hook performs no allocation, logging, file I/O, locking, or
-signature scanning and always calls the original update routine.
+Collision remains on the camera callback, but object mutation and damage do not.
+The camera callback publishes a bounded atomic command containing operation
+flags, validated target/player/weapon handles, world velocity, contact
+point/normal, generation, timestamp, and serial. The unique `objects_update`
+hook consumes that command immediately before the authoritative object update.
+The hook performs no allocation, logging, file I/O, locking, or signature
+scanning and always calls the original update routine.
 
 The closest native surface blocks its sample. BSP and instanced geometry receive
 no impulse or damage. Player, held weapon, attached/first-person-only objects,
 stale handles, and invalid values are rejected. Every exact object hit publishes
 one native velocity command per continuous contact above 0.05 m/s; the
-simulation owner validates and applies it before object update. The native is
-deliberately allowed to decide whether that object owns a movable rigid body,
-avoiding a brittle object-kind whitelist that excluded Forge scenery and
-machines. The velocity delta is proportional to swing speed and clamped. The
-high-speed melee threshold/debounce remains present but fail-closed for this
-collision/rigid-body candidate because the previously bound native was
-effects-only. Existing grip melee and all normal input paths remain unchanged.
+simulation owner validates and applies it before object update. The capsule
+fallback admits only the engine object kinds that can own movable physics; the
+native velocity path remains the final authority for whether the exact object
+actually owns a rigid body. The velocity delta is proportional to swing speed
+and clamped. At or above the configured threshold, an independently debounced
+command selects the equipped weapon's native melee tags, builds native damage
+ownership for the player, applies damage to that exact target, and invokes the
+stock effects/response wrapper. Missing or ambiguous melee signatures leave
+only high-speed damage stock while slow rigid-body contact continues; a runtime
+melee exception likewise disables melee alone. Existing grip melee and all
+normal input paths remain unchanged.
 
 ## Forge runtime proof
 
@@ -149,7 +168,8 @@ The pure regression suite covers translation and rotation sweeps, tunnelling,
 grazing misses, the noise floor, slow pushes, exact melee threshold crossing,
 finite-value rejection, movable/static classification, impulse clamping,
 per-target overlap debounce, separation rearming, reset on weapon/tracking
-change, and capsule fallback. The cumulative Release build and complete `ctest`
-suite must pass before packaging. Headset acceptance (specific weapons,
+change, 250 ms cooldown eligibility, timestamp-underflow rejection, and capsule
+fallback. The cumulative Release build and complete `ctest` suite must pass
+before packaging. Headset acceptance (specific weapons,
 materials, enemies, loose weapons/crates, walls, pause/loading/death, and rapid
 motion) remains intentionally pending; the feature therefore defaults off.

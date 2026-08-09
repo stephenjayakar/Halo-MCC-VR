@@ -8770,6 +8770,26 @@ int main()
             "Per-target contact fires once while overlapping and rearms after "
             "separation or a weapon/tracking reset");
 
+        Check(!PhysicalContactMeleeReady(
+                  PhysicalContactAction::ImpulseOnly, true, true, 1000, 0) &&
+              !PhysicalContactMeleeReady(
+                  PhysicalContactAction::ImpulseAndMelee, false, true,
+                  1000, 0) &&
+              !PhysicalContactMeleeReady(
+                  PhysicalContactAction::ImpulseAndMelee, true, false,
+                  1000, 0) &&
+              !PhysicalContactMeleeReady(
+                  PhysicalContactAction::ImpulseAndMelee, true, true,
+                  1249, 1000) &&
+              PhysicalContactMeleeReady(
+                  PhysicalContactAction::ImpulseAndMelee, true, true,
+                  1250, 1000) &&
+              !PhysicalContactMeleeReady(
+                  PhysicalContactAction::ImpulseAndMelee, true, true,
+                  999, 1000),
+            "High-speed melee requires native bindings, an armed target, and "
+            "the full 250 ms cooldown without timestamp underflow");
+
         Check(PhysicalContactMovableKind(0) &&
               PhysicalContactMovableKind(2) &&
               PhysicalContactMovableKind(11) &&

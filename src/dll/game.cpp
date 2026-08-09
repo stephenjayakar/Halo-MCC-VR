@@ -6012,19 +6012,61 @@ namespace
         uint64_t flags, bool secondaryOption, const float* point,
         const float* vector, int32_t ignoreObject1, int32_t ignoreObject2,
         int32_t ignoreObject3, Halo3CollisionResult* result);
-    using Halo3NativeMeleeResponseFn = void(__fastcall*)(
-        int32_t unitHandle, uint32_t damageEffectTag, int32_t targetHandle,
-        int32_t meleeType, uint16_t materialIndex,
-        const float* direction, const float* point, const float* normal);
+    struct Halo3DamageOwner
+    {
+        unsigned char bytes[0x0C];
+    };
+    static_assert(sizeof(Halo3DamageOwner) == 0x0C);
+    struct Halo3DamageTarget
+    {
+        float point[3];
+        float normal[3];
+        int32_t surfaceIndex;
+        int32_t objectHandle;
+        uint16_t nodeIndex;
+        uint16_t regionIndex;
+        int32_t unknown24;
+        int32_t unknown28;
+        int32_t damageSection;
+        uint16_t materialIndex;
+        uint16_t pad32;
+        float scale;
+        uint8_t contest;
+        uint8_t flags;
+        uint8_t pad3A[2];
+    };
+    static_assert(sizeof(Halo3DamageTarget) == 0x3C);
+    static_assert(offsetof(Halo3DamageTarget, objectHandle) == 0x1C);
+    static_assert(offsetof(Halo3DamageTarget, damageSection) == 0x2C);
+    static_assert(offsetof(Halo3DamageTarget, materialIndex) == 0x30);
+    static_assert(offsetof(Halo3DamageTarget, scale) == 0x34);
+    static_assert(offsetof(Halo3DamageTarget, contest) == 0x38);
+    using Halo3SelectMeleeFn = void(__fastcall*)(
+        int32_t unitHandle, int32_t meleeType, uint8_t* meleeClass,
+        int32_t* damageEffectTag, int32_t* responseEffectTag,
+        int32_t* clangDamageEffectTag, int32_t* clangResponseEffectTag);
+    using Halo3DamageOwnerFromObjectFn = void(__fastcall*)(
+        int32_t objectHandle, Halo3DamageOwner* owner);
+    using Halo3ApplyMeleeDamageFn = void(__fastcall*)(
+        int32_t attackerUnitHandle, int32_t damageEffectTag,
+        const Halo3DamageOwner* owner, const Halo3DamageTarget* target);
+    using Halo3MeleeEffectsWrapperFn = void(__fastcall*)(
+        int32_t unitHandle, int32_t damageEffectTag,
+        int32_t responseEffectTag, int32_t targetAbsoluteIndex,
+        uint16_t materialIndex, const float* point, const float* normal);
     using Halo3GameIsCooperativeFn = bool(__fastcall*)();
     using Halo3ObjectsUpdateFn = void(__fastcall*)();
     Halo3ObjectSetVelocityFn g_halo3ObjectSetVelocity = nullptr;
     Halo3ObjectSetVelocitiesFn g_halo3ObjectSetVelocities = nullptr;
     Halo3CollisionTestVectorFn g_halo3CollisionTestVector = nullptr;
-    Halo3NativeMeleeResponseFn g_halo3NativeMeleeResponse = nullptr;
+    Halo3SelectMeleeFn g_halo3SelectMelee = nullptr;
+    Halo3DamageOwnerFromObjectFn g_halo3DamageOwnerFromObject = nullptr;
+    Halo3ApplyMeleeDamageFn g_halo3ApplyMeleeDamage = nullptr;
+    Halo3MeleeEffectsWrapperFn g_halo3MeleeEffectsWrapper = nullptr;
     Halo3GameIsCooperativeFn g_halo3GameIsCooperative = nullptr;
     Halo3ObjectsUpdateFn g_origHalo3ObjectsUpdate = nullptr;
     std::atomic<bool> g_halo3PhysicalContactBindings{false};
+    std::atomic<bool> g_halo3PhysicalMeleeBindings{false};
     // Runtime acceptance rejected the bounds-sphere proxy: it remained in
     // near-continuous false contact and did not move Forge or campaign props.
     // Keep the failed implementation inert while preserving it for evidence.
@@ -6066,7 +6108,18 @@ namespace
     std::atomic<uint64_t> g_halo3ContactCommandSerial{0};
     std::atomic<uint64_t> g_halo3ContactAppliedSerial{0};
     std::atomic<uint32_t> g_halo3ContactCommandStatus{0};
+    constexpr uint32_t kHalo3ContactCommandImpulse = 1u << 0;
+    constexpr uint32_t kHalo3ContactCommandMelee = 1u << 1;
+    std::atomic<uint32_t> g_halo3ContactCommandFlags{0};
+    std::atomic<int32_t> g_halo3ContactCommandUnitHandle{-1};
+    std::atomic<int32_t> g_halo3ContactCommandWeaponHandle{-1};
+    std::atomic<float> g_halo3ContactCommandPoint[3]{};
+    std::atomic<float> g_halo3ContactCommandNormal[3]{};
+    std::atomic<uint32_t> g_halo3ContactMeleeStatus{0};
+    std::atomic<int32_t> g_halo3ContactMeleeDamageTag{-1};
+    std::atomic<int32_t> g_halo3ContactMeleeResponseTag{-1};
     std::atomic<bool> g_halo3ContactDebugRig{false};
+    std::atomic<bool> g_halo3ContactDebugMelee{false};
     std::atomic<int32_t> g_halo3ContactDebugAimTarget{-1};
     std::atomic<uint32_t> g_halo3ContactDebugAimKind{0xFFFFFFFFu};
     std::atomic<int32_t> g_halo3ContactDebugTarget{-1};
@@ -8717,19 +8770,36 @@ namespace
             const uint64_t nowMs = GetTickCount64();
             const int32_t handle =
                 g_halo3ContactCommandHandle.load(std::memory_order_relaxed);
+            const int32_t unitHandle =
+                g_halo3ContactCommandUnitHandle.load(std::memory_order_relaxed);
+            const int32_t weaponHandle =
+                g_halo3ContactCommandWeaponHandle.load(
+                    std::memory_order_relaxed);
+            const uint32_t commandFlags =
+                g_halo3ContactCommandFlags.load(std::memory_order_relaxed);
             float velocity[3]{};
+            float point[3]{};
+            float normal[3]{};
             for (int axis = 0; axis < 3; ++axis)
+            {
                 velocity[axis] = g_halo3ContactCommandVelocity[axis].load(
                     std::memory_order_relaxed);
-            const bool valid = generation && generation ==
+                point[axis] = g_halo3ContactCommandPoint[axis].load(
+                    std::memory_order_relaxed);
+                normal[axis] = g_halo3ContactCommandNormal[axis].load(
+                    std::memory_order_relaxed);
+            }
+            const bool wantsImpulse =
+                (commandFlags & kHalo3ContactCommandImpulse) != 0;
+            const bool wantsMelee =
+                (commandFlags & kHalo3ContactCommandMelee) != 0;
+            const bool commonValid = generation && generation ==
                     g_halo3RuntimeGeneration.load(std::memory_order_acquire) &&
                 sampleMs && nowMs >= sampleMs && nowMs - sampleMs <= 500 &&
-                handle != -1 && std::isfinite(velocity[0]) &&
-                std::isfinite(velocity[1]) && std::isfinite(velocity[2]) &&
-                g_halo3ObjectSetVelocities && serial ==
+                handle != -1 && (wantsImpulse || wantsMelee) && serial ==
                     g_halo3ContactCommandSerial.load(
                         std::memory_order_acquire);
-            if (valid)
+            if (commonValid)
             {
                 uint64_t applied = g_halo3ContactAppliedSerial.load(
                     std::memory_order_relaxed);
@@ -8738,37 +8808,270 @@ namespace
                         applied, serial, std::memory_order_acq_rel,
                         std::memory_order_relaxed))
                 {
-                    bool faulted = false;
-                    __try
+                    if (wantsImpulse)
                     {
-                        g_halo3ObjectSetVelocities(
-                            handle, velocity, nullptr);
+                        const bool impulseValid =
+                            std::isfinite(velocity[0]) &&
+                            std::isfinite(velocity[1]) &&
+                            std::isfinite(velocity[2]) &&
+                            g_halo3ObjectSetVelocities;
+                        bool impulseFaulted = false;
+                        if (impulseValid)
+                        {
+                            __try
+                            {
+                                g_halo3ObjectSetVelocities(
+                                    handle, velocity, nullptr);
+                            }
+                            __except (EXCEPTION_EXECUTE_HANDLER)
+                            {
+                                impulseFaulted = true;
+                            }
+                        }
+                        if (!impulseValid || impulseFaulted)
+                        {
+                            g_halo3ContactCommandStatus.store(
+                                impulseFaulted ? 3u : 4u,
+                                std::memory_order_relaxed);
+                            if (impulseFaulted)
+                            {
+                                g_halo3ContactStage.store(
+                                    static_cast<uint32_t>(
+                                        Halo3PhysicalContactStage::Faulted),
+                                    std::memory_order_relaxed);
+                                g_halo3PhysicalContactBindings.store(
+                                    false, std::memory_order_release);
+                            }
+                        }
+                        else
+                        {
+                            g_halo3ContactCommandStatus.store(
+                                2, std::memory_order_relaxed);
+                            g_halo3ContactImpulses.fetch_add(
+                                1, std::memory_order_relaxed);
+                            g_halo3ContactStage.store(
+                                static_cast<uint32_t>(
+                                    Halo3PhysicalContactStage::Impulse),
+                                std::memory_order_relaxed);
+                        }
                     }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
+
+                    if (wantsMelee)
                     {
-                        faulted = true;
-                    }
-                    if (faulted)
-                    {
-                        g_halo3ContactCommandStatus.store(
-                            3, std::memory_order_relaxed);
-                        g_halo3ContactStage.store(
-                            static_cast<uint32_t>(
-                                Halo3PhysicalContactStage::Faulted),
-                            std::memory_order_relaxed);
-                        g_halo3PhysicalContactBindings.store(
-                            false, std::memory_order_release);
-                    }
-                    else
-                    {
-                        g_halo3ContactCommandStatus.store(
-                            2, std::memory_order_relaxed);
-                        g_halo3ContactImpulses.fetch_add(
-                            1, std::memory_order_relaxed);
-                        g_halo3ContactStage.store(
-                            static_cast<uint32_t>(
-                                Halo3PhysicalContactStage::Impulse),
-                            std::memory_order_relaxed);
+                        const bool meleeValid = unitHandle != -1 &&
+                            weaponHandle != -1 &&
+                            std::isfinite(point[0]) &&
+                            std::isfinite(point[1]) &&
+                            std::isfinite(point[2]) &&
+                            std::isfinite(normal[0]) &&
+                            std::isfinite(normal[1]) &&
+                            std::isfinite(normal[2]) &&
+                            g_halo3PhysicalMeleeBindings.load(
+                                std::memory_order_acquire) &&
+                            g_halo3SelectMelee &&
+                            g_halo3DamageOwnerFromObject &&
+                            g_halo3ApplyMeleeDamage &&
+                            g_halo3MeleeEffectsWrapper;
+                        if (!meleeValid)
+                        {
+                            g_halo3ContactMeleeStatus.store(
+                                4, std::memory_order_relaxed);
+                            if (!wantsImpulse)
+                                g_halo3ContactCommandStatus.store(
+                                    4, std::memory_order_relaxed);
+                        }
+                        else
+                        {
+                            bool meleeFaulted = false;
+                            bool damageApplied = false;
+                            bool meleeRejected = false;
+                            int32_t damageEffectTag = -1;
+                            int32_t responseEffectTag = -1;
+                            __try
+                            {
+                                bool weaponMatches = false;
+                                auto** slots = reinterpret_cast<void**>(
+                                    __readgsqword(0x58));
+                                auto* tls = slots && g_engineTlsIndex
+                                    ? reinterpret_cast<unsigned char*>(
+                                          slots[*g_engineTlsIndex])
+                                    : nullptr;
+                                auto* table = tls
+                                    ? *reinterpret_cast<unsigned char**>(
+                                          tls + kHalo3TlsObjectTableOffset)
+                                    : nullptr;
+                                if (table)
+                                {
+                                    OdstDataArrayHeaderView header{};
+                                    header.nameIsObject = memcmp(
+                                        table + kOdstDataArrayNameOffset,
+                                        "object", 7) == 0;
+                                    header.signature =
+                                        *reinterpret_cast<const uint32_t*>(
+                                            table +
+                                            kOdstDataArraySignatureOffset);
+                                    header.maximumCount =
+                                        *reinterpret_cast<const uint32_t*>(
+                                            table +
+                                            kOdstDataArrayMaxCountOffset);
+                                    header.elementSize =
+                                        *reinterpret_cast<const uint32_t*>(
+                                            table +
+                                            kOdstDataArrayElementSizeOffset);
+                                    header.firstUnallocated =
+                                        *reinterpret_cast<const uint32_t*>(
+                                            table +
+                                            kOdstDataArrayFirstUnallocatedOffset);
+                                    header.valid = *(table +
+                                        kOdstDataArrayValidOffset);
+                                    const uint32_t unitIndex =
+                                        static_cast<uint32_t>(unitHandle) &
+                                        0xFFFFu;
+                                    auto* entries =
+                                        *reinterpret_cast<unsigned char**>(
+                                            table +
+                                            kOdstDataArrayElementsOffset);
+                                    if (OdstObjectTableIsWalkable(header) &&
+                                        entries &&
+                                        unitIndex < header.maximumCount)
+                                    {
+                                        auto* unitEntry = entries +
+                                            static_cast<size_t>(unitIndex) *
+                                                kHalo3ObjectEntryStride;
+                                        if (*reinterpret_cast<const uint16_t*>(
+                                                unitEntry) ==
+                                            static_cast<uint16_t>(
+                                                static_cast<uint32_t>(
+                                                    unitHandle) >> 16))
+                                        {
+                                            auto* unitData =
+                                                *reinterpret_cast<
+                                                    unsigned char**>(
+                                                    unitEntry +
+                                                    kHalo3ObjectEntryDataOffset);
+                                            const int weaponSlot = unitData
+                                                ? *reinterpret_cast<
+                                                      const int8_t*>(
+                                                      unitData + 0x262)
+                                                : -1;
+                                            const int32_t currentWeapon =
+                                                unitData && weaponSlot >= 0 &&
+                                                    weaponSlot < 4
+                                                ? *reinterpret_cast<
+                                                      const int32_t*>(
+                                                      unitData + 0x268 +
+                                                      weaponSlot * 4)
+                                                : -1;
+                                            weaponMatches =
+                                                currentWeapon == weaponHandle;
+                                        }
+                                    }
+                                }
+                                if (!weaponMatches)
+                                {
+                                    meleeRejected = true;
+                                }
+                                else
+                                {
+                                    uint8_t meleeClass = 0;
+                                    int32_t clangDamageEffectTag = -1;
+                                    int32_t clangResponseEffectTag = -1;
+                                    g_halo3SelectMelee(
+                                        unitHandle, 0, &meleeClass,
+                                        &damageEffectTag, &responseEffectTag,
+                                        &clangDamageEffectTag,
+                                        &clangResponseEffectTag);
+                                    g_halo3ContactMeleeDamageTag.store(
+                                        damageEffectTag,
+                                        std::memory_order_relaxed);
+                                    g_halo3ContactMeleeResponseTag.store(
+                                        responseEffectTag,
+                                        std::memory_order_relaxed);
+                                    if (damageEffectTag != -1 &&
+                                        (static_cast<uint32_t>(
+                                             damageEffectTag) &
+                                         0xFFFFu) != 0xFFFFu)
+                                    {
+                                        Halo3DamageOwner owner{};
+                                        g_halo3DamageOwnerFromObject(
+                                            unitHandle, &owner);
+                                        Halo3DamageTarget target{};
+                                        memcpy(target.point, point,
+                                               sizeof(target.point));
+                                        memcpy(target.normal, normal,
+                                               sizeof(target.normal));
+                                        target.surfaceIndex = -1;
+                                        target.objectHandle = handle;
+                                        target.nodeIndex = 0xFFFFu;
+                                        target.regionIndex = 0xFFFFu;
+                                        target.unknown24 = -1;
+                                        target.unknown28 = -1;
+                                        target.damageSection = -1;
+                                        target.materialIndex = 0xFFFFu;
+                                        target.scale = 1.0f;
+                                        g_halo3ApplyMeleeDamage(
+                                            unitHandle, damageEffectTag,
+                                            &owner, &target);
+                                        g_halo3MeleeEffectsWrapper(
+                                            unitHandle, damageEffectTag,
+                                            responseEffectTag,
+                                            static_cast<int32_t>(
+                                                static_cast<uint32_t>(handle) &
+                                                0xFFFFu),
+                                            target.materialIndex,
+                                            target.point, target.normal);
+                                        damageApplied = true;
+                                    }
+                                }
+                            }
+                            __except (EXCEPTION_EXECUTE_HANDLER)
+                            {
+                                meleeFaulted = true;
+                            }
+                            if (meleeFaulted)
+                            {
+                                g_halo3ContactMeleeStatus.store(
+                                    3, std::memory_order_relaxed);
+                                if (!wantsImpulse)
+                                    g_halo3ContactCommandStatus.store(
+                                        3, std::memory_order_relaxed);
+                                g_halo3PhysicalMeleeBindings.store(
+                                    false, std::memory_order_release);
+                                g_halo3ContactStage.store(
+                                    static_cast<uint32_t>(
+                                        Halo3PhysicalContactStage::Faulted),
+                                    std::memory_order_relaxed);
+                            }
+                            else if (meleeRejected)
+                            {
+                                g_halo3ContactMeleeStatus.store(
+                                    4, std::memory_order_relaxed);
+                                if (!wantsImpulse)
+                                    g_halo3ContactCommandStatus.store(
+                                        4, std::memory_order_relaxed);
+                            }
+                            else if (!damageApplied)
+                            {
+                                g_halo3ContactMeleeStatus.store(
+                                    5, std::memory_order_relaxed);
+                                if (!wantsImpulse)
+                                    g_halo3ContactCommandStatus.store(
+                                        4, std::memory_order_relaxed);
+                            }
+                            else
+                            {
+                                g_halo3ContactMeleeStatus.store(
+                                    2, std::memory_order_relaxed);
+                                g_halo3ContactCommandStatus.store(
+                                    2, std::memory_order_relaxed);
+                                g_halo3ContactMelees.fetch_add(
+                                    1, std::memory_order_relaxed);
+                                g_halo3ContactStage.store(
+                                    static_cast<uint32_t>(
+                                        Halo3PhysicalContactStage::Melee),
+                                    std::memory_order_relaxed);
+                            }
+                        }
                     }
                 }
             }
@@ -8788,6 +9091,8 @@ namespace
             g_halo3RuntimeGeneration.load(std::memory_order_acquire);
         const bool debugRig =
             g_halo3ContactDebugRig.load(std::memory_order_acquire);
+        const bool debugMelee =
+            g_halo3ContactDebugMelee.load(std::memory_order_acquire);
         bool paused = true;
         int32_t scene = -1, shot = -1;
         const bool gate = kEnableHalo3PhysicalContactCandidate &&
@@ -8816,7 +9121,8 @@ namespace
         {
             const float phase = static_cast<float>(nowMs % 10472u) *
                 (6.28318530718f / 10472.0f);
-            const float speed = 0.90f * std::fabs(std::cos(phase));
+            const float speed = (debugMelee ? 2.25f : 0.90f) *
+                std::fabs(std::cos(phase));
             motion.poseValid = true;
             motion.linearVelocityValid = true;
             motion.angularVelocityValid = true;
@@ -9455,6 +9761,15 @@ namespace
                 return;
             }
 
+            const bool requestMelee = PhysicalContactMeleeReady(
+                action,
+                g_halo3PhysicalMeleeBindings.load(
+                    std::memory_order_acquire) &&
+                    g_halo3SelectMelee && g_halo3DamageOwnerFromObject &&
+                    g_halo3ApplyMeleeDamage && g_halo3MeleeEffectsWrapper,
+                contact->meleeArmed, nowMs, g_halo3ContactLastMeleeMs);
+            uint32_t commandFlags = 0;
+            PhysicalContactVec3 worldVelocity{};
             if (firstContact)
             {
                 if (debugRig &&
@@ -9479,7 +9794,7 @@ namespace
                             closestHandle, std::memory_order_release);
                     }
                 }
-                PhysicalContactVec3 worldVelocity{
+                worldVelocity = {
                     targetVelocity[0], targetVelocity[1], targetVelocity[2]};
                 const float delta =
                     PhysicalContactImpulseDeltaMetersPerSecond(relativeSpeed) *
@@ -9490,66 +9805,57 @@ namespace
                 if (magnitude > maximum)
                     worldVelocity = worldVelocity * (maximum / magnitude);
                 if (PhysicalContactFinite(worldVelocity))
-                {
-                    g_halo3ContactCommandHandle.store(
-                        closestHandle, std::memory_order_relaxed);
-                    g_halo3ContactCommandVelocity[0].store(
-                        worldVelocity.x, std::memory_order_relaxed);
-                    g_halo3ContactCommandVelocity[1].store(
-                        worldVelocity.y, std::memory_order_relaxed);
-                    g_halo3ContactCommandVelocity[2].store(
-                        worldVelocity.z, std::memory_order_relaxed);
-                    g_halo3ContactCommandGeneration.store(
-                        generation, std::memory_order_relaxed);
-                    g_halo3ContactCommandSampleMs.store(
-                        nowMs, std::memory_order_relaxed);
-                    const uint64_t serial =
-                        g_halo3ContactCommandSerial.load(
-                            std::memory_order_relaxed) + 1;
-                    g_halo3ContactCommandStatus.store(
-                        1, std::memory_order_relaxed);
-                    g_halo3ContactCommandSerial.store(
-                        serial ? serial : 1, std::memory_order_release);
-                }
+                    commandFlags |= kHalo3ContactCommandImpulse;
             }
 
-            if (action == PhysicalContactAction::ImpulseAndMelee &&
-                g_halo3NativeMeleeResponse &&
-                contact->meleeArmed &&
-                nowMs - g_halo3ContactLastMeleeMs >= 250)
+            if (requestMelee)
             {
-                uint32_t damageEffect = 0xFFFFFFFFu;
-                unsigned char* unitDefinition = Halo3LoadedTagDefinition(
-                    *reinterpret_cast<const uint16_t*>(unitData));
-                if (unitDefinition)
-                    damageEffect = *reinterpret_cast<const uint32_t*>(
-                        unitDefinition + 0x1B4);
-                unsigned char* weaponDefinition = Halo3LoadedTagDefinition(
-                    *reinterpret_cast<const uint16_t*>(weaponData));
-                if (weaponDefinition &&
-                    (*reinterpret_cast<const uint32_t*>(
-                         weaponDefinition + 0x18C) & (1u << 9)) != 0)
-                    damageEffect = *reinterpret_cast<const uint32_t*>(
-                        weaponDefinition + 0x22C);
-                if ((damageEffect & 0xFFFFu) != 0xFFFFu)
+                commandFlags |= kHalo3ContactCommandMelee;
+                contact->meleeArmed = false;
+                g_halo3ContactLastMeleeMs = nowMs;
+                g_halo3ContactMeleeStatus.store(
+                    1, std::memory_order_relaxed);
+            }
+
+            if (commandFlags)
+            {
+                g_halo3ContactCommandHandle.store(
+                    closestHandle, std::memory_order_relaxed);
+                g_halo3ContactCommandUnitHandle.store(
+                    unitHandle, std::memory_order_relaxed);
+                g_halo3ContactCommandWeaponHandle.store(
+                    weaponHandle, std::memory_order_relaxed);
+                for (int axis = 0; axis < 3; ++axis)
                 {
-                    const float direction[3] = {contactDirection.x,
-                        contactDirection.y, contactDirection.z};
-                    const float point[3] = {closest.point.x, closest.point.y,
-                                            closest.point.z};
-                    const float normal[3] = {closest.normal.x, closest.normal.y,
-                                             closest.normal.z};
-                    g_halo3NativeMeleeResponse(
-                        unitHandle, damageEffect, closestHandle, 0, 0xFFFFu,
-                        direction, point, normal);
-                    contact->meleeArmed = false;
-                    g_halo3ContactLastMeleeMs = nowMs;
-                    g_halo3ContactMelees.fetch_add(
-                        1, std::memory_order_relaxed);
-                    g_halo3ContactStage.store(
-                        static_cast<uint32_t>(Halo3PhysicalContactStage::Melee),
+                    g_halo3ContactCommandVelocity[axis].store(
+                        axis == 0 ? worldVelocity.x
+                                  : (axis == 1 ? worldVelocity.y
+                                               : worldVelocity.z),
+                        std::memory_order_relaxed);
+                    g_halo3ContactCommandPoint[axis].store(
+                        axis == 0 ? closest.point.x
+                                  : (axis == 1 ? closest.point.y
+                                               : closest.point.z),
+                        std::memory_order_relaxed);
+                    g_halo3ContactCommandNormal[axis].store(
+                        axis == 0 ? closest.normal.x
+                                  : (axis == 1 ? closest.normal.y
+                                               : closest.normal.z),
                         std::memory_order_relaxed);
                 }
+                g_halo3ContactCommandFlags.store(
+                    commandFlags, std::memory_order_relaxed);
+                g_halo3ContactCommandGeneration.store(
+                    generation, std::memory_order_relaxed);
+                g_halo3ContactCommandSampleMs.store(
+                    nowMs, std::memory_order_relaxed);
+                const uint64_t serial =
+                    g_halo3ContactCommandSerial.load(
+                        std::memory_order_relaxed) + 1;
+                g_halo3ContactCommandStatus.store(
+                    1, std::memory_order_relaxed);
+                g_halo3ContactCommandSerial.store(
+                    serial ? serial : 1, std::memory_order_release);
             }
             g_halo3ContactDebounce.EndSample();
         }
@@ -9588,7 +9894,8 @@ namespace
             ? kStageNames[stage] : "invalid";
         LOG("H3 physical contact status: stage=%s eligible=%u speed=%.2fm/s "
             "sweeps=%llu hits=%llu impulses=%llu melees=%llu "
-            "command=%llu applied=%llu commandStatus=%u",
+            "command=%llu applied=%llu commandStatus=%u meleeStatus=%u "
+            "damage=0x%08X response=0x%08X",
             stageName,
             g_halo3ContactEligibleObjects.load(std::memory_order_relaxed),
             g_halo3ContactSpeed.load(std::memory_order_relaxed),
@@ -9604,7 +9911,12 @@ namespace
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactAppliedSerial.load(
                 std::memory_order_relaxed),
-            g_halo3ContactCommandStatus.load(std::memory_order_relaxed));
+            g_halo3ContactCommandStatus.load(std::memory_order_relaxed),
+            g_halo3ContactMeleeStatus.load(std::memory_order_relaxed),
+            static_cast<uint32_t>(g_halo3ContactMeleeDamageTag.load(
+                std::memory_order_relaxed)),
+            static_cast<uint32_t>(g_halo3ContactMeleeResponseTag.load(
+                std::memory_order_relaxed)));
         if (g_halo3ContactDebugRig.load(std::memory_order_acquire))
         {
             const int32_t target =
@@ -13886,6 +14198,35 @@ namespace
         "41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 "
         "44 8B 15 ?? ?? ?? ?? 0F 29 70 A8 65 48 8B 04 25 58 00 00 00 "
         "44 8B F1 B9 38 00 00 00 4A 8B 04 D0";
+    // unit_get_melee_damage_and_response (+0x35A9A4): selects the active
+    // weapon's authored ordinary/clang damage and response tags. meleeType=0
+    // is the normal player melee selection and does not request a lunge.
+    const char* kHalo3SelectMeleeSig =
+        "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 "
+        "41 54 41 55 41 56 41 57 48 83 EC 20 44 8B 15 ?? ?? ?? ?? "
+        "49 8B D9 65 48 8B 04 25 58 00 00 00 44 8B DA "
+        "4C 8B 35 ?? ?? ?? ?? 4D 8B F8 48 8B 3D ?? ?? ?? ?? 44 8B C9";
+    // unit_apply_melee_damage (+0x35BEFC): consumes the engine's 0x0C damage
+    // owner and 0x3C exact-target record, then enters native damage handling.
+    const char* kHalo3ApplyMeleeDamageSig =
+        "48 8B C4 48 89 58 10 89 48 08 55 56 57 41 54 41 55 41 56 41 57 "
+        "48 8D 6C 24 90 48 81 EC 70 01 00 00 44 8B 15 ?? ?? ?? ?? "
+        "49 8B F8 0F 29 70 B8 41 83 CC FF 0F 29 78 A8 49 8B D9 "
+        "44 0F 29 40 98";
+    // damage_owner_from_object (+0x384A88), used by Halo's own melee path.
+    const char* kHalo3DamageOwnerFromObjectSig =
+        "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 "
+        "41 56 41 57 48 83 EC 20 44 8B 05 ?? ?? ?? ?? 48 8B DA "
+        "65 48 8B 04 25 58 00 00 00 41 BF 38 00 00 00 8B F1 "
+        "4E 8B 34 C0 44 0F B7 C1 4B 8B 04 3E 4B 8D 2C 40";
+    // Native post-hit wrapper (+0x35BCA0). The stock melee caller gives it
+    // the selected damage/response tags plus exact target index/point/normal;
+    // it invokes unit_melee_effects and authored impact response handling.
+    const char* kHalo3MeleeEffectsWrapperSig =
+        "48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 55 "
+        "41 54 41 55 41 56 41 57 48 8D 68 98 48 81 EC 40 01 00 00 "
+        "44 8B 15 ?? ?? ?? ?? 44 8B E2 0F 29 70 C8 0F 29 78 B8 "
+        "65 48 8B 04 25 58 00 00 00 49 63 F8 45 8B D9 44 8B F1";
     const char* kHalo3GameIsCooperativeSig =
         "48 83 EC 28 8B 0D ?? ?? ?? ?? 32 D2 65 48 8B 04 25 58 00 00 00 "
         "41 B8 48 00 00 00 48 8B 04 C8 4A 8B 0C 00 80 79 10 01 "
@@ -14244,8 +14585,19 @@ namespace
         const bool contactDebugEnabled = contactDebugLength > 0 &&
             contactDebugLength < std::size(contactDebugValue) &&
             contactDebugValue[0] != L'0';
+        wchar_t contactDebugMeleeValue[8]{};
+        const DWORD contactDebugMeleeLength = GetEnvironmentVariableW(
+            L"HALOMCCVR_H3_CONTACT_DEBUG_MELEE", contactDebugMeleeValue,
+            static_cast<DWORD>(std::size(contactDebugMeleeValue)));
+        const bool contactDebugMeleeEnabled = contactDebugMeleeLength > 0 &&
+            contactDebugMeleeLength < std::size(contactDebugMeleeValue) &&
+            contactDebugMeleeValue[0] != L'0';
+        const bool contactDebugRigEnabled =
+            contactDebugEnabled || contactDebugMeleeEnabled;
         g_halo3ContactDebugRig.store(
-            contactDebugEnabled, std::memory_order_release);
+            contactDebugRigEnabled, std::memory_order_release);
+        g_halo3ContactDebugMelee.store(
+            contactDebugMeleeEnabled, std::memory_order_release);
         g_halo3ContactDebugTarget.store(-1, std::memory_order_release);
         g_halo3ContactDebugGameOptions.store(0, std::memory_order_release);
         g_halo3ContactCommandHandle.store(-1, std::memory_order_relaxed);
@@ -14254,6 +14606,12 @@ namespace
         g_halo3ContactCommandSerial.store(0, std::memory_order_release);
         g_halo3ContactAppliedSerial.store(0, std::memory_order_release);
         g_halo3ContactCommandStatus.store(0, std::memory_order_relaxed);
+        g_halo3ContactCommandFlags.store(0, std::memory_order_relaxed);
+        g_halo3ContactCommandUnitHandle.store(-1, std::memory_order_relaxed);
+        g_halo3ContactCommandWeaponHandle.store(-1, std::memory_order_relaxed);
+        g_halo3ContactMeleeStatus.store(0, std::memory_order_relaxed);
+        g_halo3ContactMeleeDamageTag.store(-1, std::memory_order_relaxed);
+        g_halo3ContactMeleeResponseTag.store(-1, std::memory_order_relaxed);
         for (int axis = 0; axis < 3; ++axis)
         {
             g_halo3ContactDebugInitialPosition[axis].store(
@@ -14262,10 +14620,17 @@ namespace
                 0.0f, std::memory_order_relaxed);
             g_halo3ContactDebugVelocity[axis].store(
                 0.0f, std::memory_order_relaxed);
+            g_halo3ContactCommandPoint[axis].store(
+                0.0f, std::memory_order_relaxed);
+            g_halo3ContactCommandNormal[axis].store(
+                0.0f, std::memory_order_relaxed);
         }
-        if (contactDebugEnabled)
+        if (contactDebugRigEnabled)
             LOG("H3 physical contact DEBUG RIG enabled by environment; "
                 "synthetic center-ray motion and object-state readback active");
+        if (contactDebugMeleeEnabled)
+            LOG("H3 physical contact DEBUG MELEE enabled by environment; "
+                "synthetic controller speed can cross the authored melee threshold");
         LocateNativePauseFlag(base, size);
         LocateCinematicState(base, size);
         uintptr_t hit = sig::Find(base, size, kCamCopySig);
@@ -14543,11 +14908,16 @@ namespace
         {
             g_halo3PhysicalContactBindings.store(
                 false, std::memory_order_release);
+            g_halo3PhysicalMeleeBindings.store(
+                false, std::memory_order_release);
             g_halo3ObjectSetVelocity = nullptr;
             g_halo3ObjectSetVelocities = nullptr;
             g_origHalo3ObjectsUpdate = nullptr;
             g_halo3CollisionTestVector = nullptr;
-            g_halo3NativeMeleeResponse = nullptr;
+            g_halo3SelectMelee = nullptr;
+            g_halo3DamageOwnerFromObject = nullptr;
+            g_halo3ApplyMeleeDamage = nullptr;
+            g_halo3MeleeEffectsWrapper = nullptr;
             g_halo3GameIsCooperative = nullptr;
             const uintptr_t velocityHit =
                 sig::Find(base, size, kHalo3ObjectSetVelocitySig);
@@ -14557,8 +14927,16 @@ namespace
                 sig::Find(base, size, kHalo3CollisionTestVectorSig);
             const uintptr_t updateHit =
                 sig::Find(base, size, kHalo3ObjectsUpdateSig);
-            const uintptr_t meleeHit =
+            const uintptr_t effectsOnlyHit =
                 sig::Find(base, size, kHalo3NativeMeleeResponseSig);
+            const uintptr_t selectMeleeHit =
+                sig::Find(base, size, kHalo3SelectMeleeSig);
+            const uintptr_t applyMeleeDamageHit =
+                sig::Find(base, size, kHalo3ApplyMeleeDamageSig);
+            const uintptr_t damageOwnerHit =
+                sig::Find(base, size, kHalo3DamageOwnerFromObjectSig);
+            const uintptr_t meleeEffectsHit =
+                sig::Find(base, size, kHalo3MeleeEffectsWrapperSig);
             const uintptr_t cooperativeHit =
                 sig::Find(base, size, kHalo3GameIsCooperativeSig);
             const bool velocityUnique = velocityHit && !sig::Find(
@@ -14573,9 +14951,22 @@ namespace
             const bool updateUnique = updateHit && !sig::Find(
                 updateHit + 1, base + size - updateHit - 1,
                 kHalo3ObjectsUpdateSig);
-            const bool meleeUnique = meleeHit && !sig::Find(
-                meleeHit + 1, base + size - meleeHit - 1,
+            const bool effectsOnlyUnique = effectsOnlyHit && !sig::Find(
+                effectsOnlyHit + 1, base + size - effectsOnlyHit - 1,
                 kHalo3NativeMeleeResponseSig);
+            const bool selectMeleeUnique = selectMeleeHit && !sig::Find(
+                selectMeleeHit + 1, base + size - selectMeleeHit - 1,
+                kHalo3SelectMeleeSig);
+            const bool applyMeleeDamageUnique = applyMeleeDamageHit &&
+                !sig::Find(applyMeleeDamageHit + 1,
+                           base + size - applyMeleeDamageHit - 1,
+                           kHalo3ApplyMeleeDamageSig);
+            const bool damageOwnerUnique = damageOwnerHit && !sig::Find(
+                damageOwnerHit + 1, base + size - damageOwnerHit - 1,
+                kHalo3DamageOwnerFromObjectSig);
+            const bool meleeEffectsUnique = meleeEffectsHit && !sig::Find(
+                meleeEffectsHit + 1, base + size - meleeEffectsHit - 1,
+                kHalo3MeleeEffectsWrapperSig);
             const bool cooperativeUnique = cooperativeHit && !sig::Find(
                 cooperativeHit + 1, base + size - cooperativeHit - 1,
                 kHalo3GameIsCooperativeSig);
@@ -14588,12 +14979,25 @@ namespace
                     reinterpret_cast<Halo3ObjectSetVelocitiesFn>(velocitiesHit);
                 g_halo3CollisionTestVector =
                     reinterpret_cast<Halo3CollisionTestVectorFn>(collisionHit);
-                // The old melee candidate called unit_melee_effects, which
-                // cannot apply native damage. Keep it fail-closed until the
-                // actual authored melee-damage entry point is proven.
-                g_halo3NativeMeleeResponse = nullptr;
                 g_halo3GameIsCooperative =
                     reinterpret_cast<Halo3GameIsCooperativeFn>(cooperativeHit);
+                if (selectMeleeUnique && applyMeleeDamageUnique &&
+                    damageOwnerUnique && meleeEffectsUnique)
+                {
+                    g_halo3SelectMelee =
+                        reinterpret_cast<Halo3SelectMeleeFn>(selectMeleeHit);
+                    g_halo3DamageOwnerFromObject =
+                        reinterpret_cast<Halo3DamageOwnerFromObjectFn>(
+                            damageOwnerHit);
+                    g_halo3ApplyMeleeDamage =
+                        reinterpret_cast<Halo3ApplyMeleeDamageFn>(
+                            applyMeleeDamageHit);
+                    g_halo3MeleeEffectsWrapper =
+                        reinterpret_cast<Halo3MeleeEffectsWrapperFn>(
+                            meleeEffectsHit);
+                    g_halo3PhysicalMeleeBindings.store(
+                        true, std::memory_order_release);
+                }
                 const MH_STATUS updateCreate = MH_CreateHook(
                     reinterpret_cast<void*>(updateHit),
                     reinterpret_cast<void*>(&Halo3ObjectsUpdateHook),
@@ -14617,8 +15021,10 @@ namespace
                 LOG("H3 physical contact: optional native bindings %s "
                     "collision=+0x%llX velocity=+0x%llX world=+0x%llX "
                     "update=+0x%llX solo=+0x%llX "
-                    "[unique; hook=%d/%d]; melee stock "
-                    "(effects-only candidate=%d/%d)",
+                    "[unique; hook=%d/%d]; authored melee=%s "
+                    "selector=+0x%llX damage=+0x%llX owner=+0x%llX "
+                    "effects=+0x%llX [unique=%d/%d/%d/%d; "
+                    "effects-only evidence=%d/%d]",
                     g_halo3PhysicalContactBindings.load(
                         std::memory_order_acquire) ? "installed" : "disabled",
                     (unsigned long long)(collisionHit - base),
@@ -14628,7 +15034,22 @@ namespace
                     (unsigned long long)(cooperativeHit - base),
                     static_cast<int>(updateCreate),
                     static_cast<int>(updateEnable),
-                    meleeHit ? 1 : 0, meleeUnique ? 1 : 0);
+                    g_halo3PhysicalMeleeBindings.load(
+                        std::memory_order_acquire) ? "installed" : "stock",
+                    (unsigned long long)(selectMeleeHit
+                        ? selectMeleeHit - base : 0),
+                    (unsigned long long)(applyMeleeDamageHit
+                        ? applyMeleeDamageHit - base : 0),
+                    (unsigned long long)(damageOwnerHit
+                        ? damageOwnerHit - base : 0),
+                    (unsigned long long)(meleeEffectsHit
+                        ? meleeEffectsHit - base : 0),
+                    selectMeleeUnique ? 1 : 0,
+                    applyMeleeDamageUnique ? 1 : 0,
+                    damageOwnerUnique ? 1 : 0,
+                    meleeEffectsUnique ? 1 : 0,
+                    effectsOnlyHit ? 1 : 0,
+                    effectsOnlyUnique ? 1 : 0);
             }
             else
             {

@@ -154,6 +154,15 @@ inline PhysicalContactAction PhysicalContactClassify(
         : PhysicalContactAction::ImpulseOnly;
 }
 
+inline bool PhysicalContactMeleeReady(
+    PhysicalContactAction action, bool nativeBindingsAvailable, bool armed,
+    uint64_t nowMs, uint64_t lastMeleeMs)
+{
+    return action == PhysicalContactAction::ImpulseAndMelee &&
+        nativeBindingsAvailable && armed && nowMs >= lastMeleeMs &&
+        nowMs - lastMeleeMs >= 250;
+}
+
 inline bool PhysicalContactMovableKind(uint8_t kind)
 {
     // biped, vehicle, weapon, equipment, garbage, crate, creature, giant.
