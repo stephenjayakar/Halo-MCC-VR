@@ -205,6 +205,17 @@ invoking the stock effects/response wrapper. These are bounded atomic status
 writes only; no logging, allocation, locks, or additional engine calls are
 introduced in `objects_update`.
 
+Candidate `9a815b298a0970ae34cbb87dcafda244d01a2df3` reported status `8`
+with the same valid AR damage/response datums. This proves that native damage
+owner construction and `unit_apply_melee_damage` both returned; only the stock
+effects/response wrapper faulted. Retail call sites at `+0x08AE5C` and
+`+0x35BC48` pass a full object datum in `r9`, and the wrapper forwards the full
+value unchanged to `unit_melee_effects` after using only its low word for a
+bounded table lookup. The candidate instead passed only `handle & 0xFFFF`,
+discarding the datum salt. The preserved log is
+`out/debug-openxr/9a815b2-forge-effects-wrapper-handle-fault.log`. The failed
+probe is disabled before correcting that argument.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
