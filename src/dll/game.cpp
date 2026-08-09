@@ -11340,11 +11340,32 @@ namespace
             bool trackedVelocityValid = true;
             if (debugRig)
             {
-                // The exact authored surfaces move with the sinusoid above.
-                // Its derivative is signed so the slow rig cannot gain speed
-                // from visible weapon orientation or animation.
-                weaponLinearMetersPerSecond =
-                    forward * (debugMaxSpeed * std::cos(debugPhase));
+                if (debugScoop && g_halo3ContactDebugScoopStartMs &&
+                    nowMs >= g_halo3ContactDebugScoopStartMs)
+                {
+                    // Drive force from the exact derivative of the authored
+                    // scoop path. The old sinusoid velocity pointed forward
+                    // while the weapon geometry moved up and sideways, so the
+                    // native impulses were accepted but could not carry the
+                    // floor target along the path.
+                    const PhysicalContactDebugScoopPose scoop =
+                        PhysicalContactDebugScoopTrajectory(
+                            static_cast<float>(
+                                nowMs - g_halo3ContactDebugScoopStartMs));
+                    weaponLinearMetersPerSecond =
+                        PhysicalContactVec3{0.0f, 0.0f, 1.0f} *
+                            (scoop.liftMetersPerSecond -
+                             scoop.releaseMetersPerSecond) +
+                        weaponTransform.left * scoop.carryMetersPerSecond;
+                }
+                else
+                {
+                    // The exact authored surfaces move with the sinusoid
+                    // above. Its derivative is signed so the slow rig cannot
+                    // gain speed from visible weapon orientation or animation.
+                    weaponLinearMetersPerSecond =
+                        forward * (debugMaxSpeed * std::cos(debugPhase));
+                }
             }
             else
             {

@@ -1061,6 +1061,9 @@ struct PhysicalContactDebugScoopPose
     float liftMeters = 0.0f;
     float carryMeters = 0.0f;
     float releaseMeters = 0.0f;
+    float liftMetersPerSecond = 0.0f;
+    float carryMetersPerSecond = 0.0f;
+    float releaseMetersPerSecond = 0.0f;
 };
 
 inline PhysicalContactDebugScoopPose PhysicalContactDebugScoopTrajectory(
@@ -1073,10 +1076,23 @@ inline PhysicalContactDebugScoopPose PhysicalContactDebugScoopTrajectory(
         const float t = std::clamp(value, 0.0f, 1.0f);
         return t * t * (3.0f - 2.0f * t);
     };
+    const auto smoothStepVelocity = [](float value, float durationSeconds)
+        -> float
+    {
+        if (value <= 0.0f || value >= 1.0f)
+            return 0.0f;
+        return 6.0f * value * (1.0f - value) / durationSeconds;
+    };
+    const float liftPhase = (elapsedMilliseconds - 1000.0f) / 1500.0f;
+    const float carryPhase = (elapsedMilliseconds - 2500.0f) / 1500.0f;
+    const float releasePhase = (elapsedMilliseconds - 4000.0f) / 750.0f;
     return {
-        0.35f * smoothStep((elapsedMilliseconds - 1000.0f) / 1500.0f),
-        0.35f * smoothStep((elapsedMilliseconds - 2500.0f) / 1500.0f),
-        0.30f * smoothStep((elapsedMilliseconds - 4000.0f) / 750.0f)};
+        0.35f * smoothStep(liftPhase),
+        0.35f * smoothStep(carryPhase),
+        0.30f * smoothStep(releasePhase),
+        0.35f * smoothStepVelocity(liftPhase, 1.5f),
+        0.35f * smoothStepVelocity(carryPhase, 1.5f),
+        0.30f * smoothStepVelocity(releasePhase, 0.75f)};
 }
 
 inline float PhysicalContactImpulseDeltaMetersPerSecond(float speed)

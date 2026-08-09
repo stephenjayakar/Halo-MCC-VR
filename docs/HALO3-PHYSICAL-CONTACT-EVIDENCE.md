@@ -467,6 +467,15 @@ motion rejects only physical contact. The validation rig now uses the signed
 derivative of its exact one-second waveform, so a `0.90 m/s` run cannot cross
 the `1.50 m/s` melee threshold.
 
+The first one-shot scoop run exposed a debug-rig mismatch: the exact authored
+weapon geometry completed the lift/carry path and native point impulses were
+accepted, but the rig still published the unrelated forward sinusoid velocity.
+The selected `4.869 kg` loose weapon therefore received 101 impulses without
+moving from `(4.292, 6.489, 11.641)`. The corrected rig publishes the analytic
+derivative of the same smooth lift, lateral carry, and downward separation
+trajectory. This changes only the environment-gated validation path; normal
+tracked contact remains driven by the OpenXR controller snapshot.
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure

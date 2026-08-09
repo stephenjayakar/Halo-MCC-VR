@@ -9118,6 +9118,7 @@ int main()
             "an existing anchor, and rejects invalid motion data");
 
         float maximumScoopSpeed = 0.0f;
+        float maximumScoopDerivativeError = 0.0f;
         PhysicalContactDebugScoopPose priorScoop =
             PhysicalContactDebugScoopTrajectory(0.0f);
         for (int milliseconds = 1; milliseconds <= 6000; ++milliseconds)
@@ -9125,16 +9126,31 @@ int main()
             const PhysicalContactDebugScoopPose scoop =
                 PhysicalContactDebugScoopTrajectory(
                     static_cast<float>(milliseconds));
-            const float verticalSpeed =
-                std::fabs((scoop.liftMeters - scoop.releaseMeters) -
-                          (priorScoop.liftMeters -
-                           priorScoop.releaseMeters)) * 1000.0f;
-            const float lateralSpeed = std::fabs(
-                scoop.carryMeters - priorScoop.carryMeters) * 1000.0f;
+            const float verticalVelocity =
+                ((scoop.liftMeters - scoop.releaseMeters) -
+                 (priorScoop.liftMeters - priorScoop.releaseMeters)) *
+                1000.0f;
+            const float lateralVelocity =
+                (scoop.carryMeters - priorScoop.carryMeters) * 1000.0f;
             maximumScoopSpeed = std::max(
                 maximumScoopSpeed,
-                std::sqrt(verticalSpeed * verticalSpeed +
-                          lateralSpeed * lateralSpeed));
+                std::sqrt(verticalVelocity * verticalVelocity +
+                          lateralVelocity * lateralVelocity));
+            if (milliseconds > 1 &&
+                milliseconds != 1000 && milliseconds != 2500 &&
+                milliseconds != 4000 && milliseconds != 4750)
+            {
+                const float reportedVertical =
+                    scoop.liftMetersPerSecond -
+                    scoop.releaseMetersPerSecond;
+                maximumScoopDerivativeError = std::max(
+                    maximumScoopDerivativeError,
+                    std::fabs(reportedVertical - verticalVelocity));
+                maximumScoopDerivativeError = std::max(
+                    maximumScoopDerivativeError,
+                    std::fabs(
+                        scoop.carryMetersPerSecond - lateralVelocity));
+            }
             priorScoop = scoop;
         }
         const PhysicalContactDebugScoopPose scoopReady =
@@ -9150,10 +9166,15 @@ int main()
               scoopCarried.carryMeters == 0.35f &&
               scoopReleased.releaseMeters == 0.30f &&
               maximumScoopSpeed < 0.61f &&
+              maximumScoopDerivativeError < 0.002f &&
+              scoopReady.liftMetersPerSecond == 0.0f &&
+              scoopLifted.liftMetersPerSecond == 0.0f &&
+              scoopCarried.carryMetersPerSecond == 0.0f &&
+              scoopReleased.releaseMetersPerSecond == 0.0f &&
               PhysicalContactDebugScoopTrajectory(-1.0f).liftMeters == 0.0f,
-            "The one-shot Forge scoop rig approaches, lifts, carries, and "
-            "separates below the 1.50 m/s melee threshold with finite bounded "
-            "motion");
+            "The one-shot Forge scoop rig reports the exact lift, carry, and "
+            "release velocity, stays below the 1.50 m/s melee threshold, and "
+            "ends every phase at rest");
 
         const PhysicalContactPushResponse gentlePush =
             PhysicalContactStablePush(
