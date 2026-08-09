@@ -6052,7 +6052,7 @@ namespace
         const Halo3DamageOwner* owner, const Halo3DamageTarget* target);
     using Halo3MeleeEffectsWrapperFn = void(__fastcall*)(
         int32_t unitHandle, int32_t damageEffectTag,
-        int32_t responseEffectTag, int32_t targetAbsoluteIndex,
+        int32_t responseEffectTag, int32_t targetObjectHandle,
         uint16_t materialIndex, const float* point, const float* normal);
     using Halo3GameIsCooperativeFn = bool(__fastcall*)();
     using Halo3ObjectsUpdateFn = void(__fastcall*)();
@@ -6076,7 +6076,7 @@ namespace
     // 0x0A as `melee`; the official and retail selectors both route that exact
     // value to the authored first-hit damage/response pair without a lunge.
     constexpr int32_t kHalo3OrdinaryMeleeStringId = 0x0A;
-    constexpr bool kEnableHalo3PhysicalMeleeCandidate = false;
+    constexpr bool kEnableHalo3PhysicalMeleeCandidate = true;
     PhysicalContactDebounce g_halo3ContactDebounce;
     uint64_t g_halo3ContactLastMotionSerial = 0;
     uint64_t g_halo3ContactLastMeleeMs = 0;
@@ -9026,10 +9026,7 @@ namespace
                                         meleeFaultStatus = 8;
                                         g_halo3MeleeEffectsWrapper(
                                             unitHandle, damageEffectTag,
-                                            responseEffectTag,
-                                            static_cast<int32_t>(
-                                                static_cast<uint32_t>(handle) &
-                                                0xFFFFu),
+                                            responseEffectTag, handle,
                                             target.materialIndex,
                                             target.point, target.normal);
                                         damageApplied = true;

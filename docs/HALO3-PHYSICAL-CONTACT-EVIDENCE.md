@@ -216,6 +216,12 @@ discarding the datum salt. The preserved log is
 `out/debug-openxr/9a815b2-forge-effects-wrapper-handle-fault.log`. The failed
 probe is disabled before correcting that argument.
 
+The corrected candidate passes the exact validated target datum handle to the
+wrapper, matching both stock callers. The wrapper may use the low word for its
+own object-table address calculation, but `unit_melee_effects` receives the
+unchanged salted handle. No target substitution, trigger input, animation
+request, or lunge is introduced.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
