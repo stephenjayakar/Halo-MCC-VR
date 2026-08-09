@@ -9110,6 +9110,8 @@ int main()
             PhysicalContactRankDebugTarget(2, 2.0f, 0.02f, 100.0f, false);
         const PhysicalContactDebugTargetRank fallingHeavyWeapon =
             PhysicalContactRankDebugTarget(2, 18.0f, 2.5f, 1.0f, false);
+        const PhysicalContactDebugTargetRank constrainedLightWeapon =
+            PhysicalContactRankDebugTarget(2, 1.246f, 0.0f, 1.0f, false);
         const PhysicalContactDebugTargetRank otherMovable =
             PhysicalContactRankDebugTarget(11, 1.0f, 0.0f, 1.0f, false);
         const PhysicalContactDebugTargetRank anchoredWeapon =
@@ -9118,13 +9120,16 @@ int main()
             PhysicalContactRankDebugTarget(
                 2, 2.0f, std::numeric_limits<float>::quiet_NaN(), 1.0f,
                 false);
-        Check(settledWeapon.valid && settledWeapon.priority == 2 &&
+        Check(settledWeapon.valid && settledWeapon.priority == 3 &&
               fallingHeavyWeapon.valid && fallingHeavyWeapon.priority == 1 &&
+              constrainedLightWeapon.valid &&
+              constrainedLightWeapon.priority == 2 &&
               otherMovable.valid && otherMovable.priority == 0 &&
-              anchoredWeapon.valid && anchoredWeapon.priority == 3 &&
+              anchoredWeapon.valid && anchoredWeapon.priority == 4 &&
               !invalidTarget.valid,
-            "Forge contact validation prefers a settled light weapon, keeps "
-            "an existing anchor, and rejects invalid motion data");
+            "Forge contact validation prefers the proven loose 2 kg weapon "
+            "over constrained lighter map weapons, keeps an existing anchor, "
+            "and rejects invalid motion data");
 
         float maximumScoopSpeed = 0.0f;
         float maximumScoopDerivativeError = 0.0f;

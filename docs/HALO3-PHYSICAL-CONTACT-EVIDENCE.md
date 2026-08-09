@@ -502,6 +502,16 @@ compound centroids in the horizontal plane and uses the exact support points
 only for vertical clearance. Its carry direction is projected onto the world
 horizontal plane. Normal tracked contact geometry and force are unchanged.
 
+Centroid alignment produced the intended exact vertical contact:
+`normal=(0.0063, 0.0003, -1.0000)` and an upward native impulse of `0.09579`
+world units. The selected `1.246 kg` map weapon still did not move. Construct
+contains map-authored weapons whose root Havok body reports dynamic motion but
+which remain constrained to their Forge spawn. The validation rank now gives a
+higher tier to settled weapons from `1.8` to `2.2 kg`, selecting the repeatedly
+proven loose `2.019 kg` weapon before constrained lighter map weapons. This is
+limited to environment-gated target selection; product contact still follows
+native dynamic-body evidence for every contacted object.
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure

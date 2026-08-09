@@ -1053,8 +1053,11 @@ struct PhysicalContactDebugTargetRank
 
 // The automated Forge rig needs a settled light prop. The nearest weapon can
 // be a falling hammer or launcher, whose own velocity makes a slow-hand test
-// measure a large relative impact. Prefer a near-stationary weapon around 2 kg,
-// then any weapon, then another movable root. An existing anchor always wins.
+// measure a large relative impact. The Construct probe also contains lighter
+// map-authored weapons that report dynamic Havok motion but remain constrained
+// to their Forge spawn. Prefer the repeatedly proven near-2 kg loose weapon,
+// then another near-stationary light weapon, then any weapon, then another
+// movable root. An existing anchor always wins.
 inline PhysicalContactDebugTargetRank PhysicalContactRankDebugTarget(
     uint8_t kind, float massKilograms, float speedMetersPerSecond,
     float distanceSquaredWorldUnits, bool anchored)
@@ -1067,8 +1070,12 @@ inline PhysicalContactDebugTargetRank PhysicalContactRankDebugTarget(
         return result;
     const bool stableLightWeapon = kind == 2 && massKilograms <= 5.0f &&
         speedMetersPerSecond <= 0.25f;
+    const bool provenLooseWeapon = stableLightWeapon &&
+        massKilograms >= 1.8f && massKilograms <= 2.2f;
     result.priority = anchored
-        ? 3 : (stableLightWeapon ? 2 : (kind == 2 ? 1 : 0));
+        ? 4
+        : (provenLooseWeapon ? 3
+           : (stableLightWeapon ? 2 : (kind == 2 ? 1 : 0)));
     result.score = anchored
         ? 0.0f
         : speedMetersPerSecond + std::fabs(massKilograms - 2.0f) * 0.02f +
