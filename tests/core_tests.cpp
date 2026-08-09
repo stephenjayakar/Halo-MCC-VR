@@ -9084,6 +9084,26 @@ int main()
             "Capsule fallback pushes movable rigid-body kinds only and clamps "
             "velocity-scaled impulse strength");
 
+        const PhysicalContactDebugTargetRank settledWeapon =
+            PhysicalContactRankDebugTarget(2, 2.0f, 0.02f, 100.0f, false);
+        const PhysicalContactDebugTargetRank fallingHeavyWeapon =
+            PhysicalContactRankDebugTarget(2, 18.0f, 2.5f, 1.0f, false);
+        const PhysicalContactDebugTargetRank otherMovable =
+            PhysicalContactRankDebugTarget(11, 1.0f, 0.0f, 1.0f, false);
+        const PhysicalContactDebugTargetRank anchoredWeapon =
+            PhysicalContactRankDebugTarget(2, 18.0f, 2.5f, 1.0f, true);
+        const PhysicalContactDebugTargetRank invalidTarget =
+            PhysicalContactRankDebugTarget(
+                2, 2.0f, std::numeric_limits<float>::quiet_NaN(), 1.0f,
+                false);
+        Check(settledWeapon.valid && settledWeapon.priority == 2 &&
+              fallingHeavyWeapon.valid && fallingHeavyWeapon.priority == 1 &&
+              otherMovable.valid && otherMovable.priority == 0 &&
+              anchoredWeapon.valid && anchoredWeapon.priority == 3 &&
+              !invalidTarget.valid,
+            "Forge contact validation prefers a settled light weapon, keeps "
+            "an existing anchor, and rejects invalid motion data");
+
         const PhysicalContactPushResponse gentlePush =
             PhysicalContactStablePush(
                 {}, {0.20f, 0, 0}, {-1, 0, 0}, 0.5f);

@@ -10430,7 +10430,7 @@ namespace
                     g_baseCamY.load(std::memory_order_relaxed),
                     g_baseCamZ.load(std::memory_order_relaxed)};
                 PhysicalContactVec3 target{};
-                float closestDistanceSquared = 1.0e30f;
+                float closestMotionScore = FLT_MAX;
                 int32_t aimTarget = -1;
                 uint8_t aimKind = 0xFF;
                 int targetPriority = -1;
@@ -10472,6 +10472,21 @@ namespace
                             &debugMotionType) ||
                         !PhysicalContactMotionTypeIsDynamic(debugMotionType))
                         continue;
+                    float debugLinear[3]{};
+                    float debugAngular[3]{};
+                    float debugSpeed = 1000.0f;
+                    if (g_halo3ObjectGetVelocities)
+                    {
+                        g_halo3ObjectGetVelocities(
+                            handle, debugLinear, debugAngular);
+                        const PhysicalContactVec3 debugLinearVelocity{
+                            debugLinear[0], debugLinear[1], debugLinear[2]};
+                        const float worldSpeed = PhysicalContactLength(
+                            debugLinearVelocity);
+                        if (PhysicalContactFinite(debugLinearVelocity) &&
+                            std::isfinite(worldSpeed))
+                            debugSpeed = worldSpeed / worldScale;
+                    }
                     const auto* objectCenter =
                         reinterpret_cast<const float*>(
                             data + kHalo3ObjectBoundingCenterOffset);
@@ -10484,16 +10499,16 @@ namespace
                     // Forge acceptance is specifically a loose weapon. Prefer
                     // kind 2 and use another movable root only when the map has
                     // no weapon datum at all.
-                    const int priority = anchoredHandle != -1
-                        ? 2 : (kind == 2 ? 1 : 0);
-                    if (!std::isfinite(distanceSquared) ||
-                        distanceSquared < 0.25f ||
-                        priority < targetPriority ||
-                        (priority == targetPriority &&
-                         distanceSquared >= closestDistanceSquared))
+                    const PhysicalContactDebugTargetRank rank =
+                        PhysicalContactRankDebugTarget(
+                            kind, debugMass, debugSpeed, distanceSquared,
+                            anchoredHandle != -1);
+                    if (!rank.valid || rank.priority < targetPriority ||
+                        (rank.priority == targetPriority &&
+                         rank.score >= closestMotionScore))
                         continue;
-                    targetPriority = priority;
-                    closestDistanceSquared = distanceSquared;
+                    targetPriority = rank.priority;
+                    closestMotionScore = rank.score;
                     target = candidate;
                     aimTarget = handle;
                     aimKind = kind;
@@ -11272,7 +11287,7 @@ namespace
                 contact->meleeArmed, nowMs, g_halo3ContactLastMeleeMs);
             uint32_t commandFlags = 0;
             PhysicalContactVec3 worldVelocity{};
-            if (firstContact && debugRig &&
+            if (debugRig &&
                 g_halo3ContactDebugTarget.load(
                     std::memory_order_relaxed) != closestHandle)
             {

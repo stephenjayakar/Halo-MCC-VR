@@ -1023,6 +1023,39 @@ inline bool PhysicalContactMovableKind(uint8_t kind)
     return kind <= 4 || kind == 11 || kind == 12 || kind == 13;
 }
 
+struct PhysicalContactDebugTargetRank
+{
+    bool valid = false;
+    int priority = -1;
+    float score = 0.0f;
+};
+
+// The automated Forge rig needs a settled light prop. The nearest weapon can
+// be a falling hammer or launcher, whose own velocity makes a slow-hand test
+// measure a large relative impact. Prefer a near-stationary weapon around 2 kg,
+// then any weapon, then another movable root. An existing anchor always wins.
+inline PhysicalContactDebugTargetRank PhysicalContactRankDebugTarget(
+    uint8_t kind, float massKilograms, float speedMetersPerSecond,
+    float distanceSquaredWorldUnits, bool anchored)
+{
+    PhysicalContactDebugTargetRank result{};
+    if (!std::isfinite(massKilograms) || massKilograms <= 0.001f ||
+        !std::isfinite(speedMetersPerSecond) || speedMetersPerSecond < 0.0f ||
+        !std::isfinite(distanceSquaredWorldUnits) ||
+        distanceSquaredWorldUnits < 0.25f)
+        return result;
+    const bool stableLightWeapon = kind == 2 && massKilograms <= 5.0f &&
+        speedMetersPerSecond <= 0.25f;
+    result.priority = anchored
+        ? 3 : (stableLightWeapon ? 2 : (kind == 2 ? 1 : 0));
+    result.score = anchored
+        ? 0.0f
+        : speedMetersPerSecond + std::fabs(massKilograms - 2.0f) * 0.02f +
+          distanceSquaredWorldUnits * 0.001f;
+    result.valid = std::isfinite(result.score);
+    return result;
+}
+
 inline float PhysicalContactImpulseDeltaMetersPerSecond(float speed)
 {
     return std::clamp(speed * 0.5f, 0.0f, 1.5f);
