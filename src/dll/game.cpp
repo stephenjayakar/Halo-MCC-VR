@@ -6301,6 +6301,11 @@ namespace
     std::atomic<uint64_t> g_halo3ContactAuthoredShapeHits{0};
     std::atomic<uint64_t> g_halo3ContactAnimatedBodyHits{0};
     std::atomic<uint64_t> g_halo3ContactUnsupportedShapes{0};
+    std::atomic<uint64_t> g_halo3ContactUnreliableNormalRejects{0};
+    std::atomic<uint64_t> g_halo3ContactPoseDeltaRejects{0};
+    std::atomic<uint64_t> g_halo3ContactPointVelocityRejects{0};
+    std::atomic<int32_t> g_halo3ContactCandidateHandle{-1};
+    std::atomic<uint32_t> g_halo3ContactCandidateNormalReliable{0};
     std::atomic<uint32_t> g_halo3ContactNativeSamples{0};
     std::atomic<uint32_t> g_halo3ContactWeaponShapeSource{0};
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
@@ -11079,6 +11084,10 @@ namespace
                     1, std::memory_order_relaxed);
             if (closestType != 4 || closestHandle == -1)
             {
+                g_halo3ContactCandidateHandle.store(
+                    -1, std::memory_order_relaxed);
+                g_halo3ContactCandidateNormalReliable.store(
+                    0, std::memory_order_relaxed);
                 g_halo3ContactStage.store(
                     static_cast<uint32_t>(
                         Halo3PhysicalContactStage::StaticBlock),
@@ -11086,6 +11095,11 @@ namespace
                 g_halo3ContactDebounce.EndSample();
                 return; // exact static/instanced surface blocks this sweep
             }
+            g_halo3ContactCandidateHandle.store(
+                closestHandle, std::memory_order_relaxed);
+            g_halo3ContactCandidateNormalReliable.store(
+                closestNormalReliable ? 1u : 0u,
+                std::memory_order_relaxed);
             const uint32_t closestIndex =
                 static_cast<uint32_t>(closestHandle) & 0xFFFFu;
             if (closestHandle == unitHandle || closestHandle == weaponHandle ||
@@ -11128,6 +11142,8 @@ namespace
                     // A newly observed pre-existing overlap has no swept
                     // separating plane. Wait for separation instead of
                     // inventing a center-to-center force direction.
+                    g_halo3ContactUnreliableNormalRejects.fetch_add(
+                        1, std::memory_order_relaxed);
                     g_halo3ContactDebounce.EndSample();
                     return;
                 }
@@ -11152,6 +11168,8 @@ namespace
                 visiblePoseMs - previousPoseMs > 100 ||
                 !g_halo3ObjectGetVelocities || !g_halo3ObjectGetCenter)
             {
+                g_halo3ContactPoseDeltaRejects.fetch_add(
+                    1, std::memory_order_relaxed);
                 g_halo3ContactDebounce.EndSample();
                 return;
             }
@@ -11208,6 +11226,8 @@ namespace
                 : PhysicalContactPointVelocity{};
             if (!pointVelocity.valid)
             {
+                g_halo3ContactPointVelocityRejects.fetch_add(
+                    1, std::memory_order_relaxed);
                 g_halo3ContactDebounce.EndSample();
                 return;
             }
@@ -11434,7 +11454,8 @@ namespace
             "targetMotion=%u "
             "depth=%.4fm normalImpulse=%.5f tangentImpulse=%.5f "
             "authoredShapeHits=%llu animatedBodyHits=%llu "
-            "unsupportedShapes=%llu "
+            "unsupportedShapes=%llu rejectNormal=%llu rejectPose=%llu "
+            "rejectVelocity=%llu candidate=0x%08X candidateNormal=%u "
             "shapeSource=%u nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm wallRays=%llu "
             "wallMotionRays=%llu "
@@ -11480,6 +11501,16 @@ namespace
             (unsigned long long)g_halo3ContactAnimatedBodyHits.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactUnsupportedShapes.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactUnreliableNormalRejects.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactPoseDeltaRejects.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactPointVelocityRejects.load(
+                std::memory_order_relaxed),
+            static_cast<uint32_t>(g_halo3ContactCandidateHandle.load(
+                std::memory_order_relaxed)),
+            g_halo3ContactCandidateNormalReliable.load(
                 std::memory_order_relaxed),
             g_halo3ContactWeaponShapeSource.load(
                 std::memory_order_relaxed),
