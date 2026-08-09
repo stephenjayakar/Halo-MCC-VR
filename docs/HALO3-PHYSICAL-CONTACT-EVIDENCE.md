@@ -272,8 +272,12 @@ The closest native surface blocks its sample. BSP and instanced geometry receive
 no impulse or damage. Player, held weapon, attached/first-person-only objects,
 stale handles, and invalid values are rejected. Every exact object hit publishes
 one native point-impulse command per sample above 0.05 m/s; the simulation
-owner re-resolves the target component and body before applying it. Authored convex
-contact admits only root engine object kinds that can own movable physics. The
+owner re-resolves the target component and body before applying it. The earlier
+candidate also used a hard-coded engine object-kind allowlist before resolving
+physics. That omitted dynamic bodies carried by other object kinds. The
+all-rigid-body candidate instead admits every validated root whose native Havok
+component resolves to an official dynamic motion type (`1`-`5` or `8`). Fixed,
+keyframed, unresolved, attached, player, and held-weapon objects remain out. The
 native point-impulse path remains the final authority for whether the exact
 object owns a rigid body. Authored masses, inward speed, penetration, and
 tangential speed determine the bounded contact constraint. Classification maps

@@ -9215,6 +9215,22 @@ int main()
             "fixed root objects while dynamic, invalid, and excluded objects "
             "remain outside the wall solver");
 
+        Check(PhysicalContactObjectReceivesImpulse(
+                  true, false, true, 4) &&
+              PhysicalContactObjectReceivesImpulse(
+                  true, false, true, 8) &&
+              !PhysicalContactObjectReceivesImpulse(
+                  true, false, true, 7) &&
+              !PhysicalContactObjectReceivesImpulse(
+                  true, false, false, 4) &&
+              !PhysicalContactObjectReceivesImpulse(
+                  false, false, true, 4) &&
+              !PhysicalContactObjectReceivesImpulse(
+                  true, true, true, 4),
+            "Every validated root dynamic Havok body receives contact impulses "
+            "without an object-kind allowlist; fixed, unresolved, attached, "
+            "and excluded objects do not");
+
         const PhysicalContactConstraintImpulse sustainedGentle =
             PhysicalContactSustainedImpulse(
                 2.76f, 0.382f, {0.20f, 0, 0}, {-1, 0, 0},

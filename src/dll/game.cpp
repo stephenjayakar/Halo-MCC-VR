@@ -10271,7 +10271,17 @@ namespace
                             data + kHalo3ObjectParentOffset) != -1)
                         continue;
                     ++root;
-                    if (PhysicalContactMovableKind(kind))
+                    void* censusComponent = nullptr;
+                    int32_t censusBodyIndex = -1;
+                    float censusMass = 0.0f;
+                    uint8_t censusMotionType = 0;
+                    const bool censusBodyResolved =
+                        Halo3ContactMassForObjectData(
+                            data, censusComponent, censusBodyIndex,
+                            censusMass, &censusMotionType);
+                    if (PhysicalContactObjectReceivesImpulse(
+                            true, false, censusBodyResolved,
+                            censusMotionType))
                         ++rootMovable;
                 }
                 const uint64_t census =
@@ -10456,8 +10466,7 @@ namespace
                         kHalo3ObjectEntryKindOffset);
                     if (handle == unitHandle || handle == weaponHandle ||
                         (anchoredHandle != -1 &&
-                         handle != anchoredHandle) ||
-                        !PhysicalContactMovableKind(kind))
+                         handle != anchoredHandle))
                         continue;
                     auto* data = *reinterpret_cast<unsigned char**>(
                         entry + kHalo3ObjectEntryDataOffset);
@@ -11058,8 +11067,7 @@ namespace
                     (uint32_t{identifier} << 16) | index);
                 const uint8_t kind = *(entry + kHalo3ObjectEntryKindOffset);
                 if (handle == unitHandle || handle == weaponHandle ||
-                    (debugRig && handle != debugAimTarget) ||
-                    !PhysicalContactMovableKind(kind))
+                    (debugRig && handle != debugAimTarget))
                     continue;
                 auto* data = *reinterpret_cast<unsigned char**>(
                     entry + kHalo3ObjectEntryDataOffset);
@@ -11081,6 +11089,18 @@ namespace
                     weaponTransform.position, targetCenter,
                     weaponBroadRadius + radius);
                 if (!proxy.hit)
+                    continue;
+                void* candidateComponent = nullptr;
+                int32_t candidateBodyIndex = -1;
+                float candidateMass = 0.0f;
+                uint8_t candidateMotionType = 0;
+                const bool candidateBodyResolved =
+                    Halo3ContactMassForObjectData(
+                        data, candidateComponent, candidateBodyIndex,
+                        candidateMass, &candidateMotionType);
+                if (!PhysicalContactObjectReceivesImpulse(
+                        true, false, candidateBodyResolved,
+                        candidateMotionType))
                     continue;
                 PhysicalContactCompoundHit authored{};
                 PhysicalContactConvexShape authoredWeaponShape{};

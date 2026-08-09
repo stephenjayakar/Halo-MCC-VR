@@ -1162,6 +1162,14 @@ inline bool PhysicalContactObjectBlocksAsStatic(
     return !bodyResolved || !PhysicalContactMotionTypeIsDynamic(motionType);
 }
 
+inline bool PhysicalContactObjectReceivesImpulse(
+    bool validRootObject, bool excludedObject, bool bodyResolved,
+    uint8_t motionType)
+{
+    return validRootObject && !excludedObject && bodyResolved &&
+        PhysicalContactMotionTypeIsDynamic(motionType);
+}
+
 // A bounded inelastic collision response. Native Halo masses decide how much
 // momentum the held weapon transfers. The engine's point-impulse function then
 // uses the target's authored mass and inertia to produce linear and angular
