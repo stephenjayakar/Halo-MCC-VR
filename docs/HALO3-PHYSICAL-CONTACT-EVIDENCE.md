@@ -240,6 +240,29 @@ own object-table address calculation, but `unit_melee_effects` receives the
 unchanged salted handle. No target substitution, trigger input, animation
 request, or lunge is introduced.
 
+Candidate `888987a06e923f92fd569691fc3647b6a3debddc` verified the final
+visible-palette contact space and contact-point velocity classifier in live
+Construct Forge, but exposed a validation-rig defect: the rig advertised a
+synthetic `2.25 m/s` controller speed while pinning its synthetic visible pose
+to the selected target. The new classifier correctly measured `0.00 m/s`, so
+the run applied one impulse but requested no melee. This was a failed validation
+candidate; production controller handling was unchanged.
+
+Candidate `60893a70790742314bcb20647d4ea620afc6978b` made the rig's visible
+weapon pose follow the same bounded one-second waveform as its synthetic motion
+snapshot, reaching `2.25 m/s` and separating once per cycle. In authoritative
+Halo 3 Construct Forge (`game=2`, `simulation=5`, `cooperative=0`, `options=1`),
+the installed candidate selected loose kind-2 weapon `0xE2A00031`, measured
+contact-point speed above the configured `1.50 m/s` threshold, and completed
+the native authored-melee transaction without a fault. Status reported
+`melees=2`, `meleeStatus=2`, `command=7`, and `applied=7`, with authored AR
+datums `damage=0xEBF10A7B` and `response=0xEAEA0974`; the same transaction moved
+the target `0.061` world units. MCC remained responsive. The preserved log is
+`out/debug-openxr/60893a7-forge-high-speed-success.log` (SHA-256
+`0FE3DD5187A63CDD70A13A1F1DE3244A0BCEF3E0A005DFFF011C936F266609B7`).
+This proves the installed headless Forge high-speed impulse-plus-native-melee
+path. It is not headset acceptance.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
