@@ -109,13 +109,54 @@ bounds-derived capsule fallback, restricted to physics-capable object kinds; an
 earlier exact native structure hit still wins unless the proxy begins at the
 same surface, such as a weapon resting on a floor. Unlike rejected candidate
 `a644d2c`, scenery and machine bounds are not treated as interactive surfaces.
+
+Headset testing rejected that interim capsule/sphere approximation because
+contact did not match the visible weapon. The official H3EK `physics_model`
+postprocess at `0x52D8B0` proves the exact replacement path. It walks rigid
+bodies at root block `+0x58` with stride `0xC0`, resolves each serialized shape
+reference, and writes the immutable Havok shape pointer at rigid body `+0x58`.
+The resolver at `0x52E830` proves these authored blocks and returned shapes:
+
+| Shape | Root block | Stride | Returned shape |
+| --- | ---: | ---: | ---: |
+| sphere | `+0x70` | `0xA0` | element `+0x50` translated shape |
+| multi-sphere | `+0x7C` | `0xD0` | element `+0x20` |
+| pill | `+0x88` | `0x70` | element `+0x20` |
+| box | `+0x94` | `0xE0` | element `+0x60` transformed shape |
+| triangle | `+0xA0` | `0x90` | element `+0x20` |
+| polyhedron | `+0xAC` | `0xA0` | element `+0x20` |
+| list | `+0xDC` | `0x60` | element |
+| MOPP | `+0xF4` | `0x40` | element |
+
+Constructors in that same official routine prove internal type `3` sphere,
+`5` triangle, `6` box, `7` capsule, `8` convex vertices, `12` convex
+translate, and `13` convex transform. Radius is shape `+0x20`. Capsule
+endpoints are `+0x30/+0x40`. Box half extents are `+0x30`. Transform child,
+rotation rows, and translation are `+0x30`, `+0x40/+0x50/+0x60`, and `+0x70`.
+A convex-vertices shape stores its packed four-vector pointer at `+0x50`, group
+count at `+0x58`, vertex count at `+0x60`, and plane pointer at `+0x68`.
+Official assault-rifle XML confirms four exact vertices and a `0.009` rounded
+radius instead of the interim long capsule.
+
+The new candidate reads only that resolved immutable shape pointer. It copies
+at most 256 finite support vertices into fixed stack storage. It supports the
+proven sphere, triangle, box, capsule, polyhedron, translate, and transform
+types. Multi-body, multi-sphere, list, MOPP, invalid, and ambiguous shapes stay
+non-interactive. A bounds sphere performs broad-phase rejection only. A bounded
+GJK sweep decides contact. It interpolates the final visible weapon translation,
+orientation, and scale. It samples at one-centimetre swept spacing, up to 32
+poses, then performs nine binary refinements at the first overlap. Broad bounds
+never create a hit. Unsupported geometry never falls back to capsule/sphere
+contact.
+
 The earlier wrist-target publication was runtime-rejected because the desired IK
 wrist is not necessarily the transform Halo ultimately skins. The replacement
 publishes only after the final visible-palette consumer returns. It accepts a
 bounded right-wrist-descendant render model with at most 16 validated nodes
 (covering the H3EK ordinary weapon, sword, and hammer first-person models) and
-publishes that model's finite final root through an atomic snapshot. This is the
-same matrix space as the visible weapon pixels, not a controller/wrist estimate.
+publishes that model's finite final root and scale through an atomic snapshot.
+This is the same matrix space as the visible weapon pixels, not a
+controller/wrist estimate.
 OpenXR pose, linear/angular velocity, timestamp, and serial use a separate
 bounded atomic snapshot.
 
@@ -147,13 +188,14 @@ The closest native surface blocks its sample. BSP and instanced geometry receive
 no impulse or damage. Player, held weapon, attached/first-person-only objects,
 stale handles, and invalid values are rejected. Every exact object hit publishes
 one native velocity command per continuous contact above 0.05 m/s; the
-simulation owner validates and applies it before object update. The capsule
-fallback admits only the engine object kinds that can own movable physics; the
+simulation owner validates and applies it before object update. Authored convex
+contact admits only root engine object kinds that can own movable physics. The
 native velocity path remains the final authority for whether the exact object
 actually owns a rigid body. The velocity delta is proportional to swing speed
-and clamped. Classification uses the contacted capsule fraction at the previous
-and current final visible transforms divided by their exact bounded timestamp
-delta. It subtracts target surface velocity from the two native accessors,
+and clamped. Classification maps the exact current weapon contact point into
+the previous full visible transform. This includes translation, pitch, yaw,
+roll, and scale over the exact bounded timestamp delta. It subtracts target
+surface velocity from the two native accessors,
 including `angular x (contact-center)`, so a rotational tip strike can count as
 melee and a target moving with the weapon does not inflate relative speed. At or
 above the configured threshold, an independently debounced

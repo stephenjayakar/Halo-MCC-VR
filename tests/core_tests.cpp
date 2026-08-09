@@ -8730,6 +8730,95 @@ int main()
             "Physical contact continuously sweeps translation and rotation "
             "without turning a grazing miss into contact");
 
+        const auto makeBox = [](PhysicalContactVec3 halfExtents,
+                                float radius) {
+            PhysicalContactConvexShape shape{};
+            shape.radius = radius;
+            for (int x = -1; x <= 1; x += 2)
+                for (int y = -1; y <= 1; y += 2)
+                    for (int z = -1; z <= 1; z += 2)
+                        shape.vertices[shape.vertexCount++] = {
+                            halfExtents.x * static_cast<float>(x),
+                            halfExtents.y * static_cast<float>(y),
+                            halfExtents.z * static_cast<float>(z)};
+            return shape;
+        };
+        const PhysicalContactConvexShape rifle =
+            makeBox({0.40f, 0.03f, 0.05f}, 0.01f);
+        const PhysicalContactConvexShape prop =
+            makeBox({0.10f, 0.10f, 0.10f}, 0.01f);
+        PhysicalContactTransform rifleFrom{};
+        PhysicalContactTransform rifleTo{};
+        rifleTo.position = {2.0f, 0, 0};
+        PhysicalContactTransform propTransform{};
+        propTransform.position = {1.0f, 0, 0};
+        const PhysicalContactConvexHit exactTranslation =
+            PhysicalContactSweepConvex(
+                rifle, rifleFrom, rifleTo, prop, propTransform);
+        propTransform.position = {1.0f, 0.16f, 0};
+        const PhysicalContactConvexHit exactGrazingMiss =
+            PhysicalContactSweepConvex(
+                rifle, rifleFrom, rifleTo, prop, propTransform);
+        propTransform.position = {0.35f, 0.35f, 0};
+        rifleTo = rifleFrom;
+        rifleTo.forward = {0, 1, 0};
+        rifleTo.left = {-1, 0, 0};
+        const PhysicalContactConvexHit exactRotation =
+            PhysicalContactSweepConvex(
+                rifle, rifleFrom, rifleTo, prop, propTransform);
+        PhysicalContactConvexShape invalidConvex{};
+        const PhysicalContactConvexHit invalidShape =
+            PhysicalContactSweepConvex(
+                invalidConvex, rifleFrom, rifleTo, prop, propTransform);
+        Check(exactTranslation.hit &&
+              exactTranslation.fraction > 0.20f &&
+              exactTranslation.fraction < 0.30f &&
+              exactTranslation.normal.x < -0.90f &&
+              !exactGrazingMiss.hit && exactRotation.hit &&
+              !invalidShape.hit,
+            "Authored convex sweeps detect thin translation and rotation, "
+            "preserve grazing clearance, return the first surface, and "
+            "reject invalid geometry");
+
+        bool gjkGridExact = true;
+        const PhysicalContactConvexShape gridBox =
+            makeBox({0.10f, 0.15f, 0.20f}, 0.0f);
+        PhysicalContactTransform gridA{};
+        PhysicalContactTransform gridB{};
+        for (int x = -8; x <= 8; ++x)
+            for (int y = -8; y <= 8; ++y)
+                for (int z = -8; z <= 8; ++z)
+                {
+                    gridB.position = {
+                        static_cast<float>(x) * 0.05f,
+                        static_cast<float>(y) * 0.05f,
+                        static_cast<float>(z) * 0.05f};
+                    const bool expected =
+                        std::fabs(gridB.position.x) <= 0.20f &&
+                        std::fabs(gridB.position.y) <= 0.30f &&
+                        std::fabs(gridB.position.z) <= 0.40f;
+                    const bool actual = PhysicalContactConvexIntersect(
+                        gridBox, gridA, gridBox, gridB);
+                    gjkGridExact = gjkGridExact && actual == expected;
+                }
+        Check(gjkGridExact,
+            "GJK matches exact axis-aligned overlap across a dense 3D grid");
+
+        PhysicalContactTransform rollFrom{};
+        PhysicalContactTransform rollTo{};
+        rollTo.left = {0, 0, 1};
+        rollTo.up = {0, -1, 0};
+        const PhysicalContactPointVelocity rigidVelocity =
+            PhysicalContactRigidPointVelocity(
+                rollFrom, rollTo, {0, 0, 0.20f}, {}, {}, {}, 0.10f, 1.0f);
+        Check(rigidVelocity.valid &&
+              std::fabs(rigidVelocity.weaponMetersPerSecond.y + 2.0f) <
+                  1.0e-5f &&
+              std::fabs(rigidVelocity.weaponMetersPerSecond.z - 2.0f) <
+                  1.0e-5f,
+            "Rigid contact-point velocity includes weapon roll instead of "
+            "reducing every weapon to one capsule spine");
+
         const PhysicalContactPointVelocity translatedVelocity =
             PhysicalContactVelocityAtPoint(
                 {0, 0, 0}, {1, 0, 0}, {0.2f, 0, 0}, {1.2f, 0, 0},

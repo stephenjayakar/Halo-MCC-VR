@@ -939,6 +939,7 @@ namespace
         std::atomic<uint32_t> sequence{0};
         std::atomic<uint64_t> sampleMs{0};
         std::atomic<int32_t> weaponHandle{-1};
+        std::atomic<float> scale{1.0f};
         std::atomic<float> basis[9]{};
         std::atomic<float> position[3]{};
     };
@@ -990,7 +991,7 @@ namespace
     unsigned char* Halo3LoadedTagDefinition(uint32_t datum);
 
     bool Halo3ReadVisibleWeaponPose(float basis[9], float position[3],
-                                    uint64_t& sampleMs)
+                                    float& scale, uint64_t& sampleMs)
     {
         auto& published = g_halo3VisibleWeaponPose;
         for (int attempt = 0; attempt < 2; ++attempt)
@@ -1000,6 +1001,7 @@ namespace
             if (before & 1u)
                 continue;
             sampleMs = published.sampleMs.load(std::memory_order_relaxed);
+            scale = published.scale.load(std::memory_order_relaxed);
             for (int i = 0; i < 9; ++i)
                 basis[i] = published.basis[i].load(std::memory_order_relaxed);
             for (int i = 0; i < 3; ++i)
@@ -5207,6 +5209,8 @@ namespace
                 published.sequence.fetch_add(1, std::memory_order_acq_rel);
                 published.sampleMs.store(
                     GetTickCount64(), std::memory_order_relaxed);
+                published.scale.store(
+                    visibleRoot.scale, std::memory_order_relaxed);
                 for (int i = 0; i < 9; ++i)
                     published.basis[i].store(
                         visibleRoot.rotation[i], std::memory_order_relaxed);
@@ -6219,6 +6223,7 @@ namespace
     int32_t g_halo3ContactWeaponHandle = -1;
     PhysicalContactVec3 g_halo3ContactPreviousGrip{};
     PhysicalContactVec3 g_halo3ContactPreviousTip{};
+    PhysicalContactTransform g_halo3ContactPreviousWeaponTransform{};
     uint64_t g_halo3ContactPreviousPoseMs = 0;
     bool g_halo3ContactPreviousPoseValid = false;
     PhysicalContactVec3 g_halo3ContactWallOffset{};
@@ -6248,6 +6253,8 @@ namespace
     std::atomic<float> g_halo3ContactSpeed{0.0f};
     std::atomic<uint64_t> g_halo3ContactWallBlocks{0};
     std::atomic<float> g_halo3ContactWallSetbackMeters{0.0f};
+    std::atomic<uint64_t> g_halo3ContactAuthoredShapeHits{0};
+    std::atomic<uint64_t> g_halo3ContactUnsupportedShapes{0};
     std::atomic<int32_t> g_halo3ContactCommandHandle{-1};
     std::atomic<float> g_halo3ContactCommandVelocity[3]{};
     std::atomic<uint32_t> g_halo3ContactCommandGeneration{0};
@@ -6659,6 +6666,218 @@ namespace
             instances + static_cast<size_t>(index) * 8 + 4);
         return address
             ? tagBase + static_cast<size_t>(address) * 4 : nullptr;
+    }
+
+    // H3EK's physics_model postprocess at +0x52D8B0 resolves every rigid
+    // body's serialized shape reference into this immutable Havok pointer.
+    // It also proves the primitive layouts read below. We copy only bounded
+    // convex support vertices. No tag pointer escapes this camera callback.
+    bool Halo3ContactConvexFromHavokShape(
+        const unsigned char* havokShape,
+        PhysicalContactConvexShape& output, int depth = 0)
+    {
+        if (!havokShape || depth > 2)
+            return false;
+        const int32_t type = *reinterpret_cast<const int32_t*>(
+            havokShape + 0x18);
+        if (type == 12 || type == 13)
+        {
+            const auto* child = *reinterpret_cast<unsigned char* const*>(
+                havokShape + 0x30);
+            if (!Halo3ContactConvexFromHavokShape(
+                    child, output, depth + 1))
+                return false;
+            if (type == 12)
+            {
+                const auto* translation = reinterpret_cast<const float*>(
+                    havokShape + 0x40);
+                const PhysicalContactVec3 value{
+                    translation[0], translation[1], translation[2]};
+                if (!PhysicalContactFinite(value))
+                    return false;
+                for (uint16_t i = 0; i < output.vertexCount; ++i)
+                    output.vertices[i] = output.vertices[i] + value;
+                return true;
+            }
+
+            const auto* rotationI = reinterpret_cast<const float*>(
+                havokShape + 0x40);
+            const auto* rotationJ = reinterpret_cast<const float*>(
+                havokShape + 0x50);
+            const auto* rotationK = reinterpret_cast<const float*>(
+                havokShape + 0x60);
+            const auto* translation = reinterpret_cast<const float*>(
+                havokShape + 0x70);
+            const PhysicalContactVec3 i{
+                rotationI[0], rotationI[1], rotationI[2]};
+            const PhysicalContactVec3 j{
+                rotationJ[0], rotationJ[1], rotationJ[2]};
+            const PhysicalContactVec3 k{
+                rotationK[0], rotationK[1], rotationK[2]};
+            const PhysicalContactVec3 t{
+                translation[0], translation[1], translation[2]};
+            if (!PhysicalContactFinite(i) || !PhysicalContactFinite(j) ||
+                !PhysicalContactFinite(k) || !PhysicalContactFinite(t))
+                return false;
+            for (uint16_t vertex = 0; vertex < output.vertexCount; ++vertex)
+            {
+                const PhysicalContactVec3 p = output.vertices[vertex];
+                output.vertices[vertex] =
+                    t + i * p.x + j * p.y + k * p.z;
+            }
+            return PhysicalContactConvexValid(output);
+        }
+
+        const float radius = *reinterpret_cast<const float*>(
+            havokShape + 0x20);
+        if (!std::isfinite(radius) || radius < 0.0f || radius > 2.0f)
+            return false;
+        output = {};
+        output.radius = radius;
+        if (type == 3) // hkSphereShape
+        {
+            output.vertices[0] = {};
+            output.vertexCount = 1;
+        }
+        else if (type == 5) // hkTriangleShape
+        {
+            for (int vertex = 0; vertex < 3; ++vertex)
+            {
+                const auto* value = reinterpret_cast<const float*>(
+                    havokShape + 0x30 + vertex * 0x10);
+                output.vertices[vertex] = {
+                    value[0], value[1], value[2]};
+            }
+            output.vertexCount = 3;
+        }
+        else if (type == 6) // hkBoxShape
+        {
+            const auto* half = reinterpret_cast<const float*>(
+                havokShape + 0x30);
+            if (!std::isfinite(half[0]) || !std::isfinite(half[1]) ||
+                !std::isfinite(half[2]) || half[0] < 0.0f ||
+                half[1] < 0.0f || half[2] < 0.0f || half[0] > 10.0f ||
+                half[1] > 10.0f || half[2] > 10.0f)
+                return false;
+            for (int x = -1; x <= 1; x += 2)
+                for (int y = -1; y <= 1; y += 2)
+                    for (int z = -1; z <= 1; z += 2)
+                        output.vertices[output.vertexCount++] = {
+                            half[0] * static_cast<float>(x),
+                            half[1] * static_cast<float>(y),
+                            half[2] * static_cast<float>(z)};
+        }
+        else if (type == 7) // hkCapsuleShape
+        {
+            for (int endpoint = 0; endpoint < 2; ++endpoint)
+            {
+                const auto* value = reinterpret_cast<const float*>(
+                    havokShape + 0x30 + endpoint * 0x10);
+                output.vertices[endpoint] = {
+                    value[0], value[1], value[2]};
+            }
+            output.vertexCount = 2;
+        }
+        else if (type == 8) // hkConvexVerticesShape
+        {
+            const auto* fourVectors =
+                *reinterpret_cast<const unsigned char* const*>(
+                    havokShape + 0x50);
+            const int32_t fourVectorCount =
+                *reinterpret_cast<const int32_t*>(havokShape + 0x58);
+            const int32_t vertexCount =
+                *reinterpret_cast<const int32_t*>(havokShape + 0x60);
+            if (!fourVectors || fourVectorCount <= 0 ||
+                fourVectorCount > 64 || vertexCount <= 0 ||
+                vertexCount > static_cast<int32_t>(
+                    PhysicalContactConvexShape::kMaximumVertices) ||
+                vertexCount > fourVectorCount * 4)
+                return false;
+            for (int vertex = 0; vertex < vertexCount; ++vertex)
+            {
+                const auto* group = reinterpret_cast<const float*>(
+                    fourVectors + static_cast<size_t>(vertex / 4) * 0x30);
+                const int lane = vertex & 3;
+                output.vertices[vertex] = {
+                    group[lane], group[4 + lane], group[8 + lane]};
+            }
+            output.vertexCount = static_cast<uint16_t>(vertexCount);
+        }
+        else
+            return false;
+        return PhysicalContactConvexValid(output);
+    }
+
+    bool Halo3ContactConvexForObject(
+        const unsigned char* objectData,
+        PhysicalContactConvexShape& output)
+    {
+        if (!objectData)
+            return false;
+        const uint32_t objectDatum =
+            *reinterpret_cast<const uint32_t*>(objectData);
+        const unsigned char* objectDef =
+            Halo3LoadedTagDefinition(objectDatum);
+        const uint32_t modelDatum = objectDef
+            ? *reinterpret_cast<const uint32_t*>(objectDef + 0x40)
+            : 0xFFFFFFFFu;
+        const unsigned char* modelDef =
+            Halo3LoadedTagDefinition(modelDatum);
+        const uint32_t physicsDatum = modelDef
+            ? *reinterpret_cast<const uint32_t*>(modelDef + 0x3C)
+            : 0xFFFFFFFFu;
+        const unsigned char* physicsDef =
+            Halo3LoadedTagDefinition(physicsDatum);
+        void** baseSlot = g_halo3TagDataBase;
+        const auto* tagBase = baseSlot
+            ? static_cast<const unsigned char*>(*baseSlot) : nullptr;
+        if (!physicsDef || !tagBase)
+            return false;
+        const int32_t rigidBodyCount =
+            *reinterpret_cast<const int32_t*>(physicsDef + 0x58);
+        const uint32_t rigidBodyAddress =
+            *reinterpret_cast<const uint32_t*>(physicsDef + 0x5C);
+        if (rigidBodyCount != 1 || !rigidBodyAddress)
+            return false;
+        const auto* rigidBody = tagBase +
+            static_cast<size_t>(rigidBodyAddress) * 4;
+        const int16_t nodeIndex =
+            *reinterpret_cast<const int16_t*>(rigidBody);
+        const auto* shape =
+            *reinterpret_cast<const unsigned char* const*>(
+                rigidBody + 0x58);
+        if ((nodeIndex != -1 && nodeIndex != 0) || !shape)
+            return false;
+        return Halo3ContactConvexFromHavokShape(shape, output);
+    }
+
+    PhysicalContactTransform Halo3ContactObjectTransform(
+        const unsigned char* objectData)
+    {
+        PhysicalContactTransform transform{};
+        const auto* position = reinterpret_cast<const float*>(
+            objectData + kHalo3ObjectPositionOffset);
+        const auto* forward = reinterpret_cast<const float*>(
+            objectData + 0x5C);
+        const auto* up = reinterpret_cast<const float*>(
+            objectData + 0x68);
+        transform.position = {position[0], position[1], position[2]};
+        transform.forward = PhysicalContactNormalize(
+            {forward[0], forward[1], forward[2]});
+        transform.up = PhysicalContactNormalize(
+            {up[0], up[1], up[2]}, {0.0f, 0.0f, 1.0f});
+        transform.left = PhysicalContactNormalize(
+            PhysicalContactCross(transform.up, transform.forward),
+            {0.0f, 1.0f, 0.0f});
+        transform.up = PhysicalContactNormalize(
+            PhysicalContactCross(transform.forward, transform.left),
+            transform.up);
+        const float scale =
+            *reinterpret_cast<const float*>(objectData + 0x8C);
+        transform.scale = std::isfinite(scale) && scale > 0.001f &&
+                scale < 100.0f
+            ? scale : 1.0f;
+        return transform;
     }
 
     // Cache the selected node's default inverse once per concrete vehicle/seat,
@@ -9337,6 +9556,7 @@ namespace
         g_halo3ContactLastMotionSerial = motion.serial;
 
         float basis[9]{}, position[3]{};
+        float visibleScale = 1.0f;
         uint64_t visiblePoseMs = nowMs;
         bool haveVisiblePose = false;
         if (debugRig && g_baseCamValid.load(std::memory_order_acquire))
@@ -9363,9 +9583,10 @@ namespace
         }
         else
             haveVisiblePose = Halo3ReadVisibleWeaponPose(
-                basis, position, visiblePoseMs);
+                basis, position, visibleScale, visiblePoseMs);
         if (!haveVisiblePose || nowMs < visiblePoseMs ||
-            nowMs - visiblePoseMs > 100)
+            nowMs - visiblePoseMs > 100 || !std::isfinite(visibleScale) ||
+            visibleScale <= 0.001f || visibleScale > 100.0f)
         {
             g_halo3ContactStage.store(
                 static_cast<uint32_t>(Halo3PhysicalContactStage::VisiblePose),
@@ -9718,6 +9939,33 @@ namespace
                         (amplitude * std::sin(debugPhase));
                 }
             }
+            PhysicalContactTransform weaponTransform{};
+            weaponTransform.position = grip;
+            weaponTransform.forward = forward;
+            weaponTransform.up = PhysicalContactNormalize(
+                {basis[6], basis[7], basis[8]}, {0.0f, 0.0f, 1.0f});
+            weaponTransform.left = PhysicalContactNormalize(
+                PhysicalContactCross(
+                    weaponTransform.up, weaponTransform.forward),
+                {basis[3], basis[4], basis[5]});
+            weaponTransform.up = PhysicalContactNormalize(
+                PhysicalContactCross(
+                    weaponTransform.forward, weaponTransform.left),
+                weaponTransform.up);
+            weaponTransform.scale = visibleScale;
+            PhysicalContactConvexShape weaponShape{};
+            if (!PhysicalContactTransformFinite(weaponTransform) ||
+                !Halo3ContactConvexForObject(weaponData, weaponShape))
+            {
+                g_halo3ContactUnsupportedShapes.fetch_add(
+                    1, std::memory_order_relaxed);
+                g_halo3ContactStage.store(
+                    static_cast<uint32_t>(
+                        Halo3PhysicalContactStage::HeldWeapon),
+                    std::memory_order_relaxed);
+                Halo3ResetPhysicalContact();
+                return;
+            }
             const PhysicalContactVec3 tip = grip + forward * capsuleLength;
             // Constrain the final rendered weapon against native BSP/instance
             // structure. The palette publication already includes the prior
@@ -9804,6 +10052,7 @@ namespace
             {
                 g_halo3ContactPreviousGrip = grip;
                 g_halo3ContactPreviousTip = tip;
+                g_halo3ContactPreviousWeaponTransform = weaponTransform;
                 g_halo3ContactPreviousPoseMs = visiblePoseMs;
                 g_halo3ContactPreviousPoseValid = true;
                 return;
@@ -9813,6 +10062,8 @@ namespace
                 g_halo3ContactPreviousGrip;
             const PhysicalContactVec3 previousTip =
                 g_halo3ContactPreviousTip;
+            const PhysicalContactTransform previousWeaponTransform =
+                g_halo3ContactPreviousWeaponTransform;
             const uint64_t previousPoseMs = g_halo3ContactPreviousPoseMs;
             const PhysicalContactVec3 movementDirection =
                 PhysicalContactNormalize(tip - previousTip,
@@ -9832,6 +10083,8 @@ namespace
             int32_t closestType = -1;
             int32_t closestHandle = -1;
             uint16_t closestMaterial = 0;
+            PhysicalContactVec3 closestWeaponPoint{};
+            bool closestUsesAuthoredShape = false;
             uint32_t eligibleObjects = 0;
             // collision_flags: structure; object_flags: object-query enable
             // plus every object type. H3EK's generated +0x14060 initializer
@@ -9885,16 +10138,21 @@ namespace
                     closestHandle = native.type == 4
                         ? native.objectHandle : -1;
                     closestMaterial = native.materialIndex;
+                    closestWeaponPoint = hitPoint;
+                    closestUsesAuthoredShape = false;
                 }
             }
             // Halo 3's vector query resolves BSP and authored model collision,
             // but the live Forge probe proves loose weapon rigid bodies expose
-            // no surface through that API. Use the already-tested bounded
-            // capsule fallback only for root object kinds that can own physics;
-            // the exact native structure result above still wins whenever it
-            // lies earlier along the same sweep.
+            // no surface through that API. The old capsule/sphere pair now
+            // serves only as a cheap broad phase. A contact exists only after
+            // the two resolved H3EK Havok convex shapes intersect.
             const int32_t debugAimTarget =
                 g_halo3ContactDebugAimTarget.load(std::memory_order_relaxed);
+            const float weaponBroadRadius =
+                PhysicalContactConvexBoundRadius(weaponShape) *
+                std::max(previousWeaponTransform.scale,
+                         weaponTransform.scale);
             const uint32_t limit = std::min(
                 header.firstUnallocated, header.maximumCount);
             for (uint32_t index = 0; index < limit; ++index)
@@ -9927,22 +10185,43 @@ namespace
                     !std::isfinite(radius) || radius <= 0.01f ||
                     radius > 5.0f)
                     continue;
-                ++eligibleObjects;
-                const PhysicalContactHit proxy = PhysicalContactSweepCapsule(
-                    previousGrip, previousTip,
-                    grip, tip, contactRadius, targetCenter, radius);
-                if (!proxy.hit ||
-                    (closest.hit && proxy.fraction > closest.fraction + 0.001f))
+                const PhysicalContactHit proxy = PhysicalContactSweepPoint(
+                    previousWeaponTransform.position,
+                    weaponTransform.position, targetCenter,
+                    weaponBroadRadius + radius);
+                if (!proxy.hit)
                     continue;
-                closest = proxy;
+                PhysicalContactConvexShape targetShape{};
+                if (!Halo3ContactConvexForObject(data, targetShape))
+                    continue;
+                const PhysicalContactTransform targetTransform =
+                    Halo3ContactObjectTransform(data);
+                if (!PhysicalContactTransformFinite(targetTransform))
+                    continue;
+                ++eligibleObjects;
+                const PhysicalContactConvexHit authored =
+                    PhysicalContactSweepConvex(
+                        weaponShape, previousWeaponTransform, weaponTransform,
+                        targetShape, targetTransform);
+                if (!authored.hit ||
+                    (closest.hit &&
+                     authored.fraction > closest.fraction + 0.001f))
+                    continue;
+                closest.hit = true;
+                closest.fraction = authored.fraction;
+                closest.point = authored.point;
+                closest.normal = authored.normal;
                 closestType = 4;
                 closestHandle = handle;
-                // H3EK global-material index zero is the authored default used
-                // when the bounds fallback has no surface triangle.
+                closestWeaponPoint = authored.weaponPoint;
+                closestUsesAuthoredShape = true;
+                // Convex Havok shapes carry the material on their primitive,
+                // not per face. Zero selects the authored default material.
                 closestMaterial = 0;
             }
             g_halo3ContactPreviousGrip = grip;
             g_halo3ContactPreviousTip = tip;
+            g_halo3ContactPreviousWeaponTransform = weaponTransform;
             g_halo3ContactPreviousPoseMs = visiblePoseMs;
             g_halo3ContactEligibleObjects.store(
                 eligibleObjects, std::memory_order_relaxed);
@@ -9957,6 +10236,9 @@ namespace
                 return;
             }
             g_halo3ContactHits.fetch_add(1, std::memory_order_relaxed);
+            if (closestUsesAuthoredShape)
+                g_halo3ContactAuthoredShapeHits.fetch_add(
+                    1, std::memory_order_relaxed);
             if (closestType != 4 || closestHandle == -1)
             {
                 g_halo3ContactStage.store(
@@ -10010,13 +10292,22 @@ namespace
                 closestHandle, targetLinear, targetAngular);
             g_halo3ObjectGetCenter(closestHandle, targetCenterRaw);
             const PhysicalContactPointVelocity pointVelocity =
-                PhysicalContactVelocityAtPoint(
-                    previousGrip, previousTip, grip, tip, closest.point,
-                    {targetLinear[0], targetLinear[1], targetLinear[2]},
-                    {targetAngular[0], targetAngular[1], targetAngular[2]},
-                    {targetCenterRaw[0], targetCenterRaw[1],
-                     targetCenterRaw[2]},
-                    dt, worldScale);
+                closestUsesAuthoredShape
+                ? PhysicalContactRigidPointVelocity(
+                      previousWeaponTransform, weaponTransform,
+                      closestWeaponPoint,
+                      {targetLinear[0], targetLinear[1], targetLinear[2]},
+                      {targetAngular[0], targetAngular[1], targetAngular[2]},
+                      {targetCenterRaw[0], targetCenterRaw[1],
+                       targetCenterRaw[2]},
+                      dt, worldScale)
+                : PhysicalContactVelocityAtPoint(
+                      previousGrip, previousTip, grip, tip, closest.point,
+                      {targetLinear[0], targetLinear[1], targetLinear[2]},
+                      {targetAngular[0], targetAngular[1], targetAngular[2]},
+                      {targetCenterRaw[0], targetCenterRaw[1],
+                       targetCenterRaw[2]},
+                      dt, worldScale);
             if (!pointVelocity.valid)
             {
                 g_halo3ContactDebounce.EndSample();
@@ -10193,6 +10484,7 @@ namespace
             "sweeps=%llu hits=%llu impulses=%llu melees=%llu "
             "command=%llu applied=%llu commandStatus=%u meleeStatus=%u "
             "damage=0x%08X response=0x%08X rawMaterial=%u material=%u "
+            "authoredShapeHits=%llu unsupportedShapes=%llu "
             "wallBlocks=%llu wallSetback=%.3fm",
             stageName,
             g_halo3ContactEligibleObjects.load(std::memory_order_relaxed),
@@ -10219,6 +10511,10 @@ namespace
                 std::memory_order_relaxed)),
             static_cast<uint32_t>(g_halo3ContactMeleeMaterial.load(
                 std::memory_order_relaxed)),
+            (unsigned long long)g_halo3ContactAuthoredShapeHits.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactUnsupportedShapes.load(
+                std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactWallBlocks.load(
                 std::memory_order_relaxed),
             g_halo3ContactWallSetbackMeters.load(

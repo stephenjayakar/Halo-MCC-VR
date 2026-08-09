@@ -67,6 +67,487 @@ inline PhysicalContactVec3 PhysicalContactCross(
         a.x * b.y - a.y * b.x};
 }
 
+struct PhysicalContactPointVelocity
+{
+    bool valid = false;
+    float capsuleFraction = 0.0f;
+    PhysicalContactVec3 weaponMetersPerSecond{};
+    PhysicalContactVec3 targetMetersPerSecond{};
+    PhysicalContactVec3 relativeMetersPerSecond{};
+};
+
+struct PhysicalContactTransform
+{
+    PhysicalContactVec3 position{};
+    PhysicalContactVec3 forward{1.0f, 0.0f, 0.0f};
+    PhysicalContactVec3 left{0.0f, 1.0f, 0.0f};
+    PhysicalContactVec3 up{0.0f, 0.0f, 1.0f};
+    float scale = 1.0f;
+};
+
+inline bool PhysicalContactTransformFinite(const PhysicalContactTransform& t)
+{
+    return PhysicalContactFinite(t.position) &&
+        PhysicalContactFinite(t.forward) && PhysicalContactFinite(t.left) &&
+        PhysicalContactFinite(t.up) && std::isfinite(t.scale) &&
+        t.scale > 1.0e-4f && t.scale < 1000.0f;
+}
+
+inline PhysicalContactVec3 PhysicalContactTransformVector(
+    const PhysicalContactTransform& t, PhysicalContactVec3 local)
+{
+    return (t.forward * local.x + t.left * local.y + t.up * local.z) *
+        t.scale;
+}
+
+inline PhysicalContactVec3 PhysicalContactTransformPoint(
+    const PhysicalContactTransform& t, PhysicalContactVec3 local)
+{
+    return t.position + PhysicalContactTransformVector(t, local);
+}
+
+inline PhysicalContactVec3 PhysicalContactInverseTransformVector(
+    const PhysicalContactTransform& t, PhysicalContactVec3 world)
+{
+    const float inverseScale = 1.0f / t.scale;
+    return {
+        PhysicalContactDot(world, t.forward) * inverseScale,
+        PhysicalContactDot(world, t.left) * inverseScale,
+        PhysicalContactDot(world, t.up) * inverseScale};
+}
+
+inline PhysicalContactVec3 PhysicalContactInverseTransformPoint(
+    const PhysicalContactTransform& t, PhysicalContactVec3 world)
+{
+    return PhysicalContactInverseTransformVector(t, world - t.position);
+}
+
+inline PhysicalContactTransform PhysicalContactInterpolateTransform(
+    const PhysicalContactTransform& from, const PhysicalContactTransform& to,
+    float fraction)
+{
+    const float t = std::clamp(fraction, 0.0f, 1.0f);
+    PhysicalContactTransform result{};
+    result.position = from.position + (to.position - from.position) * t;
+    result.scale = from.scale + (to.scale - from.scale) * t;
+    result.forward = PhysicalContactNormalize(
+        from.forward + (to.forward - from.forward) * t, to.forward);
+    const PhysicalContactVec3 upHint = PhysicalContactNormalize(
+        from.up + (to.up - from.up) * t, to.up);
+    result.left = PhysicalContactNormalize(
+        PhysicalContactCross(upHint, result.forward), to.left);
+    result.up = PhysicalContactNormalize(
+        PhysicalContactCross(result.forward, result.left), to.up);
+    return result;
+}
+
+struct PhysicalContactConvexShape
+{
+    static constexpr size_t kMaximumVertices = 256;
+    std::array<PhysicalContactVec3, kMaximumVertices> vertices{};
+    uint16_t vertexCount = 0;
+    float radius = 0.0f;
+};
+
+inline bool PhysicalContactConvexValid(const PhysicalContactConvexShape& shape)
+{
+    if (!shape.vertexCount ||
+        shape.vertexCount > PhysicalContactConvexShape::kMaximumVertices ||
+        !std::isfinite(shape.radius) || shape.radius < 0.0f ||
+        shape.radius > 10.0f)
+        return false;
+    for (uint16_t i = 0; i < shape.vertexCount; ++i)
+        if (!PhysicalContactFinite(shape.vertices[i]))
+            return false;
+    return true;
+}
+
+inline float PhysicalContactConvexBoundRadius(
+    const PhysicalContactConvexShape& shape)
+{
+    float radiusSquared = 0.0f;
+    for (uint16_t i = 0; i < shape.vertexCount; ++i)
+        radiusSquared = std::max(
+            radiusSquared,
+            PhysicalContactLengthSquared(shape.vertices[i]));
+    return std::sqrt(radiusSquared) + shape.radius;
+}
+
+inline PhysicalContactVec3 PhysicalContactConvexSupport(
+    const PhysicalContactConvexShape& shape,
+    const PhysicalContactTransform& transform,
+    PhysicalContactVec3 worldDirection)
+{
+    const PhysicalContactVec3 localDirection =
+        PhysicalContactInverseTransformVector(transform, worldDirection);
+    uint16_t best = 0;
+    float bestProjection = PhysicalContactDot(
+        shape.vertices[0], localDirection);
+    for (uint16_t i = 1; i < shape.vertexCount; ++i)
+    {
+        const float projection = PhysicalContactDot(
+            shape.vertices[i], localDirection);
+        if (projection > bestProjection)
+        {
+            bestProjection = projection;
+            best = i;
+        }
+    }
+    PhysicalContactVec3 result = PhysicalContactTransformPoint(
+        transform, shape.vertices[best]);
+    const float scaledRadius = shape.radius * transform.scale;
+    if (scaledRadius > 0.0f)
+        result = result + PhysicalContactNormalize(worldDirection) *
+            scaledRadius;
+    return result;
+}
+
+struct PhysicalContactGjkSimplex
+{
+    std::array<PhysicalContactVec3, 4> points{};
+    int count = 0;
+};
+
+inline PhysicalContactVec3 PhysicalContactPerpendicular(
+    PhysicalContactVec3 value)
+{
+    PhysicalContactVec3 axis = std::fabs(value.x) < std::fabs(value.y)
+        ? PhysicalContactVec3{1.0f, 0.0f, 0.0f}
+        : PhysicalContactVec3{0.0f, 1.0f, 0.0f};
+    PhysicalContactVec3 perpendicular = PhysicalContactCross(value, axis);
+    if (PhysicalContactLengthSquared(perpendicular) <= 1.0e-10f)
+        perpendicular = PhysicalContactCross(
+            value, {0.0f, 0.0f, 1.0f});
+    return PhysicalContactNormalize(perpendicular);
+}
+
+inline bool PhysicalContactGjkLine(
+    PhysicalContactGjkSimplex& simplex, PhysicalContactVec3& direction)
+{
+    const PhysicalContactVec3 a = simplex.points[1];
+    const PhysicalContactVec3 b = simplex.points[0];
+    const PhysicalContactVec3 ab = b - a;
+    const PhysicalContactVec3 ao = a * -1.0f;
+    if (PhysicalContactDot(ab, ao) > 0.0f)
+    {
+        direction = PhysicalContactCross(
+            PhysicalContactCross(ab, ao), ab);
+        if (PhysicalContactLengthSquared(direction) <= 1.0e-12f)
+            direction = PhysicalContactPerpendicular(ab);
+    }
+    else
+    {
+        simplex.points[0] = a;
+        simplex.count = 1;
+        direction = ao;
+    }
+    return false;
+}
+
+inline bool PhysicalContactGjkTriangle(
+    PhysicalContactGjkSimplex& simplex, PhysicalContactVec3& direction)
+{
+    const PhysicalContactVec3 a = simplex.points[2];
+    const PhysicalContactVec3 b = simplex.points[1];
+    const PhysicalContactVec3 c = simplex.points[0];
+    const PhysicalContactVec3 ab = b - a;
+    const PhysicalContactVec3 ac = c - a;
+    const PhysicalContactVec3 ao = a * -1.0f;
+    const PhysicalContactVec3 abc = PhysicalContactCross(ab, ac);
+
+    if (PhysicalContactDot(PhysicalContactCross(abc, ac), ao) > 0.0f)
+    {
+        if (PhysicalContactDot(ac, ao) > 0.0f)
+        {
+            simplex.points[0] = c;
+            simplex.points[1] = a;
+            simplex.count = 2;
+            direction = PhysicalContactCross(
+                PhysicalContactCross(ac, ao), ac);
+        }
+        else
+        {
+            simplex.points[0] = b;
+            simplex.points[1] = a;
+            simplex.count = 2;
+            return PhysicalContactGjkLine(simplex, direction);
+        }
+        return false;
+    }
+    if (PhysicalContactDot(PhysicalContactCross(ab, abc), ao) > 0.0f)
+    {
+        simplex.points[0] = b;
+        simplex.points[1] = a;
+        simplex.count = 2;
+        return PhysicalContactGjkLine(simplex, direction);
+    }
+    if (PhysicalContactDot(abc, ao) > 0.0f)
+        direction = abc;
+    else
+    {
+        simplex.points[0] = b;
+        simplex.points[1] = c;
+        direction = abc * -1.0f;
+    }
+    return false;
+}
+
+inline bool PhysicalContactGjkTetrahedron(
+    PhysicalContactGjkSimplex& simplex, PhysicalContactVec3& direction)
+{
+    const PhysicalContactVec3 a = simplex.points[3];
+    const PhysicalContactVec3 b = simplex.points[2];
+    const PhysicalContactVec3 c = simplex.points[1];
+    const PhysicalContactVec3 d = simplex.points[0];
+    const PhysicalContactVec3 ao = a * -1.0f;
+    const auto outsideFace = [&](PhysicalContactVec3 p,
+                                 PhysicalContactVec3 q,
+                                 PhysicalContactVec3 opposite,
+                                 PhysicalContactVec3& normal) {
+        normal = PhysicalContactCross(p - a, q - a);
+        if (PhysicalContactDot(normal, opposite - a) > 0.0f)
+            normal = normal * -1.0f;
+        return PhysicalContactDot(normal, ao) > 0.0f;
+    };
+    PhysicalContactVec3 normal{};
+    if (outsideFace(b, c, d, normal))
+    {
+        simplex.points[0] = c;
+        simplex.points[1] = b;
+        simplex.points[2] = a;
+        simplex.count = 3;
+        direction = normal;
+        return false;
+    }
+    if (outsideFace(c, d, b, normal))
+    {
+        simplex.points[0] = d;
+        simplex.points[1] = c;
+        simplex.points[2] = a;
+        simplex.count = 3;
+        direction = normal;
+        return false;
+    }
+    if (outsideFace(d, b, c, normal))
+    {
+        simplex.points[0] = b;
+        simplex.points[1] = d;
+        simplex.points[2] = a;
+        simplex.count = 3;
+        direction = normal;
+        return false;
+    }
+    return true;
+}
+
+inline bool PhysicalContactGjkContainsOrigin(
+    PhysicalContactGjkSimplex& simplex, PhysicalContactVec3& direction)
+{
+    if (simplex.count == 2)
+        return PhysicalContactGjkLine(simplex, direction);
+    if (simplex.count == 3)
+        return PhysicalContactGjkTriangle(simplex, direction);
+    return simplex.count == 4 &&
+        PhysicalContactGjkTetrahedron(simplex, direction);
+}
+
+inline bool PhysicalContactConvexIntersect(
+    const PhysicalContactConvexShape& a,
+    const PhysicalContactTransform& transformA,
+    const PhysicalContactConvexShape& b,
+    const PhysicalContactTransform& transformB,
+    PhysicalContactVec3* separatingDirection = nullptr)
+{
+    PhysicalContactVec3 direction = transformB.position - transformA.position;
+    if (PhysicalContactLengthSquared(direction) <= 1.0e-10f)
+        direction = {1.0f, 0.0f, 0.0f};
+    PhysicalContactGjkSimplex simplex{};
+    const auto support = [&](PhysicalContactVec3 d) {
+        return PhysicalContactConvexSupport(a, transformA, d) -
+            PhysicalContactConvexSupport(b, transformB, d * -1.0f);
+    };
+    simplex.points[0] = support(direction);
+    simplex.count = 1;
+    direction = simplex.points[0] * -1.0f;
+    for (int iteration = 0; iteration < 32; ++iteration)
+    {
+        if (!PhysicalContactFinite(direction))
+            break;
+        if (PhysicalContactLengthSquared(direction) <= 1.0e-12f)
+            return true;
+        const PhysicalContactVec3 point = support(direction);
+        if (!PhysicalContactFinite(point) ||
+            PhysicalContactDot(point, direction) < 0.0f)
+        {
+            if (separatingDirection)
+                *separatingDirection = direction;
+            return false;
+        }
+        simplex.points[simplex.count++] = point;
+        if (PhysicalContactGjkContainsOrigin(simplex, direction))
+            return true;
+    }
+    if (separatingDirection)
+        *separatingDirection = direction;
+    return false;
+}
+
+struct PhysicalContactConvexHit
+{
+    bool hit = false;
+    float fraction = 1.0f;
+    PhysicalContactVec3 point{};
+    PhysicalContactVec3 weaponPoint{};
+    PhysicalContactVec3 targetPoint{};
+    PhysicalContactVec3 normal{1.0f, 0.0f, 0.0f};
+};
+
+inline PhysicalContactConvexHit PhysicalContactSweepConvex(
+    const PhysicalContactConvexShape& weapon,
+    const PhysicalContactTransform& previousWeaponTransform,
+    const PhysicalContactTransform& currentWeaponTransform,
+    const PhysicalContactConvexShape& target,
+    const PhysicalContactTransform& targetTransform)
+{
+    PhysicalContactConvexHit result{};
+    if (!PhysicalContactConvexValid(weapon) ||
+        !PhysicalContactConvexValid(target) ||
+        !PhysicalContactTransformFinite(previousWeaponTransform) ||
+        !PhysicalContactTransformFinite(currentWeaponTransform) ||
+        !PhysicalContactTransformFinite(targetTransform))
+        return result;
+
+    PhysicalContactVec3 separation{};
+    if (PhysicalContactConvexIntersect(
+            weapon, previousWeaponTransform, target, targetTransform,
+            &separation))
+    {
+        result.hit = true;
+        result.fraction = 0.0f;
+    }
+    else
+    {
+        const float translation = PhysicalContactLength(
+            currentWeaponTransform.position -
+            previousWeaponTransform.position);
+        const float axisChange = std::max({
+            PhysicalContactLength(currentWeaponTransform.forward -
+                                  previousWeaponTransform.forward),
+            PhysicalContactLength(currentWeaponTransform.left -
+                                  previousWeaponTransform.left),
+            PhysicalContactLength(currentWeaponTransform.up -
+                                  previousWeaponTransform.up)});
+        const float sweptDistance = translation + axisChange *
+            PhysicalContactConvexBoundRadius(weapon) *
+                std::max(previousWeaponTransform.scale,
+                         currentWeaponTransform.scale);
+        const int steps = std::clamp(
+            static_cast<int>(std::ceil(sweptDistance / 0.01f)), 1, 32);
+        float low = 0.0f;
+        float high = 1.0f;
+        bool found = false;
+        for (int step = 1; step <= steps; ++step)
+        {
+            const float fraction = static_cast<float>(step) /
+                static_cast<float>(steps);
+            const PhysicalContactTransform transform =
+                PhysicalContactInterpolateTransform(
+                    previousWeaponTransform, currentWeaponTransform,
+                    fraction);
+            PhysicalContactVec3 candidateSeparation{};
+            if (PhysicalContactConvexIntersect(
+                    weapon, transform, target, targetTransform,
+                    &candidateSeparation))
+            {
+                high = fraction;
+                low = static_cast<float>(step - 1) /
+                    static_cast<float>(steps);
+                found = true;
+                break;
+            }
+            separation = candidateSeparation;
+        }
+        if (!found)
+            return result;
+        for (int iteration = 0; iteration < 9; ++iteration)
+        {
+            const float middle = (low + high) * 0.5f;
+            const PhysicalContactTransform transform =
+                PhysicalContactInterpolateTransform(
+                    previousWeaponTransform, currentWeaponTransform, middle);
+            PhysicalContactVec3 candidateSeparation{};
+            if (PhysicalContactConvexIntersect(
+                    weapon, transform, target, targetTransform,
+                    &candidateSeparation))
+                high = middle;
+            else
+            {
+                low = middle;
+                separation = candidateSeparation;
+            }
+        }
+        result.hit = true;
+        result.fraction = high;
+    }
+
+    const PhysicalContactTransform impact =
+        PhysicalContactInterpolateTransform(
+            previousWeaponTransform, currentWeaponTransform,
+            result.fraction);
+    const PhysicalContactVec3 fallbackNormal = PhysicalContactNormalize(
+        impact.position - targetTransform.position,
+        currentWeaponTransform.position - previousWeaponTransform.position);
+    result.normal = PhysicalContactNormalize(
+        separation * -1.0f, fallbackNormal);
+    result.weaponPoint = PhysicalContactConvexSupport(
+        weapon, impact, result.normal * -1.0f);
+    result.targetPoint = PhysicalContactConvexSupport(
+        target, targetTransform, result.normal);
+    result.point = (result.weaponPoint + result.targetPoint) * 0.5f;
+    return result;
+}
+
+inline PhysicalContactPointVelocity PhysicalContactRigidPointVelocity(
+    const PhysicalContactTransform& previousWeaponTransform,
+    const PhysicalContactTransform& currentWeaponTransform,
+    PhysicalContactVec3 currentWeaponPoint,
+    PhysicalContactVec3 targetLinearVelocity,
+    PhysicalContactVec3 targetAngularVelocity,
+    PhysicalContactVec3 targetCenter, float elapsedSeconds,
+    float worldUnitsPerMeter)
+{
+    PhysicalContactPointVelocity result{};
+    if (!PhysicalContactTransformFinite(previousWeaponTransform) ||
+        !PhysicalContactTransformFinite(currentWeaponTransform) ||
+        !PhysicalContactFinite(currentWeaponPoint) ||
+        !PhysicalContactFinite(targetLinearVelocity) ||
+        !PhysicalContactFinite(targetAngularVelocity) ||
+        !PhysicalContactFinite(targetCenter) ||
+        !std::isfinite(elapsedSeconds) || elapsedSeconds <= 0.0f ||
+        elapsedSeconds > 0.1f || !std::isfinite(worldUnitsPerMeter) ||
+        worldUnitsPerMeter <= 0.0f)
+        return result;
+    const PhysicalContactVec3 localPoint =
+        PhysicalContactInverseTransformPoint(
+            currentWeaponTransform, currentWeaponPoint);
+    const PhysicalContactVec3 previousWeaponPoint =
+        PhysicalContactTransformPoint(previousWeaponTransform, localPoint);
+    const float metersPerWorldUnit = 1.0f / worldUnitsPerMeter;
+    result.weaponMetersPerSecond =
+        (currentWeaponPoint - previousWeaponPoint) *
+        (metersPerWorldUnit / elapsedSeconds);
+    const PhysicalContactVec3 angularPointVelocity = PhysicalContactCross(
+        targetAngularVelocity, currentWeaponPoint - targetCenter);
+    result.targetMetersPerSecond =
+        (targetLinearVelocity + angularPointVelocity) * metersPerWorldUnit;
+    result.relativeMetersPerSecond =
+        result.weaponMetersPerSecond - result.targetMetersPerSecond;
+    result.valid = PhysicalContactFinite(result.weaponMetersPerSecond) &&
+        PhysicalContactFinite(result.targetMetersPerSecond) &&
+        PhysicalContactFinite(result.relativeMetersPerSecond);
+    return result;
+}
+
 struct PhysicalContactWallConstraint
 {
     bool constrained = false;
@@ -131,15 +612,6 @@ inline PhysicalContactVec3 PhysicalContactUpdateWallOffset(
         kReleaseMetersPerSecond * worldUnitsPerMeter * elapsedSeconds);
     return currentOffset * ((currentLength - release) / currentLength);
 }
-
-struct PhysicalContactPointVelocity
-{
-    bool valid = false;
-    float capsuleFraction = 0.0f;
-    PhysicalContactVec3 weaponMetersPerSecond{};
-    PhysicalContactVec3 targetMetersPerSecond{};
-    PhysicalContactVec3 relativeMetersPerSecond{};
-};
 
 // Compute velocity where contact actually occurred rather than classifying a
 // rotational strike from controller-origin speed. The same capsule fraction is
