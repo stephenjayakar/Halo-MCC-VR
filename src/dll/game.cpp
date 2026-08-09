@@ -10075,12 +10075,9 @@ namespace
         bool haveMotion = false;
         if (debugRig && gate)
         {
-            const float speed = debugMaxSpeed *
-                std::fabs(std::cos(debugPhase));
             motion.poseValid = true;
             motion.linearVelocityValid = true;
             motion.angularVelocityValid = true;
-            motion.linearVelocity[0] = speed;
             motion.sampleMs = nowMs;
             motion.serial = nowMs;
             haveMotion = true;
@@ -11166,23 +11163,49 @@ namespace
             g_halo3ObjectGetVelocities(
                 closestHandle, targetLinear, targetAngular);
             g_halo3ObjectGetCenter(closestHandle, targetCenterRaw);
-            const PhysicalContactPointVelocity pointVelocity =
+            PhysicalContactVec3 weaponLinearMetersPerSecond{};
+            PhysicalContactVec3 weaponAngularRadiansPerSecond{};
+            bool trackedVelocityValid = true;
+            if (debugRig)
+            {
+                // The exact authored surfaces move with the sinusoid above.
+                // Its derivative is signed so the slow rig cannot gain speed
+                // from visible weapon orientation or animation.
+                weaponLinearMetersPerSecond =
+                    forward * (debugMaxSpeed * std::cos(debugPhase));
+            }
+            else
+            {
+                trackedVelocityValid =
+                    PhysicalContactTrackingVectorToGame(
+                        {motion.linearVelocity[0], motion.linearVelocity[1],
+                         motion.linearVelocity[2]},
+                        g_headYawRef, g_gameYawRef,
+                        weaponLinearMetersPerSecond);
+                if (trackedVelocityValid && motion.angularVelocityValid)
+                    trackedVelocityValid =
+                        PhysicalContactTrackingVectorToGame(
+                            {motion.angularVelocity[0],
+                             motion.angularVelocity[1],
+                             motion.angularVelocity[2]},
+                            g_headYawRef, g_gameYawRef,
+                            weaponAngularRadiansPerSecond);
+            }
+            const PhysicalContactVec3 weaponContactPoint =
                 (closestUsesAuthoredShape || closestUsesRigidWeaponPoint)
-                ? PhysicalContactRigidPointVelocity(
-                      previousWeaponTransform, weaponTransform,
-                      closestWeaponPoint,
+                ? closestWeaponPoint : closest.point;
+            const PhysicalContactPointVelocity pointVelocity =
+                trackedVelocityValid
+                ? PhysicalContactTrackedPointVelocity(
+                      weaponLinearMetersPerSecond,
+                      weaponAngularRadiansPerSecond,
+                      weaponTransform.position, weaponContactPoint,
                       {targetLinear[0], targetLinear[1], targetLinear[2]},
                       {targetAngular[0], targetAngular[1], targetAngular[2]},
                       {targetCenterRaw[0], targetCenterRaw[1],
                        targetCenterRaw[2]},
-                      dt, worldScale)
-                : PhysicalContactVelocityAtPoint(
-                      previousGrip, previousTip, grip, tip, closest.point,
-                      {targetLinear[0], targetLinear[1], targetLinear[2]},
-                      {targetAngular[0], targetAngular[1], targetAngular[2]},
-                      {targetCenterRaw[0], targetCenterRaw[1],
-                       targetCenterRaw[2]},
-                      dt, worldScale);
+                      worldScale)
+                : PhysicalContactPointVelocity{};
             if (!pointVelocity.valid)
             {
                 g_halo3ContactDebounce.EndSample();

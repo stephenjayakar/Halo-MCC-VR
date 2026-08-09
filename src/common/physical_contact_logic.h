@@ -76,6 +76,76 @@ struct PhysicalContactPointVelocity
     PhysicalContactVec3 relativeMetersPerSecond{};
 };
 
+// Rotate an OpenXR local-space vector into Halo's on-foot world axes. This is
+// the same proper rotation used for controller displacement. Keeping it here
+// makes contact velocity independent from the visible weapon's idle, recoil,
+// and authored animation.
+inline bool PhysicalContactTrackingVectorToGame(
+    PhysicalContactVec3 tracking, float headYawReference,
+    float gameYawReference, PhysicalContactVec3& game)
+{
+    game = {};
+    if (!PhysicalContactFinite(tracking) ||
+        !std::isfinite(headYawReference) ||
+        !std::isfinite(gameYawReference))
+        return false;
+    const float sh = std::sin(headYawReference);
+    const float ch = std::cos(headYawReference);
+    const float roomForward = tracking.x * sh - tracking.z * ch;
+    const float roomRight = tracking.x * ch + tracking.z * sh;
+    const float cg = std::cos(gameYawReference);
+    const float sg = std::sin(gameYawReference);
+    game = {
+        cg * roomForward + sg * roomRight,
+        sg * roomForward - cg * roomRight,
+        tracking.y};
+    return PhysicalContactFinite(game);
+}
+
+// Use tracked hand motion at the exact authored weapon contact point. The
+// visible transform still supplies collision geometry and the world-space
+// lever arm. It never supplies velocity, so Halo animation cannot create a
+// push or qualify as a melee strike.
+inline PhysicalContactPointVelocity PhysicalContactTrackedPointVelocity(
+    PhysicalContactVec3 weaponLinearMetersPerSecond,
+    PhysicalContactVec3 weaponAngularRadiansPerSecond,
+    PhysicalContactVec3 weaponPivotWorld,
+    PhysicalContactVec3 weaponContactWorld,
+    PhysicalContactVec3 targetLinearWorldUnitsPerSecond,
+    PhysicalContactVec3 targetAngularRadiansPerSecond,
+    PhysicalContactVec3 targetCenterWorld, float worldUnitsPerMeter)
+{
+    PhysicalContactPointVelocity result{};
+    if (!PhysicalContactFinite(weaponLinearMetersPerSecond) ||
+        !PhysicalContactFinite(weaponAngularRadiansPerSecond) ||
+        !PhysicalContactFinite(weaponPivotWorld) ||
+        !PhysicalContactFinite(weaponContactWorld) ||
+        !PhysicalContactFinite(targetLinearWorldUnitsPerSecond) ||
+        !PhysicalContactFinite(targetAngularRadiansPerSecond) ||
+        !PhysicalContactFinite(targetCenterWorld) ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f)
+        return result;
+
+    const float metersPerWorldUnit = 1.0f / worldUnitsPerMeter;
+    const PhysicalContactVec3 weaponLeverMeters =
+        (weaponContactWorld - weaponPivotWorld) * metersPerWorldUnit;
+    result.weaponMetersPerSecond = weaponLinearMetersPerSecond +
+        PhysicalContactCross(
+            weaponAngularRadiansPerSecond, weaponLeverMeters);
+    result.targetMetersPerSecond =
+        (targetLinearWorldUnitsPerSecond +
+         PhysicalContactCross(
+             targetAngularRadiansPerSecond,
+             weaponContactWorld - targetCenterWorld)) *
+        metersPerWorldUnit;
+    result.relativeMetersPerSecond =
+        result.weaponMetersPerSecond - result.targetMetersPerSecond;
+    result.valid = PhysicalContactFinite(result.weaponMetersPerSecond) &&
+        PhysicalContactFinite(result.targetMetersPerSecond) &&
+        PhysicalContactFinite(result.relativeMetersPerSecond);
+    return result;
+}
+
 struct PhysicalContactTransform
 {
     PhysicalContactVec3 position{};

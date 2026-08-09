@@ -432,6 +432,28 @@ target-delta cap. Runtime telemetry now records the exact target handle and
 kind, penetration depth, normal impulse, tangential impulse, and converted
 weapon and target masses.
 
+The fixed-body candidate then selected a real dynamic loose weapon in the
+headless Construct Forge rig: handle `0xE29A002B`, kind `2`, motion type `4`,
+and native mass `4.869 kg`. The installed candidate applied native point
+impulses and moved it `0.040` world units. The same nominally slow `0.90 m/s`
+run incorrectly reported weapon speeds up to `3.09 m/s` and repeatedly invoked
+melee. The visible weapon transform includes Halo idle and authored animation,
+so transform-delta velocity was not controller velocity. The preserved log is
+`out/debug-openxr/45d3eb4-forge-dynamic-slow-false-melee.log` (SHA-256
+`F5D14B2F7EBF57DB45C8918D587944B0250C9417835BE4DFEE9B5F9A4273636B`).
+
+The tracked-motion correction retains the final visible palette and exact
+authored convexes for collision location. Force and melee classification now
+come only from the bounded lock-free OpenXR controller snapshot. Its linear and
+angular velocities are rotated through the same on-foot tracking-to-game axes
+as controller displacement. Angular velocity is evaluated at the exact weapon
+support point. The exact target surface velocity, including target angular
+motion, is subtracted there. Halo animation no longer creates force or melee.
+An unavailable optional angular sample becomes zero; invalid required linear
+motion rejects only physical contact. The validation rig now uses the signed
+derivative of its exact one-second waveform, so a `0.90 m/s` run cannot cross
+the `1.50 m/s` melee threshold.
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure

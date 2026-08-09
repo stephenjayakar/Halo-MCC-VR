@@ -8860,6 +8860,81 @@ int main()
         Check(gjkGridExact,
             "GJK matches exact axis-aligned overlap across a dense 3D grid");
 
+        PhysicalContactVec3 trackingAtZeroYaw{};
+        PhysicalContactVec3 trackingAtHeadQuarterTurn{};
+        PhysicalContactVec3 trackingAtGameQuarterTurn{};
+        PhysicalContactVec3 invalidTrackingVector{};
+        const float quarterTurn = 1.57079632679f;
+        const bool trackingAtZeroYawValid =
+            PhysicalContactTrackingVectorToGame(
+                {1.0f, 2.0f, 3.0f}, 0.0f, 0.0f,
+                trackingAtZeroYaw);
+        const bool trackingAtHeadQuarterTurnValid =
+            PhysicalContactTrackingVectorToGame(
+                {1.0f, 2.0f, 3.0f}, quarterTurn, 0.0f,
+                trackingAtHeadQuarterTurn);
+        const bool trackingAtGameQuarterTurnValid =
+            PhysicalContactTrackingVectorToGame(
+                {1.0f, 2.0f, 3.0f}, 0.0f, quarterTurn,
+                trackingAtGameQuarterTurn);
+        const bool invalidTrackingVectorValid =
+            PhysicalContactTrackingVectorToGame(
+                {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f},
+                0.0f, 0.0f, invalidTrackingVector);
+        Check(trackingAtZeroYawValid &&
+              std::fabs(trackingAtZeroYaw.x + 3.0f) < 1.0e-5f &&
+              std::fabs(trackingAtZeroYaw.y + 1.0f) < 1.0e-5f &&
+              std::fabs(trackingAtZeroYaw.z - 2.0f) < 1.0e-5f &&
+              trackingAtHeadQuarterTurnValid &&
+              std::fabs(trackingAtHeadQuarterTurn.x - 1.0f) < 1.0e-5f &&
+              std::fabs(trackingAtHeadQuarterTurn.y + 3.0f) < 1.0e-5f &&
+              std::fabs(trackingAtHeadQuarterTurn.z - 2.0f) < 1.0e-5f &&
+              trackingAtGameQuarterTurnValid &&
+              std::fabs(trackingAtGameQuarterTurn.x - 1.0f) < 1.0e-5f &&
+              std::fabs(trackingAtGameQuarterTurn.y + 3.0f) < 1.0e-5f &&
+              std::fabs(trackingAtGameQuarterTurn.z - 2.0f) < 1.0e-5f &&
+              !invalidTrackingVectorValid,
+            "OpenXR linear and angular vectors rotate into the same Halo "
+            "on-foot axes as tracked controller displacement");
+
+        const PhysicalContactPointVelocity trackedPointVelocity =
+            PhysicalContactTrackedPointVelocity(
+                {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 2.0f},
+                {0.0f, 0.0f, 0.0f}, {0.0f, 2.0f, 0.0f},
+                {0.5f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f},
+                {0.0f, 0.0f, 0.0f}, 2.0f);
+        const PhysicalContactPointVelocity trackedLinearOnly =
+            PhysicalContactTrackedPointVelocity(
+                {0.90f, 0.0f, 0.0f}, {}, {100.0f, -50.0f, 20.0f},
+                {100.0f, -50.0f, 20.0f}, {}, {}, {}, 0.30f);
+        const PhysicalContactPointVelocity invalidTrackedPoint =
+            PhysicalContactTrackedPointVelocity(
+                {}, {}, {}, {}, {}, {}, {}, 0.0f);
+        Check(trackedPointVelocity.valid &&
+              std::fabs(
+                  trackedPointVelocity.weaponMetersPerSecond.x + 1.0f) <
+                  1.0e-5f &&
+              std::fabs(
+                  trackedPointVelocity.targetMetersPerSecond.x + 0.75f) <
+                  1.0e-5f &&
+              std::fabs(
+                  trackedPointVelocity.relativeMetersPerSecond.x + 0.25f) <
+                  1.0e-5f &&
+              trackedLinearOnly.valid &&
+              std::fabs(
+                  trackedLinearOnly.weaponMetersPerSecond.x - 0.90f) <
+                  1.0e-5f &&
+              PhysicalContactClassify(
+                  PhysicalContactLength(
+                      trackedLinearOnly.relativeMetersPerSecond),
+                  PhysicalContactLength(
+                      trackedLinearOnly.weaponMetersPerSecond),
+                  1.50f) == PhysicalContactAction::ImpulseOnly &&
+              !invalidTrackedPoint.valid,
+            "Tracked contact speed includes angular tip motion and target "
+            "surface motion, converts native world scale, ignores visible "
+            "weapon animation, and keeps a 0.90 m/s debug pass below melee");
+
         PhysicalContactTransform rollFrom{};
         PhysicalContactTransform rollTo{};
         rollTo.left = {0, 0, 1};
