@@ -181,6 +181,41 @@ inline bool PhysicalContactCompoundValid(
     return true;
 }
 
+// Native Halo collision queries resolve animated bipeds and other complex
+// targets. Publish every authored vertex plus one centre per disjoint child as
+// fixed material points. Their motion fractions remain directly comparable.
+inline size_t PhysicalContactCompoundSamplePoints(
+    const PhysicalContactCompoundShape& shape,
+    PhysicalContactVec3* samples, size_t capacity)
+{
+    if (!PhysicalContactCompoundValid(shape) || !samples)
+        return 0;
+    size_t required = shape.childCount;
+    for (uint16_t childIndex = 0;
+         childIndex < shape.childCount; ++childIndex)
+        required += shape.children[childIndex].vertexCount;
+    if (capacity < required)
+        return 0;
+
+    size_t count = 0;
+    for (uint16_t childIndex = 0;
+         childIndex < shape.childCount; ++childIndex)
+    {
+        const PhysicalContactConvexShape& child =
+            shape.children[childIndex];
+        PhysicalContactVec3 centre{};
+        for (uint16_t vertexIndex = 0;
+             vertexIndex < child.vertexCount; ++vertexIndex)
+        {
+            samples[count++] = child.vertices[vertexIndex];
+            centre = centre + child.vertices[vertexIndex];
+        }
+        samples[count++] = centre *
+            (1.0f / static_cast<float>(child.vertexCount));
+    }
+    return count;
+}
+
 inline float PhysicalContactConvexBoundRadius(
     const PhysicalContactConvexShape& shape)
 {

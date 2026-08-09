@@ -6264,6 +6264,7 @@ namespace
     std::atomic<uint32_t> g_halo3ContactWallPlanes{0};
     std::atomic<uint64_t> g_halo3ContactAuthoredShapeHits{0};
     std::atomic<uint64_t> g_halo3ContactUnsupportedShapes{0};
+    std::atomic<uint32_t> g_halo3ContactNativeSamples{0};
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<int32_t> g_halo3ContactCommandHandle{-1};
@@ -9277,6 +9278,7 @@ namespace
         g_halo3ContactWallUpdateMs = 0;
         g_halo3ContactWeaponMass.store(0.0f, std::memory_order_relaxed);
         g_halo3ContactTargetMass.store(0.0f, std::memory_order_relaxed);
+        g_halo3ContactNativeSamples.store(0, std::memory_order_relaxed);
         Halo3PublishWeaponWallOffset({}, 0);
         g_halo3ContactWallSetbackMeters.store(0.0f,
                                                std::memory_order_relaxed);
@@ -10303,23 +10305,21 @@ namespace
             const PhysicalContactVec3 movementDirection =
                 PhysicalContactNormalize(tip - previousTip,
                                          forward);
-            const PhysicalContactVec3 previousMid =
-                (previousGrip + previousTip) * 0.5f;
-            const PhysicalContactVec3 currentMid = (grip + tip) * 0.5f;
-            const std::array<std::pair<PhysicalContactVec3,
-                                       PhysicalContactVec3>, 5> sweeps{{
-                {previousGrip, grip},
-                {previousMid, currentMid},
-                {previousTip, tip},
-                {previousGrip, previousTip},
-                {grip, tip},
-            }};
+            std::array<PhysicalContactVec3, 72> nativeLocalSamples{};
+            const size_t nativeLocalSampleCount =
+                PhysicalContactCompoundSamplePoints(
+                    weaponShape, nativeLocalSamples.data(),
+                    nativeLocalSamples.size());
+            g_halo3ContactNativeSamples.store(
+                static_cast<uint32_t>(nativeLocalSampleCount),
+                std::memory_order_relaxed);
             PhysicalContactHit closest{};
             int32_t closestType = -1;
             int32_t closestHandle = -1;
             uint16_t closestMaterial = 0;
             PhysicalContactVec3 closestWeaponPoint{};
             bool closestUsesAuthoredShape = false;
+            bool closestUsesRigidWeaponPoint = false;
             bool closestNormalReliable = false;
             PhysicalContactConvexShape closestWeaponShape{};
             PhysicalContactConvexShape closestTargetShape{};
@@ -10339,15 +10339,25 @@ namespace
             // structure bit and therefore still blocks contact through walls.
             const uint64_t contactCollisionFlags = kContactObjectFlags |
                 (debugRig ? 0ull : 1ull);
-            for (const auto& sweep : sweeps)
+            for (size_t sampleIndex = 0;
+                 sampleIndex < nativeLocalSampleCount; ++sampleIndex)
             {
-                const PhysicalContactVec3 vector = sweep.second - sweep.first;
-                if (!PhysicalContactFinite(sweep.first) ||
+                const PhysicalContactVec3 previousPoint =
+                    PhysicalContactTransformPoint(
+                        previousWeaponTransform,
+                        nativeLocalSamples[sampleIndex]);
+                const PhysicalContactVec3 currentPoint =
+                    PhysicalContactTransformPoint(
+                        weaponTransform, nativeLocalSamples[sampleIndex]);
+                const PhysicalContactVec3 vector =
+                    currentPoint - previousPoint;
+                if (!PhysicalContactFinite(previousPoint) ||
+                    !PhysicalContactFinite(currentPoint) ||
                     !PhysicalContactFinite(vector) ||
                     PhysicalContactLengthSquared(vector) <= 1.0e-10f)
                     continue;
                 const float point[3] = {
-                    sweep.first.x, sweep.first.y, sweep.first.z};
+                    previousPoint.x, previousPoint.y, previousPoint.z};
                 const float delta[3] = {vector.x, vector.y, vector.z};
                 Halo3CollisionResult native{};
                 native.type = -1;
@@ -10377,8 +10387,9 @@ namespace
                     closestHandle = native.type == 4
                         ? native.objectHandle : -1;
                     closestMaterial = native.materialIndex;
-                    closestWeaponPoint = hitPoint;
+                    closestWeaponPoint = currentPoint;
                     closestUsesAuthoredShape = false;
+                    closestUsesRigidWeaponPoint = true;
                     closestNormalReliable = true;
                 }
             }
@@ -10567,7 +10578,7 @@ namespace
                 closestHandle, targetLinear, targetAngular);
             g_halo3ObjectGetCenter(closestHandle, targetCenterRaw);
             const PhysicalContactPointVelocity pointVelocity =
-                closestUsesAuthoredShape
+                (closestUsesAuthoredShape || closestUsesRigidWeaponPoint)
                 ? PhysicalContactRigidPointVelocity(
                       previousWeaponTransform, weaponTransform,
                       closestWeaponPoint,
@@ -10782,6 +10793,7 @@ namespace
             "damage=0x%08X response=0x%08X rawMaterial=%u material=%u "
             "weaponMass=%.3f targetMass=%.3f "
             "authoredShapeHits=%llu unsupportedShapes=%llu "
+            "nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm wallRays=%llu "
             "wallVertices=%u wallPlanes=%u",
             stageName,
@@ -10815,6 +10827,7 @@ namespace
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactUnsupportedShapes.load(
                 std::memory_order_relaxed),
+            g_halo3ContactNativeSamples.load(std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactWallBlocks.load(
                 std::memory_order_relaxed),
             g_halo3ContactWallSetbackMeters.load(

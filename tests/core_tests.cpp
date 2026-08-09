@@ -8817,12 +8817,24 @@ int main()
                 twoPartWeapon, compoundWeaponTransform,
                 compoundWeaponTransform, onePartTarget,
                 compoundTargetTransform);
+        std::array<PhysicalContactVec3, 18> compoundSamples{};
+        const size_t compoundSampleCount =
+            PhysicalContactCompoundSamplePoints(
+                twoPartWeapon, compoundSamples.data(),
+                compoundSamples.size());
+        const size_t rejectedSampleCount =
+            PhysicalContactCompoundSamplePoints(
+                twoPartWeapon, compoundSamples.data(), 17);
         Check(!compoundGap.hit && compoundHead.hit &&
               compoundHead.weaponChild == 1 &&
               PhysicalContactCompoundValid(twoPartWeapon) &&
-              PhysicalContactCompoundBoundRadius(twoPartWeapon) > 0.59f,
+              PhysicalContactCompoundBoundRadius(twoPartWeapon) > 0.59f &&
+              compoundSampleCount == 18 && rejectedSampleCount == 0 &&
+              std::fabs(compoundSamples[8].x + 0.50f) < 1.0e-6f &&
+              std::fabs(compoundSamples[17].x - 0.50f) < 1.0e-6f,
             "Compound authored shapes keep disjoint parts separate and "
-            "report the exact child that touched");
+            "publish bounded native-query samples, and report the exact "
+            "child that touched");
 
         bool gjkGridExact = true;
         const PhysicalContactConvexShape gridBox =

@@ -387,6 +387,16 @@ its exact authored rounded radius plus `5 mm` visual clearance. Release remains
 bounded at `1.5 m/s`. The 44-tag census proves every held weapon uses at most
 20 vertices. Runtime storage allows 64 vertices without allocation.
 
+Animated bipeds do not expose one root convex. They continue through Halo 3's
+native object-aware collision query. The earlier branch traced three
+bounds-derived motion points and two non-temporal spine lines. Fractions from
+those different lines were not comparable. The authored-sample candidate now
+traces every exact weapon vertex plus one centre per disjoint child from its
+previous visible transform to its current transform. Every hit fraction is one
+motion-time fraction. The exact current material point feeds rigid point-speed
+measurement. Native target geometry still supplies the enemy datum, surface
+point, normal, and material for authored melee damage.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
