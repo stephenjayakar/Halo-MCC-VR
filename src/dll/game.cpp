@@ -944,6 +944,11 @@ namespace
     };
     Halo3VisibleWeaponPosePublication g_halo3VisibleWeaponPose;
 
+    // Defined with the other validated loaded-tag helpers below. The final
+    // palette hook only uses it to bound the render-model palette before
+    // publishing its root; a missing tag binding simply withholds contact.
+    unsigned char* Halo3LoadedTagDefinition(uint32_t datum);
+
     bool Halo3ReadVisibleWeaponPose(float basis[9], float position[3],
                                     uint64_t& sampleMs)
     {
@@ -1052,6 +1057,9 @@ namespace
     // interpolate/palette call ordering pairs correctly.
     thread_local FpInterpolationContext g_fpInterpolationContexts[2];
     thread_local BoneMatrix g_fpUnmodifiedInterpolations[2][64];
+    thread_local const BoneMatrix* g_halo3ContactPaletteSource = nullptr;
+    thread_local int g_halo3ContactPaletteBoneCount = 0;
+    thread_local uint64_t g_halo3ContactPaletteWristDescendants = 0;
     thread_local BoneMatrix g_fpPaletteScratch[kReachFpMaxSourceNodeCount];
     thread_local BoneMatrix g_scopeHiddenPalette[64];
     // The render-thread IK path publishes only pointer-sized diagnostics.
@@ -4173,6 +4181,12 @@ namespace
         if (slot==0 || slot==1)
         {
         g_fpInterpolationContexts[slot]={};
+        if (slot == 0)
+        {
+            g_halo3ContactPaletteSource = nullptr;
+            g_halo3ContactPaletteBoneCount = 0;
+            g_halo3ContactPaletteWristDescendants = 0;
+        }
         if (result && outBones && outCount && *outBones)
         {
             const int count=*outCount;
@@ -4201,6 +4215,13 @@ namespace
                 context.lWristDescendants=
                     g_fpLWristDescendants[slot].load(std::memory_order_acquire);
                 context.valid=true;
+                if (slot == 0)
+                {
+                    g_halo3ContactPaletteSource = context.source;
+                    g_halo3ContactPaletteBoneCount = context.count;
+                    g_halo3ContactPaletteWristDescendants =
+                        context.wristDescendants;
+                }
                 memcpy(g_fpUnmodifiedInterpolations[slot],*outBones,
                        static_cast<size_t>(count)*sizeof(BoneMatrix));
                 if (slot==1)
@@ -4329,20 +4350,6 @@ namespace
         out.scale = 1.0f;
         memcpy(out.rotation, mounted, sizeof(mounted));
         memcpy(out.translation, posC, sizeof(posC));
-        if (!left)
-        {
-            auto& published = g_halo3VisibleWeaponPose;
-            published.sequence.fetch_add(1, std::memory_order_acq_rel);
-            published.sampleMs.store(
-                GetTickCount64(), std::memory_order_relaxed);
-            for (int i = 0; i < 9; ++i)
-                published.basis[i].store(
-                    out.rotation[i], std::memory_order_relaxed);
-            for (int i = 0; i < 3; ++i)
-                published.position[i].store(
-                    out.translation[i], std::memory_order_relaxed);
-            published.sequence.fetch_add(1, std::memory_order_release);
-        }
         return true;
     }
 
@@ -5115,6 +5122,60 @@ namespace
         }
 
         g_origFpVisiblePalette(tag,root,destination,unused,selectedSource,boneMap);
+
+        // Contact must occupy the same space as the pixels. DesiredWristWorld
+        // is an IK target, not the matrix Halo ultimately skins with. Publish
+        // the small right-hand weapon render model only after the engine has
+        // composed the final palette. H3EK tags show fp_body is a large model,
+        // while ordinary weapons, sword and hammer have <=16 nodes; requiring
+        // node zero to map into the live right-wrist subtree rejects unrelated
+        // small first-person submissions without a guessed tag identity.
+        if (source && source == g_halo3ContactPaletteSource && destination &&
+            boneMap && tag != 0xFFFFu)
+        {
+            int32_t renderNodeCount = 0;
+            __try
+            {
+                const unsigned char* renderDef =
+                    Halo3LoadedTagDefinition(tag);
+                if (renderDef)
+                    renderNodeCount = *reinterpret_cast<const int32_t*>(
+                        renderDef + 0x30);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                renderNodeCount = 0;
+            }
+            const int32_t mappedRoot = renderNodeCount > 0
+                ? boneMap[0] : -1;
+            const BoneMatrix& visibleRoot = destination[0];
+            bool finite = std::isfinite(visibleRoot.scale) &&
+                std::fabs(visibleRoot.scale) > 0.001f;
+            for (float value : visibleRoot.rotation)
+                finite = finite && std::isfinite(value);
+            for (float value : visibleRoot.translation)
+                finite = finite && std::isfinite(value);
+            if (renderNodeCount > 0 && renderNodeCount <= 16 &&
+                mappedRoot >= 0 &&
+                mappedRoot < g_halo3ContactPaletteBoneCount &&
+                mappedRoot < 64 &&
+                (g_halo3ContactPaletteWristDescendants &
+                 (uint64_t{1} << mappedRoot)) &&
+                finite)
+            {
+                auto& published = g_halo3VisibleWeaponPose;
+                published.sequence.fetch_add(1, std::memory_order_acq_rel);
+                published.sampleMs.store(
+                    GetTickCount64(), std::memory_order_relaxed);
+                for (int i = 0; i < 9; ++i)
+                    published.basis[i].store(
+                        visibleRoot.rotation[i], std::memory_order_relaxed);
+                for (int i = 0; i < 3; ++i)
+                    published.position[i].store(
+                        visibleRoot.translation[i], std::memory_order_relaxed);
+                published.sequence.fetch_add(1, std::memory_order_release);
+            }
+        }
 
         // Collect every UNIQUE final-palette submission, not just the first
         // one for a weapon. A shotgun-only secondary arm palette can otherwise
@@ -5999,13 +6060,16 @@ namespace
         int32_t type;
         float fraction;
         float point[3];
-        unsigned char unknown14[0x18];
+        unsigned char unknown14[0x14];
+        uint16_t materialIndex;
+        uint16_t pad2A;
         float normal[3];
         unsigned char unknown38[0x08];
         int32_t objectHandle;
         unsigned char unknown44[0x24];
     };
     static_assert(sizeof(Halo3CollisionResult) == 0x68);
+    static_assert(offsetof(Halo3CollisionResult, materialIndex) == 0x28);
     static_assert(offsetof(Halo3CollisionResult, normal) == 0x2C);
     static_assert(offsetof(Halo3CollisionResult, objectHandle) == 0x40);
     using Halo3CollisionTestVectorFn = bool(__fastcall*)(
@@ -6056,6 +6120,15 @@ namespace
         uint16_t materialIndex, const float* point, const float* normal);
     using Halo3GameIsCooperativeFn = bool(__fastcall*)();
     using Halo3ObjectsUpdateFn = void(__fastcall*)();
+    using Halo3ObjectGetVelocitiesFn = void(__fastcall*)(
+        int32_t objectHandle, float* worldLinearVelocity,
+        float* worldAngularVelocity);
+    using Halo3ObjectGetCenterFn = float*(__fastcall*)(
+        int32_t objectHandle, float* worldCenter);
+    using Halo3MaterialRemapFn = uint16_t*(__fastcall*)(
+        uint16_t* outputMaterial, uint16_t rawMaterial, const float* point);
+    using Halo3MaterialLookupFn = void*(__fastcall*)(
+        uint16_t* material, void* globalsData);
     Halo3ObjectSetVelocityFn g_halo3ObjectSetVelocity = nullptr;
     Halo3ObjectSetVelocitiesFn g_halo3ObjectSetVelocities = nullptr;
     Halo3CollisionTestVectorFn g_halo3CollisionTestVector = nullptr;
@@ -6064,6 +6137,11 @@ namespace
     Halo3ApplyMeleeDamageFn g_halo3ApplyMeleeDamage = nullptr;
     Halo3MeleeEffectsWrapperFn g_halo3MeleeEffectsWrapper = nullptr;
     Halo3GameIsCooperativeFn g_halo3GameIsCooperative = nullptr;
+    Halo3ObjectGetVelocitiesFn g_halo3ObjectGetVelocities = nullptr;
+    Halo3ObjectGetCenterFn g_halo3ObjectGetCenter = nullptr;
+    Halo3MaterialRemapFn g_halo3MaterialRemap = nullptr;
+    Halo3MaterialLookupFn g_halo3MaterialLookup = nullptr;
+    void** g_halo3MaterialGlobals = nullptr;
     Halo3ObjectsUpdateFn g_origHalo3ObjectsUpdate = nullptr;
     std::atomic<bool> g_halo3PhysicalContactBindings{false};
     std::atomic<bool> g_halo3PhysicalMeleeBindings{false};
@@ -6083,6 +6161,7 @@ namespace
     int32_t g_halo3ContactWeaponHandle = -1;
     PhysicalContactVec3 g_halo3ContactPreviousGrip{};
     PhysicalContactVec3 g_halo3ContactPreviousTip{};
+    uint64_t g_halo3ContactPreviousPoseMs = 0;
     bool g_halo3ContactPreviousPoseValid = false;
     enum class Halo3PhysicalContactStage : uint32_t
     {
@@ -6121,6 +6200,7 @@ namespace
     std::atomic<int32_t> g_halo3ContactCommandWeaponHandle{-1};
     std::atomic<float> g_halo3ContactCommandPoint[3]{};
     std::atomic<float> g_halo3ContactCommandNormal[3]{};
+    std::atomic<uint16_t> g_halo3ContactCommandMaterial{0};
     std::atomic<uint32_t> g_halo3ContactMeleeStatus{0};
     std::atomic<int32_t> g_halo3ContactMeleeDamageTag{-1};
     std::atomic<int32_t> g_halo3ContactMeleeResponseTag{-1};
@@ -8753,6 +8833,7 @@ namespace
         g_halo3ContactLastMotionSerial = 0;
         g_halo3ContactWeaponHandle = -1;
         g_halo3ContactPreviousPoseValid = false;
+        g_halo3ContactPreviousPoseMs = 0;
     }
 
     // Authoritative Halo 3 simulation thread. H3EK's objects_update body owns
@@ -8783,6 +8864,8 @@ namespace
                     std::memory_order_relaxed);
             const uint32_t commandFlags =
                 g_halo3ContactCommandFlags.load(std::memory_order_relaxed);
+            const uint16_t rawMaterial =
+                g_halo3ContactCommandMaterial.load(std::memory_order_relaxed);
             float velocity[3]{};
             float point[3]{};
             float normal[3]{};
@@ -8877,7 +8960,10 @@ namespace
                             g_halo3SelectMelee &&
                             g_halo3DamageOwnerFromObject &&
                             g_halo3ApplyMeleeDamage &&
-                            g_halo3MeleeEffectsWrapper;
+                            g_halo3MeleeEffectsWrapper &&
+                            g_halo3MaterialRemap &&
+                            g_halo3MaterialLookup &&
+                            g_halo3MaterialGlobals;
                         if (!meleeValid)
                         {
                             g_halo3ContactMeleeStatus.store(
@@ -8980,6 +9066,20 @@ namespace
                                 }
                                 else
                                 {
+                                    uint16_t material = rawMaterial;
+                                    meleeFaultStatus = 5;
+                                    g_halo3MaterialRemap(
+                                        &material, rawMaterial, point);
+                                    void* const materialGlobals =
+                                        *g_halo3MaterialGlobals;
+                                    if (!materialGlobals ||
+                                        !g_halo3MaterialLookup(
+                                            &material, materialGlobals))
+                                    {
+                                        meleeRejected = true;
+                                    }
+                                    if (meleeRejected)
+                                        __leave;
                                     uint8_t meleeClass = 0;
                                     int32_t clangDamageEffectTag = -1;
                                     int32_t clangResponseEffectTag = -1;
@@ -9017,7 +9117,7 @@ namespace
                                         target.unknown24 = -1;
                                         target.unknown28 = -1;
                                         target.damageSection = -1;
-                                        target.materialIndex = 0xFFFFu;
+                                        target.materialIndex = material;
                                         target.scale = 1.0f;
                                         meleeFaultStatus = 7;
                                         g_halo3ApplyMeleeDamage(
@@ -9542,39 +9642,34 @@ namespace
             {
                 g_halo3ContactPreviousGrip = grip;
                 g_halo3ContactPreviousTip = tip;
+                g_halo3ContactPreviousPoseMs = visiblePoseMs;
                 g_halo3ContactPreviousPoseValid = true;
                 return;
             }
 
-            const float linearSpeed = std::sqrt(
-                motion.linearVelocity[0] * motion.linearVelocity[0] +
-                motion.linearVelocity[1] * motion.linearVelocity[1] +
-                motion.linearVelocity[2] * motion.linearVelocity[2]);
-            const float angularSpeed = motion.angularVelocityValid
-                ? std::sqrt(
-                    motion.angularVelocity[0] * motion.angularVelocity[0] +
-                    motion.angularVelocity[1] * motion.angularVelocity[1] +
-                    motion.angularVelocity[2] * motion.angularVelocity[2])
-                : 0.0f;
-            const float controllerSpeed = linearSpeed +
-                angularSpeed * (capsuleLength / worldScale);
+            const PhysicalContactVec3 previousGrip =
+                g_halo3ContactPreviousGrip;
+            const PhysicalContactVec3 previousTip =
+                g_halo3ContactPreviousTip;
+            const uint64_t previousPoseMs = g_halo3ContactPreviousPoseMs;
             const PhysicalContactVec3 movementDirection =
-                PhysicalContactNormalize(tip - g_halo3ContactPreviousTip,
+                PhysicalContactNormalize(tip - previousTip,
                                          forward);
             const PhysicalContactVec3 previousMid =
-                (g_halo3ContactPreviousGrip + g_halo3ContactPreviousTip) * 0.5f;
+                (previousGrip + previousTip) * 0.5f;
             const PhysicalContactVec3 currentMid = (grip + tip) * 0.5f;
             const std::array<std::pair<PhysicalContactVec3,
                                        PhysicalContactVec3>, 5> sweeps{{
-                {g_halo3ContactPreviousGrip, grip},
+                {previousGrip, grip},
                 {previousMid, currentMid},
-                {g_halo3ContactPreviousTip, tip},
-                {g_halo3ContactPreviousGrip, g_halo3ContactPreviousTip},
+                {previousTip, tip},
+                {previousGrip, previousTip},
                 {grip, tip},
             }};
             PhysicalContactHit closest{};
             int32_t closestType = -1;
             int32_t closestHandle = -1;
+            uint16_t closestMaterial = 0;
             uint32_t eligibleObjects = 0;
             // collision_flags: structure; object_flags: object-query enable
             // plus every object type. H3EK's generated +0x14060 initializer
@@ -9627,6 +9722,7 @@ namespace
                     closestType = native.type;
                     closestHandle = native.type == 4
                         ? native.objectHandle : -1;
+                    closestMaterial = native.materialIndex;
                 }
             }
             // Halo 3's vector query resolves BSP and authored model collision,
@@ -9673,7 +9769,7 @@ namespace
                     continue;
                 ++eligibleObjects;
                 const PhysicalContactHit proxy = PhysicalContactSweepCapsule(
-                    g_halo3ContactPreviousGrip, g_halo3ContactPreviousTip,
+                    previousGrip, previousTip,
                     grip, tip, contactRadius, targetCenter, radius);
                 if (!proxy.hit ||
                     (closest.hit && proxy.fraction > closest.fraction + 0.001f))
@@ -9681,9 +9777,13 @@ namespace
                 closest = proxy;
                 closestType = 4;
                 closestHandle = handle;
+                // H3EK global-material index zero is the authored default used
+                // when the bounds fallback has no surface triangle.
+                closestMaterial = 0;
             }
             g_halo3ContactPreviousGrip = grip;
             g_halo3ContactPreviousTip = tip;
+            g_halo3ContactPreviousPoseMs = visiblePoseMs;
             g_halo3ContactEligibleObjects.store(
                 eligibleObjects, std::memory_order_relaxed);
             g_halo3ContactSweeps.fetch_add(1, std::memory_order_relaxed);
@@ -9734,19 +9834,62 @@ namespace
             bool firstContact = false;
             PhysicalContactTargetState* contact =
                 g_halo3ContactDebounce.Touch(closestHandle, &firstContact);
-            const auto* targetVelocity = reinterpret_cast<const float*>(
-                closestData + 0x74);
-            const PhysicalContactVec3 targetVelocityMeters{
-                targetVelocity[0] / worldScale,
-                targetVelocity[1] / worldScale,
-                targetVelocity[2] / worldScale};
-            if (!PhysicalContactFinite(targetVelocityMeters))
+            if (!previousPoseMs || visiblePoseMs <= previousPoseMs ||
+                visiblePoseMs - previousPoseMs > 100 ||
+                !g_halo3ObjectGetVelocities || !g_halo3ObjectGetCenter)
+            {
+                g_halo3ContactDebounce.EndSample();
+                return;
+            }
+            const float dt = static_cast<float>(
+                visiblePoseMs - previousPoseMs) * 0.001f;
+            const PhysicalContactVec3 currentSpine = tip - grip;
+            const float spineLengthSquared =
+                PhysicalContactLengthSquared(currentSpine);
+            const float contactU = spineLengthSquared > 1.0e-8f
+                ? std::clamp(((closest.point.x - grip.x) * currentSpine.x +
+                              (closest.point.y - grip.y) * currentSpine.y +
+                              (closest.point.z - grip.z) * currentSpine.z) /
+                                 spineLengthSquared,
+                             0.0f, 1.0f)
+                : 0.0f;
+            const PhysicalContactVec3 weaponPoint =
+                grip + currentSpine * contactU;
+            const PhysicalContactVec3 previousWeaponPoint =
+                previousGrip + (previousTip - previousGrip) * contactU;
+            const PhysicalContactVec3 weaponPointVelocityMeters =
+                (weaponPoint - previousWeaponPoint) *
+                (1.0f / (dt * worldScale));
+            float targetLinear[3]{};
+            float targetAngular[3]{};
+            float targetCenterRaw[3]{};
+            g_halo3ObjectGetVelocities(
+                closestHandle, targetLinear, targetAngular);
+            g_halo3ObjectGetCenter(closestHandle, targetCenterRaw);
+            const PhysicalContactVec3 targetCenter{
+                targetCenterRaw[0], targetCenterRaw[1], targetCenterRaw[2]};
+            const PhysicalContactVec3 contactOffset = closest.point - targetCenter;
+            const PhysicalContactVec3 angularPointVelocity{
+                targetAngular[1] * contactOffset.z -
+                    targetAngular[2] * contactOffset.y,
+                targetAngular[2] * contactOffset.x -
+                    targetAngular[0] * contactOffset.z,
+                targetAngular[0] * contactOffset.y -
+                    targetAngular[1] * contactOffset.x};
+            const PhysicalContactVec3 targetVelocityWorld{
+                targetLinear[0] + angularPointVelocity.x,
+                targetLinear[1] + angularPointVelocity.y,
+                targetLinear[2] + angularPointVelocity.z};
+            const PhysicalContactVec3 targetVelocityMeters =
+                targetVelocityWorld * (1.0f / worldScale);
+            if (!PhysicalContactFinite(weaponPointVelocityMeters) ||
+                !PhysicalContactFinite(targetVelocityMeters))
             {
                 g_halo3ContactDebounce.EndSample();
                 return;
             }
             const PhysicalContactVec3 relativeVelocity =
-                movementDirection * controllerSpeed - targetVelocityMeters;
+                weaponPointVelocityMeters - targetVelocityMeters;
             const float relativeSpeed = PhysicalContactLength(relativeVelocity);
             const PhysicalContactVec3 contactDirection =
                 PhysicalContactNormalize(relativeVelocity, movementDirection);
@@ -9805,7 +9948,7 @@ namespace
                     }
                 }
                 worldVelocity = {
-                    targetVelocity[0], targetVelocity[1], targetVelocity[2]};
+                    targetLinear[0], targetLinear[1], targetLinear[2]};
                 const float delta =
                     PhysicalContactImpulseDeltaMetersPerSecond(relativeSpeed) *
                     worldScale;
@@ -9835,6 +9978,8 @@ namespace
                     unitHandle, std::memory_order_relaxed);
                 g_halo3ContactCommandWeaponHandle.store(
                     weaponHandle, std::memory_order_relaxed);
+                g_halo3ContactCommandMaterial.store(
+                    closestMaterial, std::memory_order_relaxed);
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     g_halo3ContactCommandVelocity[axis].store(
@@ -14187,6 +14332,24 @@ namespace
         "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 45 33 C9 "
         "49 8B F8 48 8B F2 8B D9 E8 ?? ?? ?? ?? 41 B1 01 4C 8B C7 "
         "48 8B D6 8B CB E8 ?? ?? ?? ??";
+    // object_get_velocities (+0x345480) and object_get_center_of_mass
+    // (+0x34523C), mapped from H3EK's full-symbol physics accessors. Together
+    // they provide target velocity at the exact contact point (v + omega x r).
+    const char* kHalo3ObjectGetVelocitiesSig =
+        "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 "
+        "49 8B D8 48 8B FA E8 ?? ?? ?? ?? 8B 0D ?? ?? ?? ?? "
+        "0F B7 C0 BA 38 00 00 00 4C 8D 0C 40 "
+        "65 48 8B 04 25 58 00 00 00 48 8B 04 C8 "
+        "48 8B 0C 10 48 8B 41 48 4A 8B 74 C8 10 "
+        "8B 86 A8 00 00 00 C1 E8 09 A8 01 74";
+    const char* kHalo3ObjectGetCenterSig =
+        "48 8B C4 48 89 58 08 48 89 68 10 48 89 70 18 "
+        "48 89 78 20 41 56 48 83 EC 20 "
+        "44 8B 05 ?? ?? ?? ?? 48 8B DA "
+        "65 48 8B 04 25 58 00 00 00 41 BE 38 00 00 00 "
+        "4A 8B 34 C0 E8 ?? ?? ?? ?? 0F B7 C0 "
+        "48 8D 2C 40 4A 8B 04 36 48 8B 48 48 "
+        "48 8B 7C E9 10 83 BF 9C 00 00 00 FF";
     // objects_update (+0x34067C), mapped from official H3EK +0xA52920 by its
     // object_update_absolute_index transaction and per-object update loop.
     const char* kHalo3ObjectsUpdateSig =
@@ -14238,6 +14401,24 @@ namespace
         "41 54 41 55 41 56 41 57 48 8D 68 98 48 81 EC 40 01 00 00 "
         "44 8B 15 ?? ?? ?? ?? 44 8B E2 0F 29 70 C8 0F 29 78 B8 "
         "65 48 8B 04 25 58 00 00 00 49 63 F8 45 8B D9 44 8B F1";
+    // Collision results carry a raw material at +0x28. Halo's stock melee
+    // transaction remaps it at the hit point, validates the resulting global
+    // material, and only then invokes damage/effects.
+    const char* kHalo3MaterialRemapSig =
+        "48 89 5C 24 08 57 48 83 EC 60 66 89 11 "
+        "4C 8D 4C 24 20 0F B7 DA 48 8B F9 83 C8 FF "
+        "49 8B D0 33 C9 66 89 44 24 5C 0F 57 D2 "
+        "E8 ?? ?? ?? ?? 84 C0 74";
+    const char* kHalo3MaterialLookupSig =
+        "44 0F B7 09 45 33 C0 66 45 85 C9 78 37 "
+        "41 0F BF C1 3B 82 64 04 00 00 7D 2B "
+        "8B 82 68 04 00 00 85 C0 75 05 41 8B C8 "
+        "EB 0E 48 8B C8 48 8B 05 ?? ?? ?? ?? "
+        "48 8D 0C 88 49 0F BF C1 "
+        "4C 69 C0 70 01 00 00 4C 03 C1 49 8B C0 C3";
+    const char* kHalo3MaterialValidationSiteSig =
+        "48 8B 15 ?? ?? ?? ?? 48 8D 8D 30 02 00 00 "
+        "66 89 9D 30 02 00 00 E8 ?? ?? ?? ?? 48 85 C0 74 3A";
     const char* kHalo3GameIsCooperativeSig =
         "48 83 EC 28 8B 0D ?? ?? ?? ?? 32 D2 65 48 8B 04 25 58 00 00 00 "
         "41 B8 48 00 00 00 48 8B 04 C8 4A 8B 0C 00 80 79 10 01 "
@@ -14620,6 +14801,7 @@ namespace
         g_halo3ContactCommandFlags.store(0, std::memory_order_relaxed);
         g_halo3ContactCommandUnitHandle.store(-1, std::memory_order_relaxed);
         g_halo3ContactCommandWeaponHandle.store(-1, std::memory_order_relaxed);
+        g_halo3ContactCommandMaterial.store(0, std::memory_order_relaxed);
         g_halo3ContactMeleeStatus.store(0, std::memory_order_relaxed);
         g_halo3ContactMeleeDamageTag.store(-1, std::memory_order_relaxed);
         g_halo3ContactMeleeResponseTag.store(-1, std::memory_order_relaxed);
@@ -14930,10 +15112,19 @@ namespace
             g_halo3ApplyMeleeDamage = nullptr;
             g_halo3MeleeEffectsWrapper = nullptr;
             g_halo3GameIsCooperative = nullptr;
+            g_halo3ObjectGetVelocities = nullptr;
+            g_halo3ObjectGetCenter = nullptr;
+            g_halo3MaterialRemap = nullptr;
+            g_halo3MaterialLookup = nullptr;
+            g_halo3MaterialGlobals = nullptr;
             const uintptr_t velocityHit =
                 sig::Find(base, size, kHalo3ObjectSetVelocitySig);
             const uintptr_t velocitiesHit =
                 sig::Find(base, size, kHalo3ObjectSetVelocitiesSig);
+            const uintptr_t getVelocitiesHit =
+                sig::Find(base, size, kHalo3ObjectGetVelocitiesSig);
+            const uintptr_t getCenterHit =
+                sig::Find(base, size, kHalo3ObjectGetCenterSig);
             const uintptr_t collisionHit =
                 sig::Find(base, size, kHalo3CollisionTestVectorSig);
             const uintptr_t updateHit =
@@ -14950,12 +15141,24 @@ namespace
                 sig::Find(base, size, kHalo3MeleeEffectsWrapperSig);
             const uintptr_t cooperativeHit =
                 sig::Find(base, size, kHalo3GameIsCooperativeSig);
+            const uintptr_t materialRemapHit =
+                sig::Find(base, size, kHalo3MaterialRemapSig);
+            const uintptr_t materialLookupHit =
+                sig::Find(base, size, kHalo3MaterialLookupSig);
+            const uintptr_t materialValidationSite =
+                sig::Find(base, size, kHalo3MaterialValidationSiteSig);
             const bool velocityUnique = velocityHit && !sig::Find(
                 velocityHit + 1, base + size - velocityHit - 1,
                 kHalo3ObjectSetVelocitySig);
             const bool velocitiesUnique = velocitiesHit && !sig::Find(
                 velocitiesHit + 1, base + size - velocitiesHit - 1,
                 kHalo3ObjectSetVelocitiesSig);
+            const bool getVelocitiesUnique = getVelocitiesHit && !sig::Find(
+                getVelocitiesHit + 1, base + size - getVelocitiesHit - 1,
+                kHalo3ObjectGetVelocitiesSig);
+            const bool getCenterUnique = getCenterHit && !sig::Find(
+                getCenterHit + 1, base + size - getCenterHit - 1,
+                kHalo3ObjectGetCenterSig);
             const bool collisionUnique = collisionHit && !sig::Find(
                 collisionHit + 1, base + size - collisionHit - 1,
                 kHalo3CollisionTestVectorSig);
@@ -14981,7 +15184,28 @@ namespace
             const bool cooperativeUnique = cooperativeHit && !sig::Find(
                 cooperativeHit + 1, base + size - cooperativeHit - 1,
                 kHalo3GameIsCooperativeSig);
+            const bool materialRemapUnique = materialRemapHit && !sig::Find(
+                materialRemapHit + 1, base + size - materialRemapHit - 1,
+                kHalo3MaterialRemapSig);
+            const bool materialLookupUnique = materialLookupHit && !sig::Find(
+                materialLookupHit + 1, base + size - materialLookupHit - 1,
+                kHalo3MaterialLookupSig);
+            const bool materialValidationUnique = materialValidationSite &&
+                !sig::Find(materialValidationSite + 1,
+                           base + size - materialValidationSite - 1,
+                           kHalo3MaterialValidationSiteSig);
+            bool materialValidationConsistent = false;
+            if (materialValidationUnique && materialLookupHit)
+            {
+                const int32_t callDisp =
+                    *reinterpret_cast<const int32_t*>(
+                        materialValidationSite + 22);
+                materialValidationConsistent =
+                    materialValidationSite + 26 + callDisp ==
+                    materialLookupHit;
+            }
             if (velocityUnique && velocitiesUnique && collisionUnique &&
+                getVelocitiesUnique && getCenterUnique &&
                 cooperativeUnique && updateUnique)
             {
                 g_halo3ObjectSetVelocity =
@@ -14990,11 +15214,18 @@ namespace
                     reinterpret_cast<Halo3ObjectSetVelocitiesFn>(velocitiesHit);
                 g_halo3CollisionTestVector =
                     reinterpret_cast<Halo3CollisionTestVectorFn>(collisionHit);
+                g_halo3ObjectGetVelocities =
+                    reinterpret_cast<Halo3ObjectGetVelocitiesFn>(
+                        getVelocitiesHit);
+                g_halo3ObjectGetCenter =
+                    reinterpret_cast<Halo3ObjectGetCenterFn>(getCenterHit);
                 g_halo3GameIsCooperative =
                     reinterpret_cast<Halo3GameIsCooperativeFn>(cooperativeHit);
                 if (kEnableHalo3PhysicalMeleeCandidate &&
                     selectMeleeUnique && applyMeleeDamageUnique &&
-                    damageOwnerUnique && meleeEffectsUnique)
+                    damageOwnerUnique && meleeEffectsUnique &&
+                    materialRemapUnique && materialLookupUnique &&
+                    materialValidationConsistent)
                 {
                     g_halo3SelectMelee =
                         reinterpret_cast<Halo3SelectMeleeFn>(selectMeleeHit);
@@ -15007,6 +15238,17 @@ namespace
                     g_halo3MeleeEffectsWrapper =
                         reinterpret_cast<Halo3MeleeEffectsWrapperFn>(
                             meleeEffectsHit);
+                    g_halo3MaterialRemap =
+                        reinterpret_cast<Halo3MaterialRemapFn>(
+                            materialRemapHit);
+                    g_halo3MaterialLookup =
+                        reinterpret_cast<Halo3MaterialLookupFn>(
+                            materialLookupHit);
+                    const int32_t globalsDisp =
+                        *reinterpret_cast<const int32_t*>(
+                            materialValidationSite + 3);
+                    g_halo3MaterialGlobals = reinterpret_cast<void**>(
+                        materialValidationSite + 7 + globalsDisp);
                     g_halo3PhysicalMeleeBindings.store(
                         true, std::memory_order_release);
                 }
