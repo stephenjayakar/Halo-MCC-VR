@@ -8838,16 +8838,25 @@ int main()
         const size_t rejectedSampleCount =
             PhysicalContactCompoundSamplePoints(
                 twoPartWeapon, compoundSamples.data(), 17);
+        PhysicalContactTransform centroidTransform{};
+        centroidTransform.position = {1.0f, 2.0f, 3.0f};
+        centroidTransform.scale = 2.0f;
+        const PhysicalContactVec3 symmetricCentroid =
+            PhysicalContactCompoundWorldCentroid(
+                twoPartWeapon, centroidTransform);
         Check(!compoundGap.hit && compoundHead.hit &&
               compoundHead.weaponChild == 1 &&
               PhysicalContactCompoundValid(twoPartWeapon) &&
               PhysicalContactCompoundBoundRadius(twoPartWeapon) > 0.59f &&
               compoundSampleCount == 18 && rejectedSampleCount == 0 &&
               std::fabs(compoundSamples[8].x + 0.50f) < 1.0e-6f &&
-              std::fabs(compoundSamples[17].x - 0.50f) < 1.0e-6f,
+              std::fabs(compoundSamples[17].x - 0.50f) < 1.0e-6f &&
+              std::fabs(symmetricCentroid.x - 1.0f) < 1.0e-6f &&
+              std::fabs(symmetricCentroid.y - 2.0f) < 1.0e-6f &&
+              std::fabs(symmetricCentroid.z - 3.0f) < 1.0e-6f,
             "Compound authored shapes keep disjoint parts separate and "
-            "publish bounded native-query samples, and report the exact "
-            "child that touched");
+            "publish bounded native-query samples and a transformed authored "
+            "centroid, and report the exact child that touched");
 
         bool gjkGridExact = true;
         const PhysicalContactConvexShape gridBox =

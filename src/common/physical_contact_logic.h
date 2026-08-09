@@ -251,6 +251,27 @@ inline bool PhysicalContactCompoundValid(
     return true;
 }
 
+inline PhysicalContactVec3 PhysicalContactCompoundWorldCentroid(
+    const PhysicalContactCompoundShape& shape,
+    const PhysicalContactTransform& transform)
+{
+    if (!PhysicalContactCompoundValid(shape) ||
+        !PhysicalContactTransformFinite(transform))
+        return transform.position;
+    PhysicalContactVec3 sum{};
+    uint32_t count = 0;
+    for (uint16_t child = 0; child < shape.childCount; ++child)
+        for (uint16_t vertex = 0;
+             vertex < shape.children[child].vertexCount; ++vertex)
+        {
+            sum = sum + PhysicalContactTransformPoint(
+                transform, shape.children[child].vertices[vertex]);
+            ++count;
+        }
+    return count ? sum * (1.0f / static_cast<float>(count))
+                 : transform.position;
+}
+
 // Native Halo collision queries resolve animated bipeds and other complex
 // targets. Publish every authored vertex plus one centre per disjoint child as
 // fixed material points. Their motion fractions remain directly comparable.

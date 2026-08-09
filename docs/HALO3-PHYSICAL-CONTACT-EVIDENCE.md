@@ -493,6 +493,15 @@ in bounded atomic command storage; the worker only reads them while producing
 the existing two-second status line. No logging or extra work enters the render
 or authoritative object-update hooks.
 
+That telemetry proved the scoop alignment itself was wrong: the last normal was
+`(0.8955, 0.4412, 0.0582)` and the impulse was
+`(-0.00379, -0.00811, -0.00094)`, both nearly horizontal. Matching one extreme
+weapon support point to one extreme target support point joined unrelated
+corners on irregular authored shapes. The rig now matches the two authored
+compound centroids in the horizontal plane and uses the exact support points
+only for vertical clearance. Its carry direction is projected onto the world
+horizontal plane. Normal tracked contact geometry and force are unchanged.
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure

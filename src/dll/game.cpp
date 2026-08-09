@@ -10667,19 +10667,40 @@ namespace
                             Halo3ContactCompoundSupport(
                                 debugTargetShape, debugTargetTransform,
                                 worldUp * -1.0f);
+                        const PhysicalContactVec3 weaponCentroid =
+                            PhysicalContactCompoundWorldCentroid(
+                                weaponShape, weaponTransform);
+                        const PhysicalContactVec3 targetCentroid =
+                            PhysicalContactCompoundWorldCentroid(
+                                debugTargetShape, debugTargetTransform);
                         const float elapsedMs = static_cast<float>(
                             nowMs - g_halo3ContactDebugScoopStartMs);
                         const PhysicalContactDebugScoopPose scoop =
                             PhysicalContactDebugScoopTrajectory(elapsedMs);
-                        const PhysicalContactVec3 desiredWeaponTop =
-                            targetBottom +
-                            worldUp * (worldScale *
+                        const PhysicalContactVec3 carryDirection =
+                            PhysicalContactNormalize(
+                                {weaponTransform.left.x,
+                                 weaponTransform.left.y, 0.0f},
+                                {1.0f, 0.0f, 0.0f});
+                        // Extreme support points on irregular weapons are
+                        // often different corners. Match exact support only
+                        // on height, and match the authored centroids in the
+                        // horizontal plane. This puts the weapon under the
+                        // target instead of creating a diagonal corner hit.
+                        const PhysicalContactVec3 horizontalAlignment{
+                            targetCentroid.x - weaponCentroid.x,
+                            targetCentroid.y - weaponCentroid.y,
+                            0.0f};
+                        const float verticalAlignment =
+                            targetBottom.z - weaponTop.z +
+                            worldScale *
                                 (-0.02f + scoop.liftMeters -
-                                 scoop.releaseMeters)) +
-                            weaponTransform.left *
-                                (worldScale * scoop.carryMeters);
+                                 scoop.releaseMeters);
                         weaponTransform.position = weaponTransform.position +
-                            (desiredWeaponTop - weaponTop);
+                            horizontalAlignment +
+                            worldUp * verticalAlignment +
+                            carryDirection *
+                                (worldScale * scoop.carryMeters);
                     }
                     else
                     {
@@ -11352,11 +11373,16 @@ namespace
                         PhysicalContactDebugScoopTrajectory(
                             static_cast<float>(
                                 nowMs - g_halo3ContactDebugScoopStartMs));
+                    const PhysicalContactVec3 carryDirection =
+                        PhysicalContactNormalize(
+                            {weaponTransform.left.x,
+                             weaponTransform.left.y, 0.0f},
+                            {1.0f, 0.0f, 0.0f});
                     weaponLinearMetersPerSecond =
                         PhysicalContactVec3{0.0f, 0.0f, 1.0f} *
                             (scoop.liftMetersPerSecond -
                              scoop.releaseMetersPerSecond) +
-                        weaponTransform.left * scoop.carryMetersPerSecond;
+                        carryDirection * scoop.carryMetersPerSecond;
                 }
                 else
                 {
