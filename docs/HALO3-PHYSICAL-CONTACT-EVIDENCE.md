@@ -557,6 +557,23 @@ unchanged. The failed-target log is
 `out/debug-openxr/191fb95-forge-scoop-constrained-target.log` (SHA-256
 `1DF65C1B24A83187D1987AEE00EF90D2360DB65FEE78B7E526F5B96A544CD541`).
 
+The installed mobility-selection candidate rejected that exact constrained
+handle, then selected the previously proven loose `2.019 kg` weapon. It passed
+the 5 cm check at `0.053` world units with 199 applied responses and zero
+melees. Its exact retained normal was nearly vertical and the published value
+contained an upward component, but the body ended `0.027` world units lower on
+the floor instead of lifting. This proves the pre-update native velocity write
+is still overwritten vertically during Halo's original object update. The
+preserved log is
+`out/debug-openxr/1d8898d-forge-mobility-selection-success-no-lift.log`
+(SHA-256
+`02D0F7506B3629A56C0506C073459D1AFBE5B29BBCFD96ED9CFB86FEA69B1506`).
+The next candidate keeps native melee at its headset-proven pre-update point
+but defers only the validated whole-body velocity write until immediately after
+the same authoritative `objects_update` call. It revalidates the salted handle,
+dynamic motion type, generation and finite velocity before the post-update
+write; failure still disables physical contact alone.
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure

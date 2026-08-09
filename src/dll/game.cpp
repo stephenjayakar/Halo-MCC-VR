@@ -9655,11 +9655,18 @@ namespace
 
     // Authoritative Halo 3 simulation thread. H3EK's objects_update body owns
     // the object_update_absolute_index transaction; the unique retail homolog
-    // at +0x34067C carries the same object-list/update-loop invariants. Apply
-    // the bounded camera publication here immediately before Halo updates the
-    // object set for this tick. The original always runs, even after failure.
+    // at +0x34067C carries the same object-list/update-loop invariants. Native
+    // melee stays before Halo's update. Sustained whole-body velocity is
+    // applied immediately after it so a floor-loaded body cannot overwrite the
+    // correction in the same tick. The original always runs after a failure.
     void __fastcall Halo3ObjectsUpdateHook()
     {
+        bool deferredWorldVelocity = false;
+        bool deferredHadMelee = false;
+        uint32_t deferredGeneration = 0;
+        int32_t deferredHandle = -1;
+        float deferredVelocity[3]{};
+        float deferredHaptic = 0.0f;
         const uint64_t serial =
             g_halo3ContactCommandSerial.load(std::memory_order_acquire);
         if (serial && serial != g_halo3ContactAppliedSerial.load(
@@ -9760,8 +9767,17 @@ namespace
                                 }
                                 else
                                 {
-                                    g_halo3ObjectSetVelocities(
-                                        handle, velocity, nullptr);
+                                    // Let Halo finish this tick's object
+                                    // update before setting the sustained
+                                    // target velocity. The pre-update call is
+                                    // overwritten for a floor-loaded body.
+                                    deferredWorldVelocity = true;
+                                    deferredHadMelee = wantsMelee;
+                                    deferredGeneration = generation;
+                                    deferredHandle = handle;
+                                    deferredHaptic = contactHaptic;
+                                    memcpy(deferredVelocity, velocity,
+                                           sizeof(deferredVelocity));
                                     impulseApplied = true;
                                 }
                             }
@@ -9788,20 +9804,24 @@ namespace
                         }
                         else
                         {
-                            g_halo3ContactCommandStatus.store(
-                                2, std::memory_order_relaxed);
-                            g_halo3ContactImpulses.fetch_add(
-                                1, std::memory_order_relaxed);
-                            g_halo3ContactStage.store(
-                                static_cast<uint32_t>(
-                                    Halo3PhysicalContactStage::Impulse),
-                                std::memory_order_relaxed);
-                            if (wantsPointImpulse &&
-                                std::isfinite(contactHaptic) &&
-                                contactHaptic > 0.0f)
+                            if (!deferredWorldVelocity)
                             {
-                                VR_RequestRightContactHaptic(contactHaptic);
-                                contactHapticSent = true;
+                                g_halo3ContactCommandStatus.store(
+                                    2, std::memory_order_relaxed);
+                                g_halo3ContactImpulses.fetch_add(
+                                    1, std::memory_order_relaxed);
+                                g_halo3ContactStage.store(
+                                    static_cast<uint32_t>(
+                                        Halo3PhysicalContactStage::Impulse),
+                                    std::memory_order_relaxed);
+                                if (wantsPointImpulse &&
+                                    std::isfinite(contactHaptic) &&
+                                    contactHaptic > 0.0f)
+                                {
+                                    VR_RequestRightContactHaptic(
+                                        contactHaptic);
+                                    contactHapticSent = true;
+                                }
                             }
                         }
                     }
@@ -10059,6 +10079,73 @@ namespace
         }
         if (g_origHalo3ObjectsUpdate)
             g_origHalo3ObjectsUpdate();
+        if (deferredWorldVelocity)
+        {
+            bool deferredValid = deferredGeneration &&
+                deferredGeneration == g_halo3RuntimeGeneration.load(
+                    std::memory_order_acquire) &&
+                deferredHandle != -1 && g_halo3ObjectSetVelocities &&
+                std::isfinite(deferredVelocity[0]) &&
+                std::isfinite(deferredVelocity[1]) &&
+                std::isfinite(deferredVelocity[2]);
+            bool deferredFaulted = false;
+            unsigned char* targetData = nullptr;
+            void* component = nullptr;
+            int32_t bodyIndex = -1;
+            float targetMass = 0.0f;
+            uint8_t motionType = 0;
+            deferredValid = deferredValid &&
+                Halo3ContactObjectDataForHandle(
+                    deferredHandle, targetData) &&
+                Halo3ContactMassForObjectData(
+                    targetData, component, bodyIndex, targetMass,
+                    &motionType) &&
+                PhysicalContactMotionTypeIsDynamic(motionType);
+            if (deferredValid)
+            {
+                __try
+                {
+                    g_halo3ObjectSetVelocities(
+                        deferredHandle, deferredVelocity, nullptr);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    deferredFaulted = true;
+                }
+            }
+            if (!deferredValid || deferredFaulted)
+            {
+                g_halo3ContactCommandStatus.store(
+                    deferredFaulted ? 3u : 4u,
+                    std::memory_order_relaxed);
+                if (deferredFaulted)
+                {
+                    g_halo3ContactStage.store(
+                        static_cast<uint32_t>(
+                            Halo3PhysicalContactStage::Faulted),
+                        std::memory_order_relaxed);
+                    g_halo3PhysicalContactBindings.store(
+                        false, std::memory_order_release);
+                }
+            }
+            else
+            {
+                g_halo3ContactCommandStatus.store(
+                    2, std::memory_order_relaxed);
+                g_halo3ContactImpulses.fetch_add(
+                    1, std::memory_order_relaxed);
+                if (!deferredHadMelee)
+                {
+                    g_halo3ContactStage.store(
+                        static_cast<uint32_t>(
+                            Halo3PhysicalContactStage::Impulse),
+                        std::memory_order_relaxed);
+                }
+                if (std::isfinite(deferredHaptic) &&
+                    deferredHaptic > 0.0f)
+                    VR_RequestRightContactHaptic(deferredHaptic);
+            }
+        }
     }
 
     // Camera-thread-only. Native writes are reached only after the same
