@@ -53,15 +53,20 @@ function Stop-SteamVr {
         'vrdashboard',
         'vrwebhelper'
     )
-    for ($attempt = 0; $attempt -lt 20; ++$attempt) {
+    # vrmonitor can spawn vrserver a moment after an apparently clean stop.
+    # Require five continuous seconds with every SteamVR process absent before
+    # restoring the user's exact settings file.
+    $quietSamples = 0
+    for ($attempt = 0; $attempt -lt 60; ++$attempt) {
         $processes = Get-Process -Name $names -ErrorAction SilentlyContinue
         if (-not $processes) {
-            Start-Sleep -Milliseconds 500
-            if (-not (Get-Process -Name $names -ErrorAction SilentlyContinue)) {
+            ++$quietSamples
+            if ($quietSamples -ge 10) {
                 return
             }
         }
         else {
+            $quietSamples = 0
             $processes | Stop-Process -Force
         }
         Start-Sleep -Milliseconds 500
@@ -156,7 +161,7 @@ function Test-DetailedTargetGeometrySeen([string]$Text) {
 
 function Test-DynamicBodyConstraintSeen([string]$Text) {
     return $Text -match
-        'H3 physical contact status:.*bodySetback=(?!0\.000m)([0-9]+\.[0-9]{3})m'
+        'H3 physical contact status:.*bodyConstraints=([1-9][0-9]*).*bodyPeak=(?!0\.000m)([0-9]+\.[0-9]{3})m'
 }
 
 function Test-SlowResult([string]$Text, [int]$Kind, [bool]$RequireScoop) {
