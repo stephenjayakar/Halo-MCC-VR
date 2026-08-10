@@ -124,11 +124,18 @@ function Test-ContactHaptic([string]$Line) {
 }
 
 function Test-SlowResult([string]$Text, [int]$Kind, [bool]$RequireScoop) {
-    $status = Get-LatestContactStatusLine $Text $Kind
-    if (-not $status -or $status -notmatch 'melees=0' -or
-        -not (Test-ContactHaptic $status)) {
+    if ($Text -match 'H3 physical contact status:.*melees=[1-9][0-9]*') {
         return $false
     }
+    $status = ($Text -split "`r?`n") |
+        Where-Object {
+            $_ -match 'H3 physical contact status:' -and
+            $_ -match "kind=$Kind(\s|$)" -and
+            $_ -match 'melees=0' -and
+            (Test-ContactHaptic $_)
+        } |
+        Select-Object -Last 1
+    if (-not $status) { return $false }
     if (-not $RequireScoop) { return $true }
     return $Text -match
         "H3 physical contact DEBUG RIG:.*kind=$Kind.*validated=1"
