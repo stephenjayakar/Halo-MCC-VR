@@ -10957,11 +10957,12 @@ namespace
             g_halo3ContactDebugWall.load(std::memory_order_acquire);
         const bool debugVisibleReplay =
             g_halo3ContactDebugVisibleReplay.load(std::memory_order_acquire);
-        // Candidate 16b5569 proved the first exact samples are taken before
-        // either eye has consumed the replayed palette. Retry only with the
-        // bounded two-eye warmup below; production contact never enables this
-        // environment-gated diagnostic behavior.
-        constexpr bool kEnableHalo3ExactVisibleReplayPlacement = true;
+        // Candidate f59a8da proved the warmed measurement still compared the
+        // moved render palette against the controller-space collision pose:
+        // every clean sample remained overlapped near +0.89 m. Keep the
+        // bounded diagnostic code for evidence, but disable that failed
+        // behavior before trying a render-pose measurement.
+        constexpr bool kEnableHalo3ExactVisibleReplayPlacement = false;
         const bool debugExactVisibleReplay =
             kEnableHalo3ExactVisibleReplayPlacement &&
             g_halo3ContactDebugVisibleExactReplay.load(
