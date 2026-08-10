@@ -10,7 +10,12 @@ param(
     [string]$Test = 'equipment-scoop',
 
     [ValidateRange(30, 300)]
-    [int]$ValidationTimeoutSeconds = 120
+    [int]$ValidationTimeoutSeconds = 120,
+
+    [ValidateRange(30, 600)]
+    [int]$MenuControlTimeoutSeconds = 300,
+
+    [switch]$ExternalMenuControl
 )
 
 # Runs one unattended Halo 3 physical-contact transaction through SteamVR's
@@ -331,7 +336,8 @@ try {
     } 45 'MCC did not open a controllable window.'
     Start-Sleep -Seconds 15
 
-    Add-Type @'
+    if (-not $ExternalMenuControl) {
+        Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class HaloMccVrContactInput {
@@ -385,89 +391,93 @@ public static class HaloMccVrContactInput {
     }
 }
 '@
-    function Send-ScanCode([uint16]$ScanCode, [bool]$Extended = $false) {
-        $written = [HaloMccVrContactInput]::Key($ScanCode, $Extended)
-        if ($written -ne 2) { throw "SendInput wrote $written of 2 events." }
-        Start-Sleep -Milliseconds 350
-    }
-    function Send-Enter { Send-ScanCode 0x1C }
-    function Send-Escape { Send-ScanCode 0x01 }
-    function Send-Down { Send-ScanCode 0x50 $true }
-    function Send-Right { Send-ScanCode 0x4D $true }
+        function Send-ScanCode([uint16]$ScanCode, [bool]$Extended = $false) {
+            $written = [HaloMccVrContactInput]::Key($ScanCode, $Extended)
+            if ($written -ne 2) {
+                throw "SendInput wrote $written of 2 events."
+            }
+            Start-Sleep -Milliseconds 350
+        }
+        function Send-Enter { Send-ScanCode 0x1C }
+        function Send-Escape { Send-ScanCode 0x01 }
+        function Send-Down { Send-ScanCode 0x50 $true }
+        function Send-Right { Send-ScanCode 0x4D $true }
 
-    $mcc = Get-Process $mccProcessName -ErrorAction Stop
-    $null = [HaloMccVrContactInput]::SetForegroundWindow(
-        $mcc.MainWindowHandle)
-    # MCC remembers the last selected title and activity. Back out to the
-    # Press Enter splash first; entering from there always highlights Campaigns
-    # on the root menu. Without this anchor the same relative keys can open a
-    # remembered Halo 2 quick-start panel instead of Halo 3 Forge.
-    for ($attempt = 0; $attempt -lt 8; ++$attempt) {
-        Send-Escape
-        Start-Sleep -Milliseconds 650
-    }
-    Start-Sleep -Seconds 2
-    Send-Enter
-    Start-Sleep -Seconds 7
-    Send-Down
-    Send-Down
-    Send-Enter
-    Start-Sleep -Seconds 3
-    Send-Enter
-    Start-Sleep -Seconds 3
-    Send-Down
-    Send-Down
-    Send-Enter
-    Start-Sleep -Seconds 3
-
-    if ($Test -eq 'vehicle-nudge') {
-        # From the default Construct setup, select High Ground.
+        $mcc = Get-Process $mccProcessName -ErrorAction Stop
+        $null = [HaloMccVrContactInput]::SetForegroundWindow(
+            $mcc.MainWindowHandle)
+        # MCC remembers the last selected title and activity. This legacy path
+        # is retained for known menu state only. ExternalMenuControl lets an
+        # observer read the visible menu before acting.
+        for ($attempt = 0; $attempt -lt 8; ++$attempt) {
+            Send-Escape
+            Start-Sleep -Milliseconds 650
+        }
+        Start-Sleep -Seconds 2
+        Send-Enter
+        Start-Sleep -Seconds 7
         Send-Down
-        Send-Right
-        Send-Right
-        Send-Right
+        Send-Down
         Send-Enter
         Start-Sleep -Seconds 3
-        Send-Right
-        Send-Right
-        Send-Right
-    }
-    else {
-        # Construct is already selected; move to the Start tile.
-        Send-Right
-        Send-Right
-        Send-Right
-    }
-    Start-Sleep -Seconds 2
+        Send-Enter
+        Start-Sleep -Seconds 3
+        Send-Down
+        Send-Down
+        Send-Enter
+        Start-Sleep -Seconds 3
 
-    # A relative mouse click was tried here, but MCC's DPI-virtualized window
-    # rectangle did not address the visible Launch Game panel reliably. Keep
-    # that bounded helper dormant. The proven keyboard transaction enters the
-    # lower panel, confirms it once, then retries only while halo3.dll is absent
-    # so no input leaks into gameplay.
-    $enableDpiDependentLaunchClick = $false
-    if ($enableDpiDependentLaunchClick) {
-        $null = [HaloMccVrContactInput]::ClickRelative(
-            $mcc.MainWindowHandle, 0.20, 0.78)
-    }
-    Send-Down
-    Send-Enter
-    Start-Sleep -Seconds 2
-    Send-Enter
-    Start-Sleep -Seconds 8
-    for ($attempt = 0; $attempt -lt 3; ++$attempt) {
-        $text = Get-NewLogText $runtimeLog $startedUtc
-        if ($text -match 'Title adapter: detected supported title Halo 3') {
-            break
+        if ($Test -eq 'vehicle-nudge') {
+            # From the default Construct setup, select High Ground.
+            Send-Down
+            Send-Right
+            Send-Right
+            Send-Right
+            Send-Enter
+            Start-Sleep -Seconds 3
+            Send-Right
+            Send-Right
+            Send-Right
+        }
+        else {
+            # Construct is already selected; move to the Start tile.
+            Send-Right
+            Send-Right
+            Send-Right
+        }
+        Start-Sleep -Seconds 2
+
+        # A relative mouse click was tried here, but MCC's DPI-virtualized
+        # window rectangle did not address the visible Launch Game panel
+        # reliably. Keep that bounded helper dormant.
+        $enableDpiDependentLaunchClick = $false
+        if ($enableDpiDependentLaunchClick) {
+            $null = [HaloMccVrContactInput]::ClickRelative(
+                $mcc.MainWindowHandle, 0.20, 0.78)
         }
         Send-Down
         Send-Enter
+        Start-Sleep -Seconds 2
+        Send-Enter
         Start-Sleep -Seconds 8
+        for ($attempt = 0; $attempt -lt 3; ++$attempt) {
+            $text = Get-NewLogText $runtimeLog $startedUtc
+            if ($text -match 'Title adapter: detected supported title Halo 3') {
+                break
+            }
+            Send-Down
+            Send-Enter
+            Start-Sleep -Seconds 8
+        }
     }
-    $text = Get-NewLogText $runtimeLog $startedUtc
-    if ($text -notmatch 'Title adapter: detected supported title Halo 3') {
-        throw 'Menu control did not start Halo 3.'
+    else {
+        Write-Host 'MCC is ready for visible external Forge menu control.'
     }
+
+    Wait-Until {
+        $text = Get-NewLogText $runtimeLog $startedUtc
+        $text -match 'Title adapter: detected supported title Halo 3'
+    } $MenuControlTimeoutSeconds 'Menu control did not start Halo 3.'
 
     Wait-Until {
         $text = Get-NewLogText $runtimeLog $startedUtc
@@ -540,6 +550,11 @@ $result = [ordered]@{
     installed_launcher_sha256 =
         Get-Sha256 (Join-Path $modRoot 'halo3xr_launcher.exe')
     mcc_edition = 'Steam'
+    menu_control = $(if ($ExternalMenuControl) {
+        'external-visible-state'
+    } else {
+        'legacy-fixed-sequence'
+    })
     openxr_runtime = 'SteamVR null driver'
     headset = 'Null Model Number'
     started_utc = $(if ($startedUtc) { $startedUtc.ToString('o') } else { $null })
