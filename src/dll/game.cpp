@@ -1207,6 +1207,12 @@ namespace
     thread_local int g_halo3ContactPaletteBoneCount = 0;
     thread_local uint64_t g_halo3ContactPaletteWristDescendants = 0;
     thread_local uint16_t g_halo3ContactExpectedRenderTag = 0xFFFFu;
+    std::atomic<uint32_t> g_halo3ContactPreparedRenderDatum{0xFFFFFFFFu};
+    std::atomic<uint64_t> g_halo3ContactPreparedSlotMatches{0};
+    std::atomic<uint64_t> g_halo3ContactPreparedSlotMisses{0};
+    std::atomic<uint64_t> g_halo3ContactVisibleIdentitySubmissions{0};
+    std::atomic<uint64_t> g_halo3ContactVisibleIdentityLast{0};
+    std::atomic<uint64_t> g_halo3ContactVisibleIdentityKeys[8]{};
     // Candidate e91f451 treated the prepared slot's +0x4C datum as the tag
     // passed to the final visible-palette submission. The exact-visible replay
     // reached Halo 3 gameplay but published zero palettes. Keep that strict
@@ -4348,6 +4354,7 @@ namespace
             // interface and feeds that same datum into the prepared slot.
             // Read only this already-proven runtime field: attachments share
             // the interpolation source but do not own this identity.
+            bool matchedPreparedSlot = false;
             int runtimeSlot = -1;
             unsigned char* runtimeWeapon = nullptr;
             if (result && outBones && *outBones &&
@@ -4355,13 +4362,26 @@ namespace
                     *outBones, runtimeSlot, runtimeWeapon) &&
                 runtimeSlot == 0 && runtimeWeapon)
             {
+                matchedPreparedSlot = true;
                 const uint32_t renderDatum =
                     *reinterpret_cast<const uint32_t*>(
                         runtimeWeapon + 0x4C);
+                g_halo3ContactPreparedRenderDatum.store(
+                    renderDatum, std::memory_order_relaxed);
                 const uint16_t renderTag =
                     static_cast<uint16_t>(renderDatum);
                 if (renderDatum != 0xFFFFFFFFu && renderTag != 0xFFFFu)
                     g_halo3ContactExpectedRenderTag = renderTag;
+            }
+            if (matchedPreparedSlot)
+                g_halo3ContactPreparedSlotMatches.fetch_add(
+                    1, std::memory_order_relaxed);
+            else
+            {
+                g_halo3ContactPreparedRenderDatum.store(
+                    0xFFFFFFFFu, std::memory_order_relaxed);
+                g_halo3ContactPreparedSlotMisses.fetch_add(
+                    1, std::memory_order_relaxed);
             }
             if (previousExpectedRenderTag !=
                 g_halo3ContactExpectedRenderTag)
@@ -5346,6 +5366,26 @@ namespace
                 mappedRoot < 64 &&
                 (g_halo3ContactPaletteWristDescendants &
                  (uint64_t{1} << mappedRoot)) != 0 && finite;
+            const uint64_t identityKey =
+                (uint64_t{1} << 63) |
+                static_cast<uint64_t>(tag) |
+                (static_cast<uint64_t>(
+                     static_cast<uint16_t>(renderNodeCount)) << 16) |
+                (static_cast<uint64_t>(
+                     static_cast<uint16_t>(mappedRoot + 1)) << 32);
+            g_halo3ContactVisibleIdentitySubmissions.fetch_add(
+                1, std::memory_order_relaxed);
+            g_halo3ContactVisibleIdentityLast.store(
+                identityKey, std::memory_order_relaxed);
+            for (auto& recorded : g_halo3ContactVisibleIdentityKeys)
+            {
+                uint64_t current = recorded.load(std::memory_order_relaxed);
+                if (current == identityKey)
+                    break;
+                if (!current && recorded.compare_exchange_strong(
+                        current, identityKey, std::memory_order_relaxed))
+                    break;
+            }
             const bool acceptedSubmission =
                 kEnableHalo3ExactContactRenderTag
                 ? PhysicalContactVisibleWeaponSubmissionAccepted(
@@ -10170,6 +10210,15 @@ namespace
     {
         g_halo3ContactDebounce.Reset();
         g_halo3ContactReleaseLatch.Reset();
+        g_halo3ContactPreparedRenderDatum.store(
+            0xFFFFFFFFu, std::memory_order_relaxed);
+        g_halo3ContactPreparedSlotMatches.store(0, std::memory_order_relaxed);
+        g_halo3ContactPreparedSlotMisses.store(0, std::memory_order_relaxed);
+        g_halo3ContactVisibleIdentitySubmissions.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactVisibleIdentityLast.store(0, std::memory_order_relaxed);
+        for (auto& key : g_halo3ContactVisibleIdentityKeys)
+            key.store(0, std::memory_order_relaxed);
         g_halo3ContactLastMotionSerial = 0;
         g_halo3ContactWeaponHandle = -1;
         g_halo3ContactPreviousPoseValid = false;
@@ -13265,6 +13314,36 @@ namespace
                 std::memory_order_relaxed),
             g_halo3ContactWallVertices.load(std::memory_order_relaxed),
             g_halo3ContactWallPlanes.load(std::memory_order_relaxed));
+        LOG("H3 physical contact visible IDs: prepared=0x%08X "
+            "slotMatches=%llu slotMisses=%llu submissions=%llu "
+            "last=0x%016llX keys=[%016llX %016llX %016llX %016llX "
+            "%016llX %016llX %016llX %016llX]",
+            g_halo3ContactPreparedRenderDatum.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactPreparedSlotMatches.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactPreparedSlotMisses.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactVisibleIdentitySubmissions.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactVisibleIdentityLast.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactVisibleIdentityKeys[0].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactVisibleIdentityKeys[1].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactVisibleIdentityKeys[2].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactVisibleIdentityKeys[3].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactVisibleIdentityKeys[4].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactVisibleIdentityKeys[5].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactVisibleIdentityKeys[6].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactVisibleIdentityKeys[7].load(
+                std::memory_order_relaxed));
         if (g_halo3ContactDebugRig.load(std::memory_order_acquire))
         {
             const int32_t target =
