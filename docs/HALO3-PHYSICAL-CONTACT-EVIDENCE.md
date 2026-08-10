@@ -991,6 +991,17 @@ preserved log is
 The equality is disabled before any replacement experiment; the proven slot,
 field, and submission hook remain leads, not a proven cross-hook identity.
 
+Probe `bfc08ce` restored the earlier bounded wrist filter and recorded identity
+only. The final hook consistently saw `0x19FB` with 37 nodes (the first-person
+body) and `0x0B2B` with 5 nodes (the weapon) from the slot-0 interpolation
+source. The prepared-slot lookup missed 48 of 48 calls because the interpolator
+returns a distinct output buffer, not the slot's `+0x4A4` prepared bone array.
+The visible replay still passed through the bounded filter. Its preserved log
+is `out/debug-openxr/20260810-152353775Z-visible-weapon-nudge.log` (SHA-256
+`01C557A12D94488F0EFCC88313C2664B20E1043E81CDA6E9A68E1AAB27624B83`).
+The hook already receives the authoritative slot number, so the next probe
+reads slot 0 directly rather than inferring it from an unrelated buffer.
+
 ## Rejected first-person root composition
 
 The exact visible replay proved that the contact publication and the pixels do

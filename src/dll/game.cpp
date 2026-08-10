@@ -3321,6 +3321,21 @@ namespace
         }
     }
 
+    unsigned char* FirstPersonWeaponSlot(int slot)
+    {
+        if (slot < 0 || slot >= 2 || !g_engineTlsIndex)
+            return nullptr;
+        auto** slots = reinterpret_cast<void**>(__readgsqword(0x58));
+        if (!slots)
+            return nullptr;
+        auto* tls = reinterpret_cast<unsigned char*>(slots[*g_engineTlsIndex]);
+        if (!tls)
+            return nullptr;
+        auto* weapons = *reinterpret_cast<unsigned char**>(tls + 0x568);
+        return weapons ? weapons + static_cast<size_t>(slot) * 0x11BC
+                       : nullptr;
+    }
+
     // Locate the first-person weapon slot that owns a composed bone array.
     // Pointer compares only, so it is safe to call before composition too.
     bool FindFirstPersonWeapon(BoneMatrix* bones, int& outSlot, unsigned char*& outWeapon)
@@ -4355,12 +4370,9 @@ namespace
             // Read only this already-proven runtime field: attachments share
             // the interpolation source but do not own this identity.
             bool matchedPreparedSlot = false;
-            int runtimeSlot = -1;
-            unsigned char* runtimeWeapon = nullptr;
-            if (result && outBones && *outBones &&
-                FindFirstPersonWeapon(
-                    *outBones, runtimeSlot, runtimeWeapon) &&
-                runtimeSlot == 0 && runtimeWeapon)
+            unsigned char* runtimeWeapon = result
+                ? FirstPersonWeaponSlot(slot) : nullptr;
+            if (runtimeWeapon)
             {
                 matchedPreparedSlot = true;
                 const uint32_t renderDatum =
