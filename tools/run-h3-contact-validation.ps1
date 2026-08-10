@@ -141,6 +141,38 @@ function Test-SlowResult([string]$Text, [int]$Kind, [bool]$RequireScoop) {
         "H3 physical contact DEBUG RIG:.*kind=$Kind.*validated=1"
 }
 
+function Test-VehicleReleaseResult([string]$Text) {
+    if ($Text -match 'H3 physical contact status:.*melees=[1-9][0-9]*') {
+        return $false
+    }
+    $lines = $Text -split "`r?`n" | Where-Object {
+        $_ -match 'H3 physical contact status:' -and
+        $_ -match 'shapeSource=1' -and
+        $_ -match 'impulses=([1-9][0-9]*) releases=([1-9][0-9]*) melees=0 ' -and
+        $_ -match 'command=([1-9][0-9]*) applied=([1-9][0-9]*) commandStatus=2' -and
+        $_ -match 'target=0x(?!FFFFFFFF)[0-9A-F]+ kind=1 ' -and
+        $_ -match 'targetMass=([0-9]+(?:\.[0-9]+)?) targetMotion=4 ' -and
+        $_ -match 'lastImpulse=\((-?[0-9]+(?:\.[0-9]+)?) (-?[0-9]+(?:\.[0-9]+)?) (-?[0-9]+(?:\.[0-9]+)?)\)'
+    }
+    foreach ($line in $lines) {
+        $null = $line -match 'command=([1-9][0-9]*) applied=([1-9][0-9]*) commandStatus=2'
+        $command = [int]$Matches[1]
+        $applied = [int]$Matches[2]
+        $null = $line -match 'targetMass=([0-9]+(?:\.[0-9]+)?) targetMotion=4 '
+        $mass = [double]$Matches[1]
+        $null = $line -match 'lastImpulse=\((-?[0-9]+(?:\.[0-9]+)?) (-?[0-9]+(?:\.[0-9]+)?) (-?[0-9]+(?:\.[0-9]+)?)\)'
+        $x = [double]$Matches[1]
+        $y = [double]$Matches[2]
+        $z = [double]$Matches[3]
+        $magnitude = [math]::Sqrt($x * $x + $y * $y + $z * $z)
+        if ($command -eq $applied -and $mass -gt 0.0 -and
+            $magnitude -gt 0.0 -and $magnitude -le 1.0001) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
         'weapon-scoop' {
@@ -153,10 +185,7 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
             return Test-SlowResult $Text 10 $false
         }
         'vehicle-nudge' {
-            if (-not (Test-SlowResult $Text 1 $false)) { return $false }
-            return $Text -match
-                'H3 physical contact status:.*releases=[1-9][0-9]*.*' +
-                'melees=0.*commandStatus=2.*target=0x(?!FFFFFFFF).*kind=1'
+            return Test-VehicleReleaseResult $Text
         }
         'wall' {
             return $Text -match
