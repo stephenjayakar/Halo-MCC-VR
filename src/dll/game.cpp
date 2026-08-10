@@ -10173,6 +10173,11 @@ namespace
             g_halo3ContactDebugScoop.load(std::memory_order_acquire);
         const bool debugWall =
             g_halo3ContactDebugWall.load(std::memory_order_acquire);
+        // Candidate 51a3e6a did not produce an exact kind-10 hit in Construct.
+        // Keep its bounded placement helper for evidence, but do not run the
+        // failed diagnostic behavior while the proven scoop selector can
+        // reject unsuitable map objects and continue.
+        constexpr bool kEnableHalo3DebugBoundsSweepPlacement = false;
         constexpr float kDebugCycleMs = 1000.0f;
         constexpr float kDebugAngularRate = 6.28318530718f;
         const float debugPhase = static_cast<float>(nowMs % 1000u) *
@@ -10976,7 +10981,8 @@ namespace
                     }
                     grip = weaponTransform.position;
                 }
-                else if (!debugScoop)
+                else if (!debugScoop &&
+                         kEnableHalo3DebugBoundsSweepPlacement)
                 {
                     const auto* targetBoundsCenter =
                         reinterpret_cast<const float*>(
