@@ -15,8 +15,10 @@ param(
 
 # Runs one unattended Halo 3 physical-contact transaction through SteamVR's
 # null driver. The user's exact SteamVR settings are copied before any change
-# and restored in finally, including launch or menu-control failures. This is a
-# diagnostic tool only. A passing null-driver run is never headset acceptance.
+# and restored in finally, including launch or menu-control failures. SteamVR
+# stays stopped after restoration so a late null-driver process cannot rewrite
+# the restored file. This is a diagnostic tool only. A passing null-driver run
+# is never headset acceptance.
 
 $ErrorActionPreference = 'Stop'
 
@@ -37,10 +39,27 @@ function Get-Sha256([string]$Path) {
 }
 
 function Stop-SteamVr {
-    Get-Process vrmonitor, vrserver, vrcompositor, vrdashboard `
-            -ErrorAction SilentlyContinue |
-        Stop-Process -Force
-    Start-Sleep -Seconds 3
+    $names = @(
+        'vrmonitor',
+        'vrserver',
+        'vrcompositor',
+        'vrdashboard',
+        'vrwebhelper'
+    )
+    for ($attempt = 0; $attempt -lt 20; ++$attempt) {
+        $processes = Get-Process -Name $names -ErrorAction SilentlyContinue
+        if (-not $processes) {
+            Start-Sleep -Milliseconds 500
+            if (-not (Get-Process -Name $names -ErrorAction SilentlyContinue)) {
+                return
+            }
+        }
+        else {
+            $processes | Stop-Process -Force
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    throw 'SteamVR processes did not stop.'
 }
 
 function Stop-Mcc {
@@ -497,10 +516,6 @@ finally {
             $restored.steamvr.requireHmd -ne $true) {
             throw 'Restored SteamVR settings are not in real-headset mode.'
         }
-        Start-Process -FilePath $vrMonitor -WindowStyle Hidden
-        Wait-Until {
-            [bool](Get-Process vrmonitor -ErrorAction SilentlyContinue)
-        } 30 'Normal SteamVR did not restart.'
     }
     catch {
         if (-not $failure) { $failure = $_.Exception.Message }
