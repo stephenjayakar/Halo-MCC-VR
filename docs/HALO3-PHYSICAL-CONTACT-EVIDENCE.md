@@ -258,12 +258,13 @@ weapon definition's first-person block; its caller at `+0x9663FD` reads the
 element's first-person model datum at `+0x0C`. The pinned retail
 `halo3.dll` (SHA-256
 `B209D8454B12DC77E54CCD2C9924EC8D44B8619D21CF98E36FFAF601E67EFB63`)
-first-person builder at `+0x2C0D20` stores that resolved datum in the prepared
-primary slot at `+0x4C`, beside the already-proven interpolation bones at
-`+0x4A4`. At `+0x2C0F26..+0x2C0F39` it passes the `+0x4C` datum as the render
-model for the visible submission. The interpolation hook therefore snapshots
-the low 16-bit tag index from this exact prepared primary slot, and the final
-palette hook publishes contact only when its submitted tag is identical.
+first-person builder at `+0x2C0D20` prepares the model set beside the proven
+interpolation bones at `+0x4A4`. Runtime probes described below correct the
+initial field interpretation: `+0x4C` is the separately submitted 37-node
+first-person body, while the held weapon is the datum at `+0x44`. The
+interpolation hook therefore snapshots the low 16-bit tag index from slot
+`+0x44`, and the final palette hook publishes contact only when its submitted
+tag is identical.
 Missing or invalid identity withholds contact; weapon changes invalidate the
 previous pose before the new model can publish.
 
@@ -1010,6 +1011,15 @@ as the held weapon's render identity is runtime-rejected. The passing broad
 visible replay is preserved at
 `out/debug-openxr/20260810-152904233Z-visible-weapon-nudge.log` (SHA-256
 `7C00335429F9C9F34E04F2208098EDEB047EC14405D252AEFC8584C98464BC16`).
+
+Probe `0ebfd26` performed one bounded scan of the fixed prepared-slot header
+before the `+0x4A4` bone bank. For final weapon tag `0x0B2B`, it found exactly
+one matching datum: `0xECA10B2B` at slot `+0x44`. The live `+0x4C` datum
+remained `0xFB9319FB`, matching the separate 37-node body submission. The
+one-time scan is disabled after discovery; the product path reads only the
+proven `+0x44` field. Its passing broad-filter replay is preserved at
+`out/debug-openxr/20260810-153652702Z-visible-weapon-nudge.log` (SHA-256
+`027674855EB715DE4EFB1E624DA228BBA79EDE019DA40FB0E602EA745EA60790`).
 
 ## Rejected first-person root composition
 

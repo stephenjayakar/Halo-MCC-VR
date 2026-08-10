@@ -1216,11 +1216,11 @@ namespace
     std::atomic<uint32_t> g_halo3ContactPreparedWeaponProbeTag{0xFFFFFFFFu};
     std::atomic<uint32_t> g_halo3ContactPreparedWeaponProbeMatches{0};
     std::atomic<uint64_t> g_halo3ContactPreparedWeaponProbeFields[8]{};
-    // Candidate e91f451 treated the prepared slot's +0x4C datum as the tag
-    // passed to the final visible-palette submission. The exact-visible replay
-    // reached Halo 3 gameplay but published zero palettes. Keep that strict
-    // identity experiment inert until runtime telemetry proves the mapping.
-    constexpr bool kEnableHalo3ExactContactRenderTag = false;
+    // Runtime probe 0ebfd26 found the bounded 5-node weapon's exact final tag
+    // once in the prepared slot header, at +0x44. The adjacent +0x4C datum is
+    // the 37-node first-person body and must be rejected.
+    constexpr bool kEnableHalo3ExactContactRenderTag = true;
+    constexpr bool kEnableHalo3PreparedWeaponFieldProbe = false;
     thread_local BoneMatrix g_fpPaletteScratch[kReachFpMaxSourceNodeCount];
     thread_local BoneMatrix g_scopeHiddenPalette[64];
     // The render-thread IK path publishes only pointer-sized diagnostics.
@@ -4366,12 +4366,10 @@ namespace
             g_halo3ContactPaletteWristDescendants = 0;
             g_halo3ContactExpectedRenderTag = 0xFFFFu;
 
-            // Retail's first-person builder reads the primary render-model
-            // datum from slot +0x4C before it submits that model. Official
-            // halo3_tag_test independently resolves the authored first-person
-            // interface and feeds that same datum into the prepared slot.
-            // Read only this already-proven runtime field: attachments share
-            // the interpolation source but do not own this identity.
+            // Probe 0ebfd26 matched the final bounded weapon submission to the
+            // prepared slot's unique +0x44 datum. +0x4C is the separately
+            // submitted first-person body. Read only the exact slot number
+            // already supplied to this interpolation hook.
             bool matchedPreparedSlot = false;
             unsigned char* runtimeWeapon = result
                 ? FirstPersonWeaponSlot(slot) : nullptr;
@@ -4380,7 +4378,7 @@ namespace
                 matchedPreparedSlot = true;
                 const uint32_t renderDatum =
                     *reinterpret_cast<const uint32_t*>(
-                        runtimeWeapon + 0x4C);
+                        runtimeWeapon + 0x44);
                 g_halo3ContactPreparedRenderDatum.store(
                     renderDatum, std::memory_order_relaxed);
                 const uint16_t renderTag =
@@ -5382,7 +5380,8 @@ namespace
                 (g_halo3ContactPaletteWristDescendants &
                  (uint64_t{1} << mappedRoot)) != 0 && finite;
             uint32_t unprobedTag = 0xFFFFFFFFu;
-            if (boundedWristSubmission &&
+            if (kEnableHalo3PreparedWeaponFieldProbe &&
+                boundedWristSubmission &&
                 g_halo3ContactPreparedWeaponProbeTag.compare_exchange_strong(
                     unprobedTag, tag, std::memory_order_relaxed))
             {
