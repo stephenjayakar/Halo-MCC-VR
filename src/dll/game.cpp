@@ -955,18 +955,22 @@ namespace
     {
         std::atomic<uint32_t> sequence{0};
         std::atomic<uint64_t> sampleMs{0};
+        std::atomic<uint32_t> exact{0};
         std::atomic<float> root[13]{};
     };
     Halo3ContactVisibleReplayPublication g_halo3ContactVisibleReplayRoot;
     std::atomic<bool> g_halo3ContactDebugVisibleReplay{false};
     std::atomic<uint64_t> g_halo3ContactDebugVisiblePalettes{0};
+    std::atomic<uint64_t> g_halo3ContactDebugVisibleExactPublishes{0};
+    std::atomic<uint64_t> g_halo3ContactDebugVisibleExactPalettes{0};
 
     void Halo3PublishContactVisibleReplayRoot(
-        const BoneMatrix& root, uint64_t sampleMs)
+        const BoneMatrix& root, uint64_t sampleMs, bool exact)
     {
         auto& published = g_halo3ContactVisibleReplayRoot;
         published.sequence.fetch_add(1, std::memory_order_acq_rel);
         published.sampleMs.store(sampleMs, std::memory_order_relaxed);
+        published.exact.store(exact ? 1u : 0u, std::memory_order_relaxed);
         const float* values = reinterpret_cast<const float*>(&root);
         for (int value = 0; value < 13; ++value)
             published.root[value].store(values[value],
@@ -975,7 +979,7 @@ namespace
     }
 
     bool Halo3ReadContactVisibleReplayRoot(
-        BoneMatrix& root, uint64_t& sampleMs)
+        BoneMatrix& root, uint64_t& sampleMs, bool& exact)
     {
         auto& published = g_halo3ContactVisibleReplayRoot;
         for (int attempt = 0; attempt < 2; ++attempt)
@@ -985,6 +989,7 @@ namespace
             if (!before || (before & 1u))
                 continue;
             sampleMs = published.sampleMs.load(std::memory_order_relaxed);
+            exact = published.exact.load(std::memory_order_relaxed) != 0;
             float* values = reinterpret_cast<float*>(&root);
             for (int value = 0; value < 13; ++value)
                 values[value] = published.root[value].load(
@@ -5284,9 +5289,10 @@ namespace
                 {
                     BoneMatrix desiredRoot{};
                     uint64_t desiredMs = 0;
+                    bool desiredExact = false;
                     const uint64_t nowMs = GetTickCount64();
                     if (Halo3ReadContactVisibleReplayRoot(
-                            desiredRoot, desiredMs) &&
+                            desiredRoot, desiredMs, desiredExact) &&
                         nowMs >= desiredMs && nowMs - desiredMs <= 100)
                     {
                         BoneMatrix inverseRoot{}, delta{};
@@ -5310,6 +5316,9 @@ namespace
                                        sizeof(BoneMatrix));
                             g_halo3ContactDebugVisiblePalettes.fetch_add(
                                 1, std::memory_order_relaxed);
+                            if (desiredExact)
+                                g_halo3ContactDebugVisibleExactPalettes.fetch_add(
+                                    1, std::memory_order_relaxed);
                         }
                     }
                 }
@@ -10782,7 +10791,8 @@ namespace
         constexpr float kDebugAngularRate = 6.28318530718f;
         const float debugPhase = static_cast<float>(nowMs % 1000u) *
             (kDebugAngularRate / kDebugCycleMs);
-        const float debugMaxSpeed = debugMelee ? 2.25f : 0.90f;
+        const float debugMaxSpeed = debugMelee
+            ? 2.25f : (debugVisibleReplay ? 0.25f : 0.90f);
         bool paused = true;
         int32_t scene = -1, shot = -1;
         const bool gate = kEnableHalo3PhysicalContactCandidate &&
@@ -11433,7 +11443,9 @@ namespace
                 g_halo3ContactDebugAimKind.store(
                     aimKind, std::memory_order_relaxed);
                 if (debugVisibleReplay && aimTarget != -1 &&
-                    haveVisiblePalette)
+                    haveVisiblePalette &&
+                    g_halo3ContactDebugVisibleExactPublishes.load(
+                        std::memory_order_relaxed) == 0)
                 {
                     const PhysicalContactVec3 replayForward =
                         g_halo3ContactDebugAnchorValid
@@ -11475,7 +11487,8 @@ namespace
                     replayRoot.translation[0] = replayPosition.x;
                     replayRoot.translation[1] = replayPosition.y;
                     replayRoot.translation[2] = replayPosition.z;
-                    Halo3PublishContactVisibleReplayRoot(replayRoot, nowMs);
+                    Halo3PublishContactVisibleReplayRoot(
+                        replayRoot, nowMs, false);
                 }
                 else if (aimTarget != -1)
                 {
@@ -11558,6 +11571,52 @@ namespace
                     std::memory_order_relaxed);
                 Halo3ResetPhysicalContact();
                 return;
+            }
+            if (debugRig && debugVisibleReplay && debugAimData)
+            {
+                PhysicalContactCompoundShape debugTargetShape{};
+                PhysicalContactTransform debugTargetTransform{};
+                bool requiresNativeConfirmation = false;
+                const int32_t detailedTargetHandle =
+                    g_halo3ContactDebugAimTarget.load(
+                        std::memory_order_relaxed);
+                const bool haveDebugTargetShape =
+                    detailedTargetHandle != -1 &&
+                    (Halo3ContactDetailedTargetShape(
+                         detailedTargetHandle, debugAimData,
+                         debugTargetShape, debugTargetTransform,
+                         requiresNativeConfirmation) ||
+                     (Halo3ContactShapeForObject(
+                          debugAimData, debugTargetShape) &&
+                      (debugTargetTransform =
+                           Halo3ContactObjectTransform(debugAimData),
+                       true)));
+                if (haveDebugTargetShape &&
+                    PhysicalContactTransformFinite(debugTargetTransform))
+                {
+                    const PhysicalContactVec3 weaponFront =
+                        Halo3ContactCompoundSupport(
+                            weaponShape, weaponTransform, forward);
+                    const PhysicalContactVec3 targetNear =
+                        Halo3ContactCompoundSupport(
+                            debugTargetShape, debugTargetTransform,
+                            forward * -1.0f);
+                    const float amplitude =
+                        worldScale * debugMaxSpeed / kDebugAngularRate;
+                    const float displacement =
+                        amplitude * std::sin(debugPhase) -
+                        worldScale * 0.02f;
+                    const PhysicalContactVec3 translation =
+                        targetNear + forward * displacement - weaponFront;
+                    BoneMatrix replayRoot = visibleNodes[0];
+                    replayRoot.translation[0] += translation.x;
+                    replayRoot.translation[1] += translation.y;
+                    replayRoot.translation[2] += translation.z;
+                    Halo3PublishContactVisibleReplayRoot(
+                        replayRoot, nowMs, true);
+                    g_halo3ContactDebugVisibleExactPublishes.fetch_add(
+                        1, std::memory_order_relaxed);
+                }
             }
             if (debugRig && !debugVisibleReplay && debugAimData)
             {
@@ -13195,9 +13254,16 @@ namespace
             if (g_halo3ContactDebugVisibleReplay.load(
                     std::memory_order_acquire))
             {
-                LOG("H3 physical contact DEBUG VISIBLE REPLAY: palettes=%llu",
+                LOG("H3 physical contact DEBUG VISIBLE REPLAY: "
+                    "palettes=%llu exactPublishes=%llu exactPalettes=%llu",
                     (unsigned long long)
                         g_halo3ContactDebugVisiblePalettes.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugVisibleExactPublishes.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugVisibleExactPalettes.load(
                             std::memory_order_relaxed));
             }
             const uint64_t census =
@@ -17957,6 +18023,10 @@ namespace
         g_halo3ContactDebugVisibleReplay.store(
             contactDebugVisibleEnabled, std::memory_order_release);
         g_halo3ContactDebugVisiblePalettes.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugVisibleExactPublishes.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugVisibleExactPalettes.store(
             0, std::memory_order_release);
         g_halo3ContactDebugWallType.store(-1, std::memory_order_release);
         g_halo3ContactDebugWallHandle.store(-1, std::memory_order_release);
