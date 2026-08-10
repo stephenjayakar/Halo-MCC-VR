@@ -964,6 +964,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactDebugVisiblePalettes{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleExactPublishes{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleExactPalettes{0};
+    std::atomic<bool> g_halo3ContactDebugVisibleMeasurementStarted{false};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectSeparations{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
@@ -10956,11 +10957,11 @@ namespace
             g_halo3ContactDebugWall.load(std::memory_order_acquire);
         const bool debugVisibleReplay =
             g_halo3ContactDebugVisibleReplay.load(std::memory_order_acquire);
-        // Candidate 16b5569 retried the old composition after the exact +0x44
-        // held-weapon selector removed attachment palettes. That reduced the
-        // false range from -88 m to -16 m but still did not place contact in
-        // rendered pixel space. Keep the disproven diagnostic behavior inert.
-        constexpr bool kEnableHalo3ExactVisibleReplayPlacement = false;
+        // Candidate 16b5569 proved the first exact samples are taken before
+        // either eye has consumed the replayed palette. Retry only with the
+        // bounded two-eye warmup below; production contact never enables this
+        // environment-gated diagnostic behavior.
+        constexpr bool kEnableHalo3ExactVisibleReplayPlacement = true;
         const bool debugExactVisibleReplay =
             kEnableHalo3ExactVisibleReplayPlacement &&
             g_halo3ContactDebugVisibleExactReplay.load(
@@ -11789,15 +11790,35 @@ namespace
                             forward * -1.0f);
                     const float currentGapMeters = PhysicalContactDot(
                         weaponFront - targetNear, forward) / worldScale;
-                    Halo3ContactDebugExpandGapRange(currentGapMeters);
-                    const PhysicalContactCompoundHit direct =
-                        PhysicalContactSweepCompound(
-                            weaponShape, weaponTransform, weaponTransform,
-                            debugTargetShape, debugTargetTransform);
-                    (direct.hit
-                         ? g_halo3ContactDebugVisibleDirectOverlaps
-                         : g_halo3ContactDebugVisibleDirectSeparations)
-                        .fetch_add(1, std::memory_order_relaxed);
+                    // The replay is consumed once per eye. Do not measure the
+                    // original, uncontrolled palette or the half-updated stereo
+                    // pair. Four exact palette consumptions cover both eyes and
+                    // one complete follow-up pair on the observed retail path.
+                    if (g_halo3ContactDebugVisibleExactPalettes.load(
+                            std::memory_order_relaxed) >= 4)
+                    {
+                        if (!g_halo3ContactDebugVisibleMeasurementStarted.exchange(
+                                true, std::memory_order_relaxed))
+                        {
+                            g_halo3ContactDebugVisibleDirectOverlaps.store(
+                                0, std::memory_order_relaxed);
+                            g_halo3ContactDebugVisibleDirectSeparations.store(
+                                0, std::memory_order_relaxed);
+                            g_halo3ContactDebugVisibleMinimumGap.store(
+                                FLT_MAX, std::memory_order_relaxed);
+                            g_halo3ContactDebugVisibleMaximumGap.store(
+                                -FLT_MAX, std::memory_order_relaxed);
+                        }
+                        Halo3ContactDebugExpandGapRange(currentGapMeters);
+                        const PhysicalContactCompoundHit direct =
+                            PhysicalContactSweepCompound(
+                                weaponShape, weaponTransform, weaponTransform,
+                                debugTargetShape, debugTargetTransform);
+                        (direct.hit
+                             ? g_halo3ContactDebugVisibleDirectOverlaps
+                             : g_halo3ContactDebugVisibleDirectSeparations)
+                            .fetch_add(1, std::memory_order_relaxed);
+                    }
                     const float amplitude =
                         worldScale * debugMaxSpeed / kDebugAngularRate;
                     const float displacement =
@@ -18303,6 +18324,8 @@ namespace
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleExactPalettes.store(
             0, std::memory_order_release);
+        g_halo3ContactDebugVisibleMeasurementStarted.store(
+            false, std::memory_order_release);
         g_halo3ContactDebugVisibleDirectOverlaps.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleDirectSeparations.store(
