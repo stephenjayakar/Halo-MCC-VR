@@ -809,6 +809,16 @@ did not produce a usable detailed shape. The failed run is preserved at
 `11A0EF28EF602DA2827BE29A5621D95C78A583C2DD4EBFE752FF3EF185E6E3BA`).
 The behavior was disabled before the next experiment.
 
+The next candidate adds a debug-rig-only read probe. It does not use the
+candidate geometry for contact. It walks the live target node bank and loaded
+tag blocks once when the rig anchors a vehicle, then publishes the first failed
+stage in the normal two-second status log. Stages 1-4 cover the node provider,
+5-7 the object/model/collision tag chain, 8 the region block, 9 the first live
+permutation, 10 the BSP block and fixed child bound, 11 the node mapping, 12 the
+vertex block, 13 finite vertices, and 100 a complete ten-part walk. This probe
+exists only to replace the failed implementation with runtime evidence instead
+of another guessed fix.
+
 The bounded synthetic Release benchmark uses 70 vertices per target child,
 matching the largest official Mongoose child. Four held-weapon children against
 all ten Mongoose children measured `0.0655 ms` p95. The full four-by-sixteen

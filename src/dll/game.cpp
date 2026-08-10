@@ -6368,6 +6368,15 @@ namespace
     std::atomic<float> g_halo3ContactDebugPeakLiftMeters{0.0f};
     std::atomic<float> g_halo3ContactDebugPeakCarryMeters{0.0f};
     std::atomic<float> g_halo3ContactDebugPeakReleaseSpeed{0.0f};
+    std::atomic<int32_t> g_halo3ContactDebugGeometryHandle{-1};
+    std::atomic<uint32_t> g_halo3ContactDebugGeometryStage{0};
+    std::atomic<uint32_t> g_halo3ContactDebugGeometryNodes{0};
+    std::atomic<uint32_t> g_halo3ContactDebugGeometryRegions{0};
+    std::atomic<uint32_t> g_halo3ContactDebugGeometryRegion{0};
+    std::atomic<uint32_t> g_halo3ContactDebugGeometryPermutations{0};
+    std::atomic<uint32_t> g_halo3ContactDebugGeometryChildren{0};
+    std::atomic<int32_t> g_halo3ContactDebugGeometryNode{-1};
+    std::atomic<int32_t> g_halo3ContactDebugGeometryVertices{-1};
     // Camera-thread-only anchor for the automated contact rig. A slow test
     // must not chase a target after applying an impulse. Chasing changes the
     // weapon orientation and creates artificial high-speed tip motion.
@@ -7327,6 +7336,175 @@ namespace
             returned = false;
         }
         return returned;
+    }
+
+    // Debug-rig-only, read-only walk of a movable target's authored collision
+    // model. It records the first failed validation stage without changing the
+    // contact decision. This keeps discovery out of retail play and keeps all
+    // logging outside the camera hook.
+    void Halo3ContactProbeDetailedTargetGeometry(
+        int32_t objectHandle, const unsigned char* objectData)
+    {
+        g_halo3ContactDebugGeometryHandle.store(
+            objectHandle, std::memory_order_relaxed);
+        g_halo3ContactDebugGeometryStage.store(1, std::memory_order_relaxed);
+        g_halo3ContactDebugGeometryNodes.store(0, std::memory_order_relaxed);
+        g_halo3ContactDebugGeometryRegions.store(0, std::memory_order_relaxed);
+        g_halo3ContactDebugGeometryRegion.store(0, std::memory_order_relaxed);
+        g_halo3ContactDebugGeometryPermutations.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactDebugGeometryChildren.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactDebugGeometryNode.store(-1, std::memory_order_relaxed);
+        g_halo3ContactDebugGeometryVertices.store(
+            -1, std::memory_order_relaxed);
+        if (!objectData ||
+            g_halo3NodeBinding.load(std::memory_order_acquire) !=
+                static_cast<uint8_t>(Halo3NodeBindingState::Installed) ||
+            !g_halo3InterpolatedNodes)
+            return;
+
+        Halo3Matrix4x3* matrices = nullptr;
+        int matrixCount = 0;
+        g_halo3ContactDebugGeometryStage.store(2, std::memory_order_relaxed);
+        if (!Halo3ContactReadInterpolatedNodes(
+                objectHandle, &matrices, &matrixCount) || !matrices)
+            return;
+        g_halo3ContactDebugGeometryNodes.store(
+            matrixCount > 0 ? static_cast<uint32_t>(matrixCount) : 0,
+            std::memory_order_relaxed);
+        g_halo3ContactDebugGeometryStage.store(3, std::memory_order_relaxed);
+        if (matrixCount <= 0 || matrixCount > kHalo3MaximumRenderNodes)
+            return;
+        g_halo3ContactDebugGeometryStage.store(4, std::memory_order_relaxed);
+        if (!Halo3MatrixValid(matrices[0]))
+            return;
+
+        const uint32_t objectDatum =
+            *reinterpret_cast<const uint32_t*>(objectData);
+        const unsigned char* objectDef =
+            Halo3LoadedTagDefinition(objectDatum);
+        g_halo3ContactDebugGeometryStage.store(5, std::memory_order_relaxed);
+        if (!objectDef)
+            return;
+        const uint32_t modelDatum =
+            *reinterpret_cast<const uint32_t*>(objectDef + 0x40);
+        const unsigned char* modelDef =
+            Halo3LoadedTagDefinition(modelDatum);
+        g_halo3ContactDebugGeometryStage.store(6, std::memory_order_relaxed);
+        if (!modelDef)
+            return;
+        const uint32_t collisionDatum =
+            *reinterpret_cast<const uint32_t*>(modelDef + 0x1C);
+        const unsigned char* collisionDef =
+            Halo3LoadedTagDefinition(collisionDatum);
+        void** baseSlot = g_halo3TagDataBase;
+        const auto* tagBase = baseSlot
+            ? static_cast<const unsigned char*>(*baseSlot) : nullptr;
+        g_halo3ContactDebugGeometryStage.store(7, std::memory_order_relaxed);
+        if (!collisionDef || !tagBase)
+            return;
+
+        const int32_t regionCount =
+            *reinterpret_cast<const int32_t*>(collisionDef + 0x20);
+        const uint32_t regionAddress =
+            *reinterpret_cast<const uint32_t*>(collisionDef + 0x24);
+        g_halo3ContactDebugGeometryRegions.store(
+            regionCount > 0 ? static_cast<uint32_t>(regionCount) : 0,
+            std::memory_order_relaxed);
+        g_halo3ContactDebugGeometryStage.store(8, std::memory_order_relaxed);
+        if (regionCount <= 0 || regionCount > 32 || !regionAddress)
+            return;
+
+        const auto* regions = tagBase +
+            static_cast<size_t>(regionAddress) * 4;
+        uint32_t totalChildren = 0;
+        for (int32_t regionIndex = 0;
+             regionIndex < regionCount; ++regionIndex)
+        {
+            g_halo3ContactDebugGeometryRegion.store(
+                static_cast<uint32_t>(regionIndex),
+                std::memory_order_relaxed);
+            const auto* region = regions +
+                static_cast<size_t>(regionIndex) * 0x10;
+            const int32_t permutationCount =
+                *reinterpret_cast<const int32_t*>(region + 0x04);
+            const uint32_t permutationAddress =
+                *reinterpret_cast<const uint32_t*>(region + 0x08);
+            g_halo3ContactDebugGeometryPermutations.store(
+                permutationCount > 0
+                    ? static_cast<uint32_t>(permutationCount) : 0,
+                std::memory_order_relaxed);
+            g_halo3ContactDebugGeometryStage.store(
+                9, std::memory_order_relaxed);
+            if (permutationCount <= 0 || permutationCount > 16 ||
+                !permutationAddress)
+                return;
+
+            const auto* permutation = tagBase +
+                static_cast<size_t>(permutationAddress) * 4;
+            const int32_t bspCount =
+                *reinterpret_cast<const int32_t*>(permutation + 0x04);
+            const uint32_t bspAddress =
+                *reinterpret_cast<const uint32_t*>(permutation + 0x08);
+            g_halo3ContactDebugGeometryStage.store(
+                10, std::memory_order_relaxed);
+            if (bspCount <= 0 || bspCount > 16 || !bspAddress ||
+                totalChildren + static_cast<uint32_t>(bspCount) > 16)
+                return;
+
+            const auto* bsps = tagBase +
+                static_cast<size_t>(bspAddress) * 4;
+            for (int32_t bspIndex = 0; bspIndex < bspCount; ++bspIndex)
+            {
+                const auto* bsp = bsps +
+                    static_cast<size_t>(bspIndex) * 0x64;
+                const int16_t nodeIndex =
+                    *reinterpret_cast<const int16_t*>(bsp);
+                const uint32_t node = nodeIndex < 0
+                    ? 0u : static_cast<uint32_t>(nodeIndex);
+                g_halo3ContactDebugGeometryNode.store(
+                    static_cast<int32_t>(node), std::memory_order_relaxed);
+                g_halo3ContactDebugGeometryStage.store(
+                    11, std::memory_order_relaxed);
+                if (node >= static_cast<uint32_t>(matrixCount) ||
+                    !Halo3MatrixValid(matrices[node]))
+                    return;
+
+                const int32_t vertexCount =
+                    *reinterpret_cast<const int32_t*>(bsp + 0x58);
+                const uint32_t vertexAddress =
+                    *reinterpret_cast<const uint32_t*>(bsp + 0x5C);
+                g_halo3ContactDebugGeometryVertices.store(
+                    vertexCount, std::memory_order_relaxed);
+                g_halo3ContactDebugGeometryStage.store(
+                    12, std::memory_order_relaxed);
+                if (vertexCount < 4 ||
+                    vertexCount > static_cast<int32_t>(
+                        PhysicalContactConvexShape::kMaximumVertices) ||
+                    !vertexAddress)
+                    return;
+
+                const auto* vertices = tagBase +
+                    static_cast<size_t>(vertexAddress) * 4;
+                for (int32_t vertex = 0;
+                     vertex < vertexCount; ++vertex)
+                {
+                    const auto* point = reinterpret_cast<const float*>(
+                        vertices + static_cast<size_t>(vertex) * 0x10);
+                    g_halo3ContactDebugGeometryStage.store(
+                        13, std::memory_order_relaxed);
+                    if (!PhysicalContactFinite(
+                            {point[0], point[1], point[2]}))
+                        return;
+                }
+                ++totalChildren;
+                g_halo3ContactDebugGeometryChildren.store(
+                    totalChildren, std::memory_order_relaxed);
+            }
+        }
+        g_halo3ContactDebugGeometryStage.store(
+            100, std::memory_order_release);
     }
 
     // Official H3EK player bipeds use ten node-bound rigid bodies. Their pill
@@ -10950,6 +11128,9 @@ namespace
                     if (PhysicalContactTransformFinite(anchorTransform) &&
                         PhysicalContactFinite(anchorForward))
                     {
+                        if (aimKind == 1)
+                            Halo3ContactProbeDetailedTargetGeometry(
+                                aimTarget, debugAimData);
                         g_halo3ContactDebugAnchorValid = true;
                         g_halo3ContactDebugAnchorGeneration = generation;
                         g_halo3ContactDebugAnchorHandle = aimTarget;
@@ -12515,6 +12696,33 @@ namespace
                     std::memory_order_relaxed),
                 g_halo3ContactDebugPeakReleaseSpeed.load(
                     std::memory_order_relaxed));
+            if (g_halo3ContactDebugGeometryHandle.load(
+                    std::memory_order_relaxed) != -1)
+            {
+                LOG("H3 physical contact DEBUG TARGET GEOMETRY: "
+                    "handle=0x%08X stage=%u nodes=%u regions=%u "
+                    "region=%u permutations=%u children=%u node=%d "
+                    "vertices=%d",
+                    static_cast<uint32_t>(
+                        g_halo3ContactDebugGeometryHandle.load(
+                            std::memory_order_relaxed)),
+                    g_halo3ContactDebugGeometryStage.load(
+                        std::memory_order_relaxed),
+                    g_halo3ContactDebugGeometryNodes.load(
+                        std::memory_order_relaxed),
+                    g_halo3ContactDebugGeometryRegions.load(
+                        std::memory_order_relaxed),
+                    g_halo3ContactDebugGeometryRegion.load(
+                        std::memory_order_relaxed),
+                    g_halo3ContactDebugGeometryPermutations.load(
+                        std::memory_order_relaxed),
+                    g_halo3ContactDebugGeometryChildren.load(
+                        std::memory_order_relaxed),
+                    g_halo3ContactDebugGeometryNode.load(
+                        std::memory_order_relaxed),
+                    g_halo3ContactDebugGeometryVertices.load(
+                        std::memory_order_relaxed));
+            }
             const uint64_t census =
                 g_halo3ContactDebugObjectCensus.load(
                     std::memory_order_relaxed);
@@ -17280,6 +17488,24 @@ namespace
             0.0f, std::memory_order_release);
         g_halo3ContactDebugPeakReleaseSpeed.store(
             0.0f, std::memory_order_release);
+        g_halo3ContactDebugGeometryHandle.store(
+            -1, std::memory_order_release);
+        g_halo3ContactDebugGeometryStage.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugGeometryNodes.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugGeometryRegions.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugGeometryRegion.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugGeometryPermutations.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugGeometryChildren.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugGeometryNode.store(
+            -1, std::memory_order_release);
+        g_halo3ContactDebugGeometryVertices.store(
+            -1, std::memory_order_release);
         g_halo3ContactDebugAimTarget.store(-1, std::memory_order_release);
         g_halo3ContactDebugAimKind.store(
             0xFFFFFFFFu, std::memory_order_release);
