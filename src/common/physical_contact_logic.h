@@ -1527,6 +1527,40 @@ inline PhysicalContactVec3 PhysicalContactTargetDeltaVelocity(
     return PhysicalContactFinite(delta) ? delta : PhysicalContactVec3{};
 }
 
+// After separation Halo can clear the velocity that a floor-loaded body had
+// while following the weapon. Restore only the difference between the tracked
+// weapon contact point and the post-update target point. Authored target mass
+// converts that velocity difference to impulse. The rejected vehicle trace
+// used 114 kg m/s, so this one-shot handoff has a fixed 1 kg m/s ceiling.
+inline PhysicalContactVec3 PhysicalContactReleaseImpulse(
+    float targetMassKilograms,
+    PhysicalContactVec3 desiredMetersPerSecond,
+    PhysicalContactVec3 currentMetersPerSecond,
+    float worldUnitsPerMeter)
+{
+    if (!std::isfinite(targetMassKilograms) ||
+        targetMassKilograms <= 0.001f ||
+        targetMassKilograms > 1000000.0f ||
+        !PhysicalContactFinite(desiredMetersPerSecond) ||
+        !PhysicalContactFinite(currentMetersPerSecond) ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f)
+        return {};
+    PhysicalContactVec3 impulse =
+        (desiredMetersPerSecond - currentMetersPerSecond) *
+        targetMassKilograms;
+    const float length = PhysicalContactLength(impulse);
+    if (!std::isfinite(length) || length <= 1.0e-8f)
+        return {};
+    constexpr float kMaximumReleaseImpulseKilogramMetersPerSecond = 1.0f;
+    if (length > kMaximumReleaseImpulseKilogramMetersPerSecond)
+    {
+        impulse = impulse *
+            (kMaximumReleaseImpulseKilogramMetersPerSecond / length);
+    }
+    const PhysicalContactVec3 result = impulse * worldUnitsPerMeter;
+    return PhysicalContactFinite(result) ? result : PhysicalContactVec3{};
+}
+
 // Convert the exact mass-aware point impulse into portable controller feedback.
 // The square-root response keeps a light prop readable without letting a heavy
 // vehicle saturate the controller. Native melee gets a clear minimum pulse.
@@ -1630,4 +1664,71 @@ public:
 private:
     std::array<PhysicalContactTargetState, kCapacity> slots_{};
     size_t replacement_ = 0;
+};
+
+struct PhysicalContactReleaseCommand
+{
+    int32_t handle = -1;
+    PhysicalContactVec3 point{};
+    PhysicalContactVec3 desiredMetersPerSecond{};
+    bool apply = false;
+};
+
+// Keep the newest tracked slow-contact handoff. Consume it once after exact
+// shape separation. A different target and stale or invalid state clear the
+// latch without transferring motion.
+class PhysicalContactReleaseLatch
+{
+public:
+    void Arm(int32_t handle, PhysicalContactVec3 point,
+             PhysicalContactVec3 desiredMetersPerSecond, uint64_t sampleMs)
+    {
+        if (handle == -1 || !sampleMs || !PhysicalContactFinite(point) ||
+            !PhysicalContactFinite(desiredMetersPerSecond) ||
+            PhysicalContactLengthSquared(desiredMetersPerSecond) <= 0.0025f)
+        {
+            Reset();
+            return;
+        }
+        handle_ = handle;
+        point_ = point;
+        desiredMetersPerSecond_ = desiredMetersPerSecond;
+        sampleMs_ = sampleMs;
+    }
+
+    PhysicalContactReleaseCommand TakeIfSeparated(
+        int32_t currentContactHandle, uint64_t nowMs)
+    {
+        PhysicalContactReleaseCommand result{};
+        if (handle_ == -1)
+            return result;
+        if (currentContactHandle == handle_)
+            return result;
+        if (currentContactHandle != -1 || !nowMs || nowMs < sampleMs_ ||
+            nowMs - sampleMs_ > 100)
+        {
+            Reset();
+            return result;
+        }
+        result.handle = handle_;
+        result.point = point_;
+        result.desiredMetersPerSecond = desiredMetersPerSecond_;
+        result.apply = true;
+        Reset();
+        return result;
+    }
+
+    void Reset()
+    {
+        handle_ = -1;
+        point_ = {};
+        desiredMetersPerSecond_ = {};
+        sampleMs_ = 0;
+    }
+
+private:
+    int32_t handle_ = -1;
+    PhysicalContactVec3 point_{};
+    PhysicalContactVec3 desiredMetersPerSecond_{};
+    uint64_t sampleMs_ = 0;
 };
