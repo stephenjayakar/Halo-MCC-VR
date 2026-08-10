@@ -839,6 +839,14 @@ This closes the failed vehicle geometry path: detailed target contact may use
 the renderer-proven raw bank when the interpolated provider reports false,
 while a provider fault still rejects only that contact sample.
 
+The first installed product run loaded one detailed target on every vehicle
+sweep (`targetDetailed=1`, `targetFallback=0`) but the debug rig produced no
+hit. The product reader was not the failed stage. The rig still aligned its
+synthetic weapon to the vehicle's old 28-vertex physics hull while the contact
+decision used the ten-part collision model. The next validator-only change
+aligns its scoop trajectory to the same detailed target shape and transform.
+Normal tracked-controller contact is unchanged.
+
 The bounded synthetic Release benchmark uses 70 vertices per target child,
 matching the largest official Mongoose child. Four held-weapon children against
 all ten Mongoose children measured `0.0655 ms` p95. The full four-by-sixteen

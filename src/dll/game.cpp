@@ -11433,12 +11433,25 @@ namespace
             if (debugRig && debugAimData)
             {
                 PhysicalContactCompoundShape debugTargetShape{};
-                const PhysicalContactTransform debugTargetTransform =
-                    g_halo3ContactDebugAnchorValid
-                    ? g_halo3ContactDebugAnchorTransform
-                    : Halo3ContactObjectTransform(debugAimData);
-                if (Halo3ContactShapeForObject(
-                        debugAimData, debugTargetShape) &&
+                PhysicalContactTransform debugTargetTransform{};
+                bool requiresNativeConfirmation = false;
+                const int32_t detailedTargetHandle =
+                    g_halo3ContactDebugAimTarget.load(
+                        std::memory_order_relaxed);
+                const bool detailedDebugTarget =
+                    detailedTargetHandle != -1 &&
+                    Halo3ContactDetailedTargetShape(
+                        detailedTargetHandle, debugAimData, debugTargetShape,
+                        debugTargetTransform,
+                        requiresNativeConfirmation);
+                const bool haveDebugTargetShape = detailedDebugTarget ||
+                    Halo3ContactShapeForObject(
+                        debugAimData, debugTargetShape);
+                if (!detailedDebugTarget)
+                    debugTargetTransform = g_halo3ContactDebugAnchorValid
+                        ? g_halo3ContactDebugAnchorTransform
+                        : Halo3ContactObjectTransform(debugAimData);
+                if (haveDebugTargetShape &&
                     PhysicalContactTransformFinite(debugTargetTransform))
                 {
                     if (debugScoop && g_halo3ContactDebugScoopStartMs &&
