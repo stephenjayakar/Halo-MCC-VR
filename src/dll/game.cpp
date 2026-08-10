@@ -1206,6 +1206,7 @@ namespace
     thread_local const BoneMatrix* g_halo3ContactPaletteSource = nullptr;
     thread_local int g_halo3ContactPaletteBoneCount = 0;
     thread_local uint64_t g_halo3ContactPaletteWristDescendants = 0;
+    thread_local uint16_t g_halo3ContactExpectedRenderTag = 0xFFFFu;
     thread_local BoneMatrix g_fpPaletteScratch[kReachFpMaxSourceNodeCount];
     thread_local BoneMatrix g_scopeHiddenPalette[64];
     // The render-thread IK path publishes only pointer-sized diagnostics.
@@ -4329,9 +4330,42 @@ namespace
         g_fpInterpolationContexts[slot]={};
         if (slot == 0)
         {
+            const uint16_t previousExpectedRenderTag =
+                g_halo3ContactExpectedRenderTag;
             g_halo3ContactPaletteSource = nullptr;
             g_halo3ContactPaletteBoneCount = 0;
             g_halo3ContactPaletteWristDescendants = 0;
+            g_halo3ContactExpectedRenderTag = 0xFFFFu;
+
+            // Retail's first-person builder reads the primary render-model
+            // datum from slot +0x4C before it submits that model. Official
+            // halo3_tag_test independently resolves the authored first-person
+            // interface and feeds that same datum into the prepared slot.
+            // Read only this already-proven runtime field: attachments share
+            // the interpolation source but do not own this identity.
+            int runtimeSlot = -1;
+            unsigned char* runtimeWeapon = nullptr;
+            if (result && outBones && *outBones &&
+                FindFirstPersonWeapon(
+                    *outBones, runtimeSlot, runtimeWeapon) &&
+                runtimeSlot == 0 && runtimeWeapon)
+            {
+                const uint32_t renderDatum =
+                    *reinterpret_cast<const uint32_t*>(
+                        runtimeWeapon + 0x4C);
+                const uint16_t renderTag =
+                    static_cast<uint16_t>(renderDatum);
+                if (renderDatum != 0xFFFFFFFFu && renderTag != 0xFFFFu)
+                    g_halo3ContactExpectedRenderTag = renderTag;
+            }
+            if (previousExpectedRenderTag !=
+                g_halo3ContactExpectedRenderTag)
+            {
+                // A weapon change must never consume the preceding weapon's
+                // still-fresh final palette while the new one is publishing.
+                g_halo3VisibleWeaponPose.sampleMs.store(
+                    0, std::memory_order_release);
+            }
         }
         if (result && outBones && outCount && *outBones)
         {
@@ -5271,11 +5305,10 @@ namespace
 
         // Contact must occupy the same space as the pixels. DesiredWristWorld
         // is an IK target, not the matrix Halo ultimately skins with. Publish
-        // the small right-hand weapon render model only after the engine has
-        // composed the final palette. H3EK tags show fp_body is a large model,
-        // while ordinary weapons, sword and hammer have <=16 nodes; requiring
-        // node zero to map into the live right-wrist subtree rejects unrelated
-        // small first-person submissions without a guessed tag identity.
+        // only the active primary slot's exact render-model tag after the
+        // engine has composed its final palette. Attachments can share this
+        // source and right-wrist subtree, so node count is only a bound, never
+        // the identity test.
         if (source && source == g_halo3ContactPaletteSource && destination &&
             boneMap && tag != 0xFFFFu)
         {
@@ -5301,13 +5334,11 @@ namespace
                 finite = finite && std::isfinite(value);
             for (float value : visibleRoot.translation)
                 finite = finite && std::isfinite(value);
-            if (renderNodeCount > 0 && renderNodeCount <= 16 &&
-                mappedRoot >= 0 &&
-                mappedRoot < g_halo3ContactPaletteBoneCount &&
-                mappedRoot < 64 &&
-                (g_halo3ContactPaletteWristDescendants &
-                 (uint64_t{1} << mappedRoot)) &&
-                finite)
+            if (PhysicalContactVisibleWeaponSubmissionAccepted(
+                    g_halo3ContactExpectedRenderTag, tag,
+                    renderNodeCount, mappedRoot,
+                    g_halo3ContactPaletteBoneCount,
+                    g_halo3ContactPaletteWristDescendants, finite))
             {
                 if (g_halo3ContactDebugVisibleReplay.load(
                         std::memory_order_acquire))

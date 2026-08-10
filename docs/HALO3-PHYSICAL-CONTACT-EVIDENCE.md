@@ -244,6 +244,29 @@ controller/wrist estimate.
 OpenXR pose, linear/angular velocity, timestamp, and serial use a separate
 bounded atomic snapshot.
 
+The original final-palette selector was still too broad. It accepted every
+small render model whose node zero mapped into the primary wrist subtree.
+First-person attachments use the same interpolated bank and can satisfy both
+conditions, so a later attachment submission could replace the correctly
+published weapon pose.
+
+The replacement uses the engine's exact active render-model identity. Official
+H3EK `halo3_tag_test.exe` (SHA-256
+`59A78F2C96034D7CEB5D710505B2B36813AA141FC81A083E3F952973DBCE4602`)
+function `+0xABB1B0` selects the authored player-interface element from the
+weapon definition's first-person block; its caller at `+0x9663FD` reads the
+element's first-person model datum at `+0x0C`. The pinned retail
+`halo3.dll` (SHA-256
+`B209D8454B12DC77E54CCD2C9924EC8D44B8619D21CF98E36FFAF601E67EFB63`)
+first-person builder at `+0x2C0D20` stores that resolved datum in the prepared
+primary slot at `+0x4C`, beside the already-proven interpolation bones at
+`+0x4A4`. At `+0x2C0F26..+0x2C0F39` it passes the `+0x4C` datum as the render
+model for the visible submission. The interpolation hook therefore snapshots
+the low 16-bit tag index from this exact prepared primary slot, and the final
+palette hook publishes contact only when its submitted tag is identical.
+Missing or invalid identity withholds contact; weapon changes invalidate the
+previous pose before the new model can publish.
+
 ## Runtime safety and behavior
 
 Contact requires all of the following: the opt-in setting, current Halo 3

@@ -8730,6 +8730,29 @@ int main()
     // translation/rotation tunnelling, classification keeps slow pushes
     // damage-free, and fixed-capacity state debounces each concrete target.
     {
+        constexpr uint16_t kActiveWeaponRenderTag = 0x1234u;
+        constexpr uint64_t kRightWristSubtree = uint64_t{1} << 7;
+        Check(PhysicalContactVisibleWeaponSubmissionAccepted(
+                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
+                  5, 7, 42, kRightWristSubtree, true) &&
+              !PhysicalContactVisibleWeaponSubmissionAccepted(
+                  kActiveWeaponRenderTag, 0x4321u,
+                  1, 7, 42, kRightWristSubtree, true) &&
+              !PhysicalContactVisibleWeaponSubmissionAccepted(
+                  0xFFFFu, 0xFFFFu,
+                  5, 7, 42, kRightWristSubtree, true) &&
+              !PhysicalContactVisibleWeaponSubmissionAccepted(
+                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
+                  17, 7, 42, kRightWristSubtree, true) &&
+              !PhysicalContactVisibleWeaponSubmissionAccepted(
+                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
+                  5, 6, 42, kRightWristSubtree, true) &&
+              !PhysicalContactVisibleWeaponSubmissionAccepted(
+                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
+                  5, 7, 42, kRightWristSubtree, false),
+            "Physical contact publishes only the active primary weapon render "
+            "model, never a small attachment sharing its wrist palette");
+
         const PhysicalContactHit translation = PhysicalContactSweepCapsule(
             {0, 0, 0}, {0.5f, 0, 0}, {2, 0, 0}, {2.5f, 0, 0},
             0.05f, {1.25f, 0, 0}, 0.05f);

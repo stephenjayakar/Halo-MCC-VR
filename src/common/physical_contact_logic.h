@@ -230,6 +230,23 @@ struct PhysicalContactCompoundShape
     uint16_t childCount = 0;
 };
 
+// The first-person renderer can submit the held weapon and several smaller
+// attachment models through the same interpolated bone bank. Contact may use
+// only the render-model tag stored in the active primary-weapon runtime slot.
+// A size/wrist test alone is insufficient: a one-node attachment can satisfy
+// both and overwrite the weapon pose later in the same render transaction.
+inline constexpr bool PhysicalContactVisibleWeaponSubmissionAccepted(
+    uint16_t expectedRenderTag, uint16_t submittedRenderTag,
+    int32_t renderNodeCount, int32_t mappedRoot, int32_t sourceBoneCount,
+    uint64_t wristDescendants, bool finiteRoot)
+{
+    return expectedRenderTag != 0xFFFFu &&
+        submittedRenderTag == expectedRenderTag &&
+        renderNodeCount > 0 && renderNodeCount <= 16 &&
+        mappedRoot >= 0 && mappedRoot < sourceBoneCount && mappedRoot < 64 &&
+        (wristDescendants & (uint64_t{1} << mappedRoot)) != 0 && finiteRoot;
+}
+
 inline int32_t PhysicalContactCollisionPermutationIndex(
     int32_t permutationCount, bool allowFirstOfMany)
 {
