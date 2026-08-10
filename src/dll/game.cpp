@@ -11450,10 +11450,20 @@ namespace
                         detailedTargetHandle, debugAimData, debugTargetShape,
                         debugTargetTransform,
                         requiresNativeConfirmation);
-                const bool haveDebugTargetShape = detailedDebugTarget ||
+                // The replacement aligns one concrete convex on each side.
+                // This avoids mixing a wheel support point with a compound
+                // centroid that can lie in empty space between vehicle parts.
+                const bool childAlignedDetailedTarget =
+                    !detailedDebugTarget && detailedTargetHandle != -1 &&
+                    Halo3ContactDetailedTargetShape(
+                        detailedTargetHandle, debugAimData, debugTargetShape,
+                        debugTargetTransform,
+                        requiresNativeConfirmation);
+                const bool haveDebugTargetShape =
+                    childAlignedDetailedTarget || detailedDebugTarget ||
                     Halo3ContactShapeForObject(
                         debugAimData, debugTargetShape);
-                if (!detailedDebugTarget)
+                if (!detailedDebugTarget && !childAlignedDetailedTarget)
                     debugTargetTransform = g_halo3ContactDebugAnchorValid
                         ? g_halo3ContactDebugAnchorTransform
                         : Halo3ContactObjectTransform(debugAimData);
@@ -11464,19 +11474,64 @@ namespace
                         nowMs >= g_halo3ContactDebugScoopStartMs)
                     {
                         const PhysicalContactVec3 worldUp{0.0f, 0.0f, 1.0f};
-                        const PhysicalContactVec3 weaponTop =
-                            Halo3ContactCompoundSupport(
+                        const auto largestChild = [](
+                            const PhysicalContactCompoundShape& shape) {
+                            uint16_t best = 0;
+                            for (uint16_t child = 1;
+                                 child < shape.childCount; ++child)
+                                if (shape.children[child].vertexCount >
+                                    shape.children[best].vertexCount)
+                                    best = child;
+                            return best;
+                        };
+                        const auto convexWorldCentroid = [](
+                            const PhysicalContactConvexShape& shape,
+                            const PhysicalContactTransform& transform) {
+                            PhysicalContactVec3 local{};
+                            for (uint16_t vertex = 0;
+                                 vertex < shape.vertexCount; ++vertex)
+                                local = local + shape.vertices[vertex];
+                            local = local *
+                                (1.0f / static_cast<float>(
+                                    shape.vertexCount));
+                            return PhysicalContactTransformPoint(
+                                transform, local);
+                        };
+                        PhysicalContactVec3 weaponTop{};
+                        PhysicalContactVec3 targetBottom{};
+                        PhysicalContactVec3 weaponCentroid{};
+                        PhysicalContactVec3 targetCentroid{};
+                        if (childAlignedDetailedTarget)
+                        {
+                            const auto& weaponChild = weaponShape.children[
+                                largestChild(weaponShape)];
+                            const auto& targetChild = debugTargetShape.children[
+                                largestChild(debugTargetShape)];
+                            weaponTop = PhysicalContactConvexSupport(
+                                weaponChild, weaponTransform, worldUp);
+                            targetBottom = PhysicalContactConvexSupport(
+                                targetChild, debugTargetTransform,
+                                worldUp * -1.0f);
+                            weaponCentroid = convexWorldCentroid(
+                                weaponChild, weaponTransform);
+                            targetCentroid = convexWorldCentroid(
+                                targetChild, debugTargetTransform);
+                        }
+                        else
+                        {
+                            weaponTop = Halo3ContactCompoundSupport(
                                 weaponShape, weaponTransform, worldUp);
-                        const PhysicalContactVec3 targetBottom =
-                            Halo3ContactCompoundSupport(
+                            targetBottom = Halo3ContactCompoundSupport(
                                 debugTargetShape, debugTargetTransform,
                                 worldUp * -1.0f);
-                        const PhysicalContactVec3 weaponCentroid =
-                            PhysicalContactCompoundWorldCentroid(
-                                weaponShape, weaponTransform);
-                        const PhysicalContactVec3 targetCentroid =
-                            PhysicalContactCompoundWorldCentroid(
-                                debugTargetShape, debugTargetTransform);
+                            weaponCentroid =
+                                PhysicalContactCompoundWorldCentroid(
+                                    weaponShape, weaponTransform);
+                            targetCentroid =
+                                PhysicalContactCompoundWorldCentroid(
+                                    debugTargetShape,
+                                    debugTargetTransform);
+                        }
                         const float elapsedMs = static_cast<float>(
                             nowMs - g_halo3ContactDebugScoopStartMs);
                         const PhysicalContactDebugScoopPose scoop =
