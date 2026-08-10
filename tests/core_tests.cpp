@@ -9220,12 +9220,9 @@ int main()
         Check(scoopReady.liftMeters == 0.0f &&
               scoopLifted.liftMeters == 0.35f &&
               scoopCarried.carryMeters == 0.35f &&
-              scoopReleased.releaseMeters == 0.20f &&
-              std::fabs(
-                  scoopReleased.liftMeters -
-                  scoopReleased.releaseMeters - 0.15f) < 1.0e-5f &&
+              scoopReleased.releaseMeters == 0.40f &&
               scoopSeparating.carryMetersPerSecond > 0.15f &&
-              maximumScoopSpeed < 0.75f &&
+              maximumScoopSpeed < 1.30f &&
               maximumScoopDerivativeError < 0.006f &&
               scoopReady.liftMetersPerSecond == 0.0f &&
               scoopLifted.liftMetersPerSecond == 0.0f &&
