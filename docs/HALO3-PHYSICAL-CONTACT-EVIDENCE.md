@@ -758,6 +758,48 @@ for props. The earliest body hit supplies the exact weapon child, target child,
 surface point, normal, and temporal fraction. A provider fault rejects only
 that contact sample. It does not change VR ownership or the node binding.
 
+### Detailed movable-target collision geometry
+
+The installed `2909e2d` product uses detailed authored collision geometry for
+the held weapon, but movable target objects still use their Havok physics
+shapes. The official H3EK Mongoose tags prove why that target fallback is not
+precise enough for vehicle contact. `mongoose.physics_model` contains one root
+polyhedron with 28 vertices. `mongoose.collision_model` instead contains six
+regions: bumper, hull, and four wheels. The default permutation combines ten
+simultaneous BSP children and 269 vertices across the visible root, fender, and
+animated wheel nodes. The collision tag has 14 render nodes. Its largest child
+has 70 vertices. The official XML exports are preserved under the ignored
+`out/h3-contact-target-geometry` directory. Their SHA-256 values are
+`1707ABC5361063888AF481844B328FC048482AB78E6C45C898084E36D6351F76`
+for the physics model and
+`6CE1F148706335F6A5581D9E7E1DF10F515F25869F43DBE78FD186D0F5B83689`
+for the collision model.
+
+The detailed-target candidate raises the fixed compound limit from eight to
+sixteen children. This holds the complete ten-part Mongoose while keeping the
+worst supported held-weapon/target pair at 4 x 16 = 64 convex tests, the same
+pair-count ceiling as the former 8 x 8 limit. The proven 44-tag held-weapon
+census limit of four children is checked before every sweep. It reads the same
+official collision-model blocks already proven for the visible held weapon,
+maps every child through Halo's live interpolated node bank, and sweeps the
+two detailed compound shapes. A complete detailed shape owns the contact
+decision; a miss
+does not fall through to the larger physics proxy. If the detailed tag or node
+bank cannot be validated, only that target uses the existing physics fallback.
+
+Vehicle collision regions have default, medium, major, and destroyed
+permutations. The official tag stores the default first in every Mongoose
+region, but no verified retail binding currently exposes the selected live
+damage permutation. Therefore a proposed surface from a multi-permutation tag
+must also be confirmed by Halo's live native object query against the exact
+target and point. Failed confirmation rejects the contact rather than trusting
+the default shape. Status telemetry reports `targetShapeSource=1` for detailed
+collision, `2` for the physics fallback, and `3` for animated physics bodies.
+It also reports the current detailed/fallback candidate counts and native
+confirmation rejects, so a missed contact can be separated from unavailable
+geometry without hot-path logging. This candidate still requires Forge runtime
+and headset validation.
+
 ### Post-separation velocity restoration
 
 The first headset result for sustained response proved that physical contact

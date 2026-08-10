@@ -1033,6 +1033,13 @@ namespace
         return false;
     }
     static_assert(sizeof(BoneMatrix) == 0x34);
+    static_assert(sizeof(BoneMatrix) == sizeof(Halo3Matrix4x3));
+    static_assert(offsetof(BoneMatrix, scale) ==
+                  offsetof(Halo3Matrix4x3, scale));
+    static_assert(offsetof(BoneMatrix, rotation) ==
+                  offsetof(Halo3Matrix4x3, forward));
+    static_assert(offsetof(BoneMatrix, translation) ==
+                  offsetof(Halo3Matrix4x3, position));
 
     using FpInterpolateFn = bool(__fastcall*)(int view, int id, int slot,
                                               BoneMatrix** outBones, int* outCount);
@@ -6312,6 +6319,11 @@ namespace
     std::atomic<uint32_t> g_halo3ContactCandidateNormalReliable{0};
     std::atomic<uint32_t> g_halo3ContactNativeSamples{0};
     std::atomic<uint32_t> g_halo3ContactWeaponShapeSource{0};
+    std::atomic<uint32_t> g_halo3ContactTargetShapeSource{0};
+    std::atomic<uint32_t> g_halo3ContactDetailedTargetCandidates{0};
+    std::atomic<uint32_t> g_halo3ContactFallbackTargetCandidates{0};
+    std::atomic<uint32_t> g_halo3ContactTargetConfirmationRejects{0};
+    constexpr uint16_t kHalo3ContactMaximumHeldWeaponChildren = 4;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<uint32_t> g_halo3ContactTargetMotionType{0};
@@ -7060,9 +7072,13 @@ namespace
         const unsigned char* objectData, const BoneMatrix* visibleNodes,
         uint32_t visibleNodeCount,
         const PhysicalContactTransform& visibleRoot,
-        PhysicalContactCompoundShape& output)
+        PhysicalContactCompoundShape& output,
+        bool allowFirstPermutation = false,
+        bool* selectedFirstOfMany = nullptr)
     {
         output = {};
+        if (selectedFirstOfMany)
+            *selectedFirstOfMany = false;
         if (!objectData || !visibleNodes || !visibleNodeCount ||
             visibleNodeCount >
                 Halo3VisibleWeaponPosePublication::kMaximumNodes ||
@@ -7105,12 +7121,21 @@ namespace
                 *reinterpret_cast<const int32_t*>(region + 0x04);
             const uint32_t permutationAddress =
                 *reinterpret_cast<const uint32_t*>(region + 0x08);
+            const int32_t permutationIndex =
+                PhysicalContactCollisionPermutationIndex(
+                    permutationCount, allowFirstPermutation);
             // Every official held-weapon collision tag has one permutation.
-            // A custom ambiguous tag falls back to its authored physics shape.
-            if (permutationCount != 1 || !permutationAddress)
+            // A target vehicle may instead have default/medium/major/destroyed
+            // variants. Its first entry is the authored default, and the live
+            // native object query must later confirm the exact proposed point
+            // before that multi-permutation surface can create contact.
+            if (permutationIndex < 0 || !permutationAddress)
                 return false;
+            if (permutationCount > 1 && selectedFirstOfMany)
+                *selectedFirstOfMany = true;
             const auto* permutation = tagBase +
-                static_cast<size_t>(permutationAddress) * 4;
+                static_cast<size_t>(permutationAddress) * 4 +
+                static_cast<size_t>(permutationIndex) * 0x28;
             const int32_t bspCount =
                 *reinterpret_cast<const int32_t*>(permutation + 0x04);
             const uint32_t bspAddress =
@@ -7327,6 +7352,86 @@ namespace
             returned = false;
         }
         return returned;
+    }
+
+    bool Halo3ContactDetailedTargetShape(
+        int32_t objectHandle, const unsigned char* objectData,
+        PhysicalContactCompoundShape& output,
+        PhysicalContactTransform& outputTransform,
+        bool& requiresNativeConfirmation)
+    {
+        output = {};
+        outputTransform = {};
+        requiresNativeConfirmation = false;
+        if (!objectData ||
+            g_halo3NodeBinding.load(std::memory_order_acquire) !=
+                static_cast<uint8_t>(Halo3NodeBindingState::Installed) ||
+            !g_halo3InterpolatedNodes)
+            return false;
+        Halo3Matrix4x3* matrices = nullptr;
+        int matrixCount = 0;
+        if (!Halo3ContactReadInterpolatedNodes(
+                objectHandle, &matrices, &matrixCount) || !matrices ||
+            matrixCount <= 0 ||
+            matrixCount > static_cast<int>(
+                Halo3VisibleWeaponPosePublication::kMaximumNodes) ||
+            !Halo3MatrixValid(matrices[0]))
+            return false;
+        std::array<BoneMatrix,
+                   Halo3VisibleWeaponPosePublication::kMaximumNodes>
+            visibleNodes{};
+        std::memcpy(visibleNodes.data(), matrices,
+                    static_cast<size_t>(matrixCount) * sizeof(BoneMatrix));
+        outputTransform = Halo3ContactTransformFromBone(visibleNodes[0]);
+        if (!PhysicalContactTransformFinite(outputTransform))
+            return false;
+        return Halo3ContactVisibleCollisionShape(
+            objectData, visibleNodes.data(),
+            static_cast<uint32_t>(matrixCount), outputTransform, output,
+            true, &requiresNativeConfirmation);
+    }
+
+    bool Halo3ContactNativeSurfaceConfirms(
+        uint64_t collisionFlags, int32_t targetHandle,
+        int32_t unitHandle, int32_t weaponHandle,
+        PhysicalContactVec3 proposedPoint,
+        PhysicalContactVec3 proposedNormal, float worldUnitsPerMeter)
+    {
+        if (!g_halo3CollisionTestVector || targetHandle == -1 ||
+            !PhysicalContactFinite(proposedPoint) ||
+            !PhysicalContactFinite(proposedNormal) ||
+            !std::isfinite(worldUnitsPerMeter) ||
+            worldUnitsPerMeter <= 0.0f)
+            return false;
+        const PhysicalContactVec3 normal = PhysicalContactNormalize(
+            proposedNormal, {});
+        if (PhysicalContactLengthSquared(normal) <= 1.0e-12f)
+            return false;
+        constexpr float kHalfRayMeters = 0.03f;
+        const float halfRay = kHalfRayMeters * worldUnitsPerMeter;
+        const PhysicalContactVec3 start =
+            proposedPoint + normal * halfRay;
+        const PhysicalContactVec3 vector = normal * (-2.0f * halfRay);
+        const float point[3] = {start.x, start.y, start.z};
+        const float delta[3] = {vector.x, vector.y, vector.z};
+        Halo3CollisionResult native{};
+        native.type = -1;
+        native.fraction = 1.0f;
+        if (!g_halo3CollisionTestVector(
+                collisionFlags, false, point, delta, unitHandle,
+                weaponHandle, -1, &native) || native.type != 4 ||
+            native.objectHandle != targetHandle ||
+            !std::isfinite(native.fraction) || native.fraction < 0.0f ||
+            native.fraction > 1.0f)
+            return false;
+        const PhysicalContactVec3 nativePoint{
+            native.point[0], native.point[1], native.point[2]};
+        if (!PhysicalContactFinite(nativePoint))
+            return false;
+        const float errorMeters = PhysicalContactLength(
+            nativePoint - proposedPoint) / worldUnitsPerMeter;
+        return std::isfinite(errorMeters) &&
+            errorMeters <= kHalfRayMeters + 0.005f;
     }
 
     // Official H3EK player bipeds use ten node-bound rigid bodies. Their pill
@@ -9661,6 +9766,13 @@ namespace
             0xFFFFFFFFu, std::memory_order_relaxed);
         g_halo3ContactNativeSamples.store(0, std::memory_order_relaxed);
         g_halo3ContactWeaponShapeSource.store(0, std::memory_order_relaxed);
+        g_halo3ContactTargetShapeSource.store(0, std::memory_order_relaxed);
+        g_halo3ContactDetailedTargetCandidates.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactFallbackTargetCandidates.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactTargetConfirmationRejects.store(
+            0, std::memory_order_relaxed);
         Halo3PublishWeaponWallOffset({}, 0);
         g_halo3ContactWallSetbackMeters.store(0.0f,
                                                std::memory_order_relaxed);
@@ -11027,9 +11139,17 @@ namespace
                 collisionShape = Halo3ContactVisibleCollisionShape(
                     weaponData, visibleNodes.data(), visibleNodeCount,
                     paletteRoot, weaponShape);
-            const bool physicsFallback = !collisionShape &&
+            if (collisionShape &&
+                weaponShape.childCount >
+                    kHalo3ContactMaximumHeldWeaponChildren)
+                collisionShape = false;
+            bool physicsFallback = !collisionShape &&
                 PhysicalContactTransformFinite(weaponTransform) &&
                 Halo3ContactShapeForObject(weaponData, weaponShape);
+            if (physicsFallback &&
+                weaponShape.childCount >
+                    kHalo3ContactMaximumHeldWeaponChildren)
+                physicsFallback = false;
             g_halo3ContactWeaponShapeSource.store(
                 collisionShape ? 1u : (physicsFallback ? 2u : 0u),
                 std::memory_order_relaxed);
@@ -11663,7 +11783,11 @@ namespace
             PhysicalContactConvexShape closestWeaponShape{};
             PhysicalContactConvexShape closestTargetShape{};
             PhysicalContactTransform closestTargetTransform{};
+            uint32_t closestTargetShapeSource = 0;
             uint32_t eligibleObjects = 0;
+            uint32_t detailedTargetCandidates = 0;
+            uint32_t fallbackTargetCandidates = 0;
+            uint32_t targetConfirmationRejects = 0;
             // collision_flags: structure; object_flags: object-query enable
             // plus every object type. H3EK's generated +0x14060 initializer
             // proves the type mask is 0x7FFE, while the official assertion in
@@ -11807,10 +11931,46 @@ namespace
                 PhysicalContactConvexShape authoredWeaponShape{};
                 PhysicalContactConvexShape authoredTargetShape{};
                 PhysicalContactTransform authoredTargetTransform{};
-                bool usesAnimatedBody = false;
+                uint32_t targetShapeSource = 0;
                 PhysicalContactCompoundShape targetShape{};
-                if (Halo3ContactShapeForObject(data, targetShape))
+                bool requiresNativeConfirmation = false;
+                const bool hasDetailedTarget =
+                    Halo3ContactDetailedTargetShape(
+                        handle, data, targetShape,
+                        authoredTargetTransform,
+                        requiresNativeConfirmation);
+                if (hasDetailedTarget)
                 {
+                    ++detailedTargetCandidates;
+                    targetShapeSource = 1;
+                    authored = PhysicalContactSweepCompound(
+                        weaponShape, previousWeaponTransform, weaponTransform,
+                        targetShape, authoredTargetTransform);
+                    // A damaged vehicle can select a different collision-model
+                    // permutation. The detailed default shape may narrow the
+                    // broad phase, but only Halo's live native surface can
+                    // approve the resulting exact target point.
+                    if (authored.hit && requiresNativeConfirmation &&
+                        !Halo3ContactNativeSurfaceConfirms(
+                            contactCollisionFlags, handle, unitHandle,
+                            weaponHandle, authored.targetPoint,
+                            authored.normal, worldScale))
+                    {
+                        ++targetConfirmationRejects;
+                        authored = {};
+                    }
+                    if (authored.hit)
+                    {
+                        authoredWeaponShape =
+                            weaponShape.children[authored.weaponChild];
+                        authoredTargetShape =
+                            targetShape.children[authored.targetChild];
+                    }
+                }
+                else if (Halo3ContactShapeForObject(data, targetShape))
+                {
+                    ++fallbackTargetCandidates;
+                    targetShapeSource = 2;
                     authoredTargetTransform =
                         Halo3ContactObjectTransform(data);
                     if (!PhysicalContactTransformFinite(
@@ -11829,17 +11989,18 @@ namespace
                 }
                 else
                 {
+                    targetShapeSource = 3;
                     Halo3ContactAnimatedBodyHit animated{};
                     if (!Halo3ContactSweepAnimatedBodies(
                             handle, data, weaponShape,
                             previousWeaponTransform, weaponTransform,
                             animated))
                         continue;
+                    ++fallbackTargetCandidates;
                     authored = animated.hit;
                     authoredWeaponShape = animated.weaponShape;
                     authoredTargetShape = animated.targetShape;
                     authoredTargetTransform = animated.targetTransform;
-                    usesAnimatedBody = authored.hit;
                 }
                 ++eligibleObjects;
                 if (!authored.hit ||
@@ -11860,7 +12021,8 @@ namespace
                 closestWeaponShape = authoredWeaponShape;
                 closestTargetShape = authoredTargetShape;
                 closestTargetTransform = authoredTargetTransform;
-                if (usesAnimatedBody)
+                closestTargetShapeSource = targetShapeSource;
+                if (targetShapeSource == 3)
                     g_halo3ContactAnimatedBodyHits.fetch_add(
                         1, std::memory_order_relaxed);
                 // Convex Havok shapes carry the material on their primitive,
@@ -11873,6 +12035,14 @@ namespace
             g_halo3ContactPreviousPoseMs = visiblePoseMs;
             g_halo3ContactEligibleObjects.store(
                 eligibleObjects, std::memory_order_relaxed);
+            g_halo3ContactTargetShapeSource.store(
+                closestTargetShapeSource, std::memory_order_relaxed);
+            g_halo3ContactDetailedTargetCandidates.store(
+                detailedTargetCandidates, std::memory_order_relaxed);
+            g_halo3ContactFallbackTargetCandidates.store(
+                fallbackTargetCandidates, std::memory_order_relaxed);
+            g_halo3ContactTargetConfirmationRejects.store(
+                targetConfirmationRejects, std::memory_order_relaxed);
             g_halo3ContactSweeps.fetch_add(1, std::memory_order_relaxed);
             g_halo3ContactStage.store(
                 static_cast<uint32_t>(Halo3PhysicalContactStage::Sweeping),
@@ -12370,7 +12540,8 @@ namespace
             "unsupportedShapes=%llu rejectNormal=%llu rejectPose=%llu "
             "rejectVelocity=%llu rejectMeleeSpike=%llu "
             "candidate=0x%08X candidateNormal=%u "
-            "shapeSource=%u nativeSamples=%u "
+            "shapeSource=%u targetShapeSource=%u targetDetailed=%u "
+            "targetFallback=%u targetConfirmRejects=%u nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
             "wallVertices=%u wallPlanes=%u",
@@ -12450,6 +12621,14 @@ namespace
             g_halo3ContactCandidateNormalReliable.load(
                 std::memory_order_relaxed),
             g_halo3ContactWeaponShapeSource.load(
+                std::memory_order_relaxed),
+            g_halo3ContactTargetShapeSource.load(
+                std::memory_order_relaxed),
+            g_halo3ContactDetailedTargetCandidates.load(
+                std::memory_order_relaxed),
+            g_halo3ContactFallbackTargetCandidates.load(
+                std::memory_order_relaxed),
+            g_halo3ContactTargetConfirmationRejects.load(
                 std::memory_order_relaxed),
             g_halo3ContactNativeSamples.load(std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactWallBlocks.load(
