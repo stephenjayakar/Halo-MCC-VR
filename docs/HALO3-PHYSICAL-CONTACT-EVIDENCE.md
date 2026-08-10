@@ -954,29 +954,23 @@ null-driver rewrite. One later navigation attempt selected Escalation Slayer
 instead of Forge and was rejected before Halo 3 gameplay validation. That menu
 failure is not product evidence.
 
-## First-person root composition
+## Rejected first-person root composition
 
-The first visible replay exposed a space error that the earlier synthetic rig
-could not see. Halo's final weapon palette is still local to the first-person
-root passed to `FpVisiblePaletteHook`; the renderer consumes
-`root * destination[node]`. The existing arm and marker paths already prove
-this relation by composing a palette node with `root` before comparing it with
-a world-space controller target, then applying the inverse root before writing
-back to the local palette.
-
-Candidate `77011f0` moved the drawn weapon with exact authored support-point
-placement while intentionally retaining the old contact publication. The
-commanded surface gap swept from -6 cm to +2 cm, but the contact-side measured
-gap ranged from `1.7213 m` to `4.5880 m`; 5,470 current-pose intersection tests
-reported overlap and only two reported separation. This is direct evidence
-that publishing `destination[node]` without the first-person root does not put
-contact in the space Halo draws. The preserved failed probe is
-`out/debug-openxr/20260810-121701541Z-visible-weapon-gap.log` (SHA-256
+The exact visible replay proved that the contact publication and the pixels do
+not yet share one verified transform. Candidate `77011f0` commanded a visible
+surface gap from about -6 cm to +2 cm while retaining the local-palette contact
+publication. Contact instead measured `1.7213 m` to `4.5880 m`; its preserved
+log is `out/debug-openxr/20260810-121701541Z-visible-weapon-gap.log` (SHA-256
 `BDBC587117559E3985994F9D20CFFA735AE1D329FB4307954049862ADB5F8AA0`).
-The failed placement behavior was disabled by `616acfd` before the product
-alternative. The alternative publishes `root * destination[node]` for every
-bounded weapon node and converts debug replay world transforms back through
-`inverse(root)` before writing the local render palette.
+
+Candidate `e9975ee` then tried publishing `root * destination[node]` and
+converting the debug replay back through `inverse(root)`. Its installed exact
+Forge replay also failed: the measured gap expanded to `-88.4815 m` through
+`0.9001 m` rather than the commanded centimetre range. The preserved log is
+`out/debug-openxr/20260810-122923424Z-visible-weapon-gap.log` (SHA-256
+`6BDC11C62C913F3DB7420018C02B746B0EBE9ADEC90EC281C297A567EAC96494`).
+Candidate `e9975ee` is therefore rejected; its behavior is disabled before any
+alternative. Neither failed transform is evidence of pixel/contact alignment.
 
 ## Exact-contact haptics
 
