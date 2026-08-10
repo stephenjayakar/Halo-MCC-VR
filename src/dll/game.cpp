@@ -960,9 +960,34 @@ namespace
     };
     Halo3ContactVisibleReplayPublication g_halo3ContactVisibleReplayRoot;
     std::atomic<bool> g_halo3ContactDebugVisibleReplay{false};
+    std::atomic<bool> g_halo3ContactDebugVisibleExactReplay{false};
     std::atomic<uint64_t> g_halo3ContactDebugVisiblePalettes{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleExactPublishes{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleExactPalettes{0};
+    std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectOverlaps{0};
+    std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectSeparations{0};
+    std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
+    std::atomic<float> g_halo3ContactDebugVisibleMaximumGap{-FLT_MAX};
+
+    void Halo3ContactDebugExpandGapRange(float gapMeters)
+    {
+        if (!std::isfinite(gapMeters))
+            return;
+        float minimum = g_halo3ContactDebugVisibleMinimumGap.load(
+            std::memory_order_relaxed);
+        while (gapMeters < minimum &&
+               !g_halo3ContactDebugVisibleMinimumGap.compare_exchange_weak(
+                   minimum, gapMeters, std::memory_order_relaxed))
+        {
+        }
+        float maximum = g_halo3ContactDebugVisibleMaximumGap.load(
+            std::memory_order_relaxed);
+        while (gapMeters > maximum &&
+               !g_halo3ContactDebugVisibleMaximumGap.compare_exchange_weak(
+                   maximum, gapMeters, std::memory_order_relaxed))
+        {
+        }
+    }
 
     void Halo3PublishContactVisibleReplayRoot(
         const BoneMatrix& root, uint64_t sampleMs, bool exact)
@@ -10782,24 +10807,21 @@ namespace
             g_halo3ContactDebugWall.load(std::memory_order_acquire);
         const bool debugVisibleReplay =
             g_halo3ContactDebugVisibleReplay.load(std::memory_order_acquire);
+        const bool debugExactVisibleReplay =
+            g_halo3ContactDebugVisibleExactReplay.load(
+                std::memory_order_acquire);
         // Candidate 51a3e6a did not produce an exact kind-10 hit in Construct.
         // Keep its bounded placement helper for evidence, but do not run the
         // failed diagnostic behavior while the proven scoop selector can
         // reject unsuitable map objects and continue.
         constexpr bool kEnableHalo3DebugBoundsSweepPlacement = false;
-        // Candidate 9d8fe23 applied the exact-support placement to the drawn
-        // palette, but the contact solver still reported 35-40 cm of overlap
-        // instead of the commanded <=2 cm. Keep the bounded probe dormant
-        // until the intervening transform is measured independently.
-        constexpr bool kEnableHalo3ExactVisibleReplayPlacement = false;
         constexpr float kDebugCycleMs = 1000.0f;
         constexpr float kDebugAngularRate = 6.28318530718f;
         const float debugPhase = static_cast<float>(nowMs % 1000u) *
             (kDebugAngularRate / kDebugCycleMs);
         const float debugMaxSpeed = debugMelee
             ? 2.25f
-            : (debugVisibleReplay &&
-                       kEnableHalo3ExactVisibleReplayPlacement
+            : (debugExactVisibleReplay
                    ? 0.25f
                    : 0.90f);
         bool paused = true;
@@ -11581,8 +11603,7 @@ namespace
                 Halo3ResetPhysicalContact();
                 return;
             }
-            if (debugRig && debugVisibleReplay && debugAimData &&
-                kEnableHalo3ExactVisibleReplayPlacement)
+            if (debugRig && debugExactVisibleReplay && debugAimData)
             {
                 PhysicalContactCompoundShape debugTargetShape{};
                 PhysicalContactTransform debugTargetTransform{};
@@ -11611,6 +11632,17 @@ namespace
                         Halo3ContactCompoundSupport(
                             debugTargetShape, debugTargetTransform,
                             forward * -1.0f);
+                    const float currentGapMeters = PhysicalContactDot(
+                        weaponFront - targetNear, forward) / worldScale;
+                    Halo3ContactDebugExpandGapRange(currentGapMeters);
+                    const PhysicalContactCompoundHit direct =
+                        PhysicalContactSweepCompound(
+                            weaponShape, weaponTransform, weaponTransform,
+                            debugTargetShape, debugTargetTransform);
+                    (direct.hit
+                         ? g_halo3ContactDebugVisibleDirectOverlaps
+                         : g_halo3ContactDebugVisibleDirectSeparations)
+                        .fetch_add(1, std::memory_order_relaxed);
                     const float amplitude =
                         worldScale * debugMaxSpeed / kDebugAngularRate;
                     const float displacement =
@@ -13265,7 +13297,9 @@ namespace
                     std::memory_order_acquire))
             {
                 LOG("H3 physical contact DEBUG VISIBLE REPLAY: "
-                    "palettes=%llu exactPublishes=%llu exactPalettes=%llu",
+                    "palettes=%llu exactPublishes=%llu exactPalettes=%llu "
+                    "directOverlaps=%llu directSeparations=%llu "
+                    "gapRange=(%.4f %.4f)m",
                     (unsigned long long)
                         g_halo3ContactDebugVisiblePalettes.load(
                             std::memory_order_relaxed),
@@ -13274,7 +13308,17 @@ namespace
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleExactPalettes.load(
-                            std::memory_order_relaxed));
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugVisibleDirectOverlaps.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugVisibleDirectSeparations.load(
+                            std::memory_order_relaxed),
+                    g_halo3ContactDebugVisibleMinimumGap.load(
+                        std::memory_order_relaxed),
+                    g_halo3ContactDebugVisibleMaximumGap.load(
+                        std::memory_order_relaxed));
             }
             const uint64_t census =
                 g_halo3ContactDebugObjectCensus.load(
@@ -17995,6 +18039,16 @@ namespace
             contactDebugVisibleLength > 0 &&
             contactDebugVisibleLength < std::size(contactDebugVisibleValue) &&
             contactDebugVisibleValue[0] != L'0';
+        wchar_t contactDebugVisibleExactValue[8]{};
+        const DWORD contactDebugVisibleExactLength = GetEnvironmentVariableW(
+            L"HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT",
+            contactDebugVisibleExactValue,
+            static_cast<DWORD>(std::size(contactDebugVisibleExactValue)));
+        const bool contactDebugVisibleExactEnabled =
+            contactDebugVisibleExactLength > 0 &&
+            contactDebugVisibleExactLength <
+                std::size(contactDebugVisibleExactValue) &&
+            contactDebugVisibleExactValue[0] != L'0';
         wchar_t contactDebugKindValue[8]{};
         const DWORD contactDebugKindLength = GetEnvironmentVariableW(
             L"HALOMCCVR_H3_CONTACT_DEBUG_KIND", contactDebugKindValue,
@@ -18021,7 +18075,7 @@ namespace
         const bool contactDebugRigEnabled =
             contactDebugEnabled || contactDebugMeleeEnabled ||
             contactDebugScoopEnabled || contactDebugWallEnabled ||
-            contactDebugVisibleEnabled;
+            contactDebugVisibleEnabled || contactDebugVisibleExactEnabled;
         g_halo3ContactDebugRig.store(
             contactDebugRigEnabled, std::memory_order_release);
         g_halo3ContactDebugMelee.store(
@@ -18031,13 +18085,24 @@ namespace
         g_halo3ContactDebugWall.store(
             contactDebugWallEnabled, std::memory_order_release);
         g_halo3ContactDebugVisibleReplay.store(
-            contactDebugVisibleEnabled, std::memory_order_release);
+            contactDebugVisibleEnabled || contactDebugVisibleExactEnabled,
+            std::memory_order_release);
+        g_halo3ContactDebugVisibleExactReplay.store(
+            contactDebugVisibleExactEnabled, std::memory_order_release);
         g_halo3ContactDebugVisiblePalettes.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleExactPublishes.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleExactPalettes.store(
             0, std::memory_order_release);
+        g_halo3ContactDebugVisibleDirectOverlaps.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugVisibleDirectSeparations.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugVisibleMinimumGap.store(
+            FLT_MAX, std::memory_order_release);
+        g_halo3ContactDebugVisibleMaximumGap.store(
+            -FLT_MAX, std::memory_order_release);
         g_halo3ContactDebugWallType.store(-1, std::memory_order_release);
         g_halo3ContactDebugWallHandle.store(-1, std::memory_order_release);
         g_halo3ContactDebugStructureWallValidated.store(

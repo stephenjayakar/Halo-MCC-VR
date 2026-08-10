@@ -6,6 +6,7 @@ param(
         'crate-nudge',
         'vehicle-nudge',
         'visible-weapon-nudge',
+        'visible-weapon-gap',
         'wall',
         'melee')]
     [string]$Test = 'equipment-scoop',
@@ -227,6 +228,11 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
                 $Text -match
                     'H3 physical contact DEBUG VISIBLE REPLAY: palettes=([1-9][0-9]*)'
         }
+        'visible-weapon-gap' {
+            return (Test-DetailedTargetGeometrySeen $Text) -and
+                $Text -match
+                    'H3 physical contact DEBUG VISIBLE REPLAY:.*exactPalettes=([1-9][0-9]*).*directOverlaps=([1-9][0-9]*).*directSeparations=([1-9][0-9]*).*gapRange=\((-0\.0[4-9][0-9]*|-0\.[1-9][0-9]*) (0\.0[0-9]*|0\.[1-9][0-9]*)\)m'
+        }
         'wall' {
             return $Text -match
                 'H3 physical contact DEBUG WALL:.*structureValidated=1.*objectValidated=1'
@@ -282,7 +288,8 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_KIND',
     'HALOMCCVR_H3_CONTACT_DEBUG_MELEE',
     'HALOMCCVR_H3_CONTACT_DEBUG_WALL',
-    'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE'
+    'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE',
+    'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT'
 )
 $savedEnvironment = @{}
 foreach ($name in $debugVariables) {
@@ -339,6 +346,10 @@ try {
         }
         'visible-weapon-nudge' {
             $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE = '1'
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '2'
+        }
+        'visible-weapon-gap' {
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT = '1'
             $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '2'
         }
         'wall' {
@@ -508,7 +519,7 @@ public static class HaloMccVrContactInput {
 
     $text = Get-NewLogText $runtimeLog $startedUtc
     [IO.File]::WriteAllText($savedLogPath, $text)
-    if ($Test -eq 'visible-weapon-nudge') {
+    if ($Test -in @('visible-weapon-nudge', 'visible-weapon-gap')) {
         Save-DesktopScreenshot $successScreenshot
     }
     $passed = $true
