@@ -6255,6 +6255,7 @@ namespace
     // rejected path for evidence while the continuous response replaces it.
     constexpr bool kEnableHalo3FirstContactVelocityKick = false;
     PhysicalContactDebounce g_halo3ContactDebounce;
+    PhysicalContactReleaseLatch g_halo3ContactReleaseLatch;
     uint64_t g_halo3ContactLastMotionSerial = 0;
     uint64_t g_halo3ContactLastMeleeMs = 0;
     int32_t g_halo3ContactWeaponHandle = -1;
@@ -6289,6 +6290,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactSweeps{0};
     std::atomic<uint64_t> g_halo3ContactHits{0};
     std::atomic<uint64_t> g_halo3ContactImpulses{0};
+    std::atomic<uint64_t> g_halo3ContactReleases{0};
     std::atomic<uint64_t> g_halo3ContactMelees{0};
     std::atomic<float> g_halo3ContactWeaponSpeed{0.0f};
     std::atomic<float> g_halo3ContactRelativeSpeed{0.0f};
@@ -9636,6 +9638,7 @@ namespace
     void Halo3ResetPhysicalContact()
     {
         g_halo3ContactDebounce.Reset();
+        g_halo3ContactReleaseLatch.Reset();
         g_halo3ContactLastMotionSerial = 0;
         g_halo3ContactWeaponHandle = -1;
         g_halo3ContactPreviousPoseValid = false;
@@ -9673,10 +9676,12 @@ namespace
     void __fastcall Halo3ObjectsUpdateHook()
     {
         bool deferredWorldVelocity = false;
+        bool deferredPointImpulse = false;
         bool deferredHadMelee = false;
         uint32_t deferredGeneration = 0;
         int32_t deferredHandle = -1;
         float deferredVelocity[3]{};
+        float deferredPoint[3]{};
         float deferredHaptic = 0.0f;
         const uint64_t serial =
             g_halo3ContactCommandSerial.load(std::memory_order_acquire);
@@ -9760,21 +9765,20 @@ namespace
                             {
                                 if (wantsPointImpulse)
                                 {
-                                    unsigned char* targetData = nullptr;
-                                    void* component = nullptr;
-                                    int32_t bodyIndex = -1;
-                                    float targetMass = 0.0f;
-                                    if (Halo3ContactObjectDataForHandle(
-                                            handle, targetData) &&
-                                        Halo3ContactMassForObjectData(
-                                            targetData, component, bodyIndex,
-                                            targetMass))
-                                    {
-                                        g_halo3ComponentApplyPointImpulse(
-                                            component, bodyIndex, point,
-                                            velocity);
-                                        impulseApplied = true;
-                                    }
+                                    // A pre-update point impulse is erased by
+                                    // the same floor-loaded object update that
+                                    // erased the old velocity response. Resolve
+                                    // the body again and apply after Halo ends
+                                    // this tick's object transaction.
+                                    deferredPointImpulse = true;
+                                    deferredGeneration = generation;
+                                    deferredHandle = handle;
+                                    deferredHaptic = contactHaptic;
+                                    memcpy(deferredVelocity, velocity,
+                                           sizeof(deferredVelocity));
+                                    memcpy(deferredPoint, point,
+                                           sizeof(deferredPoint));
+                                    impulseApplied = true;
                                 }
                                 else
                                 {
@@ -9815,7 +9819,8 @@ namespace
                         }
                         else
                         {
-                            if (!deferredWorldVelocity)
+                            if (!deferredWorldVelocity &&
+                                !deferredPointImpulse)
                             {
                                 g_halo3ContactCommandStatus.store(
                                     2, std::memory_order_relaxed);
@@ -10152,6 +10157,74 @@ namespace
                             Halo3PhysicalContactStage::Impulse),
                         std::memory_order_relaxed);
                 }
+                if (std::isfinite(deferredHaptic) &&
+                    deferredHaptic > 0.0f)
+                    VR_RequestRightContactHaptic(deferredHaptic);
+            }
+        }
+        if (deferredPointImpulse)
+        {
+            bool deferredValid = deferredGeneration &&
+                deferredGeneration == g_halo3RuntimeGeneration.load(
+                    std::memory_order_acquire) &&
+                deferredHandle != -1 && g_halo3ComponentApplyPointImpulse &&
+                std::isfinite(deferredVelocity[0]) &&
+                std::isfinite(deferredVelocity[1]) &&
+                std::isfinite(deferredVelocity[2]) &&
+                std::isfinite(deferredPoint[0]) &&
+                std::isfinite(deferredPoint[1]) &&
+                std::isfinite(deferredPoint[2]);
+            bool deferredFaulted = false;
+            unsigned char* targetData = nullptr;
+            void* component = nullptr;
+            int32_t bodyIndex = -1;
+            float targetMass = 0.0f;
+            uint8_t motionType = 0;
+            deferredValid = deferredValid &&
+                Halo3ContactObjectDataForHandle(
+                    deferredHandle, targetData) &&
+                Halo3ContactMassForObjectData(
+                    targetData, component, bodyIndex, targetMass,
+                    &motionType) &&
+                PhysicalContactMotionTypeIsDynamic(motionType);
+            if (deferredValid)
+            {
+                __try
+                {
+                    g_halo3ComponentApplyPointImpulse(
+                        component, bodyIndex, deferredPoint,
+                        deferredVelocity);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    deferredFaulted = true;
+                }
+            }
+            if (!deferredValid || deferredFaulted)
+            {
+                g_halo3ContactCommandStatus.store(
+                    deferredFaulted ? 3u : 4u,
+                    std::memory_order_relaxed);
+                if (deferredFaulted)
+                {
+                    g_halo3ContactStage.store(
+                        static_cast<uint32_t>(
+                            Halo3PhysicalContactStage::Faulted),
+                        std::memory_order_relaxed);
+                    g_halo3PhysicalContactBindings.store(
+                        false, std::memory_order_release);
+                }
+            }
+            else
+            {
+                g_halo3ContactCommandStatus.store(
+                    2, std::memory_order_relaxed);
+                g_halo3ContactImpulses.fetch_add(
+                    1, std::memory_order_relaxed);
+                g_halo3ContactStage.store(
+                    static_cast<uint32_t>(
+                        Halo3PhysicalContactStage::Impulse),
+                    std::memory_order_relaxed);
                 if (std::isfinite(deferredHaptic) &&
                     deferredHaptic > 0.0f)
                     VR_RequestRightContactHaptic(deferredHaptic);
@@ -11738,6 +11811,50 @@ namespace
             g_halo3ContactDebounce.BeginSample();
             if (!closest.hit)
             {
+                const PhysicalContactReleaseCommand release =
+                    g_halo3ContactReleaseLatch.TakeIfSeparated(-1, nowMs);
+                if (release.apply)
+                {
+                    g_halo3ContactCommandHandle.store(
+                        release.handle, std::memory_order_relaxed);
+                    g_halo3ContactCommandUnitHandle.store(
+                        unitHandle, std::memory_order_relaxed);
+                    g_halo3ContactCommandWeaponHandle.store(
+                        weaponHandle, std::memory_order_relaxed);
+                    g_halo3ContactCommandHaptic.store(
+                        0.0f, std::memory_order_relaxed);
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        g_halo3ContactCommandVelocity[axis].store(
+                            axis == 0 ? release.worldImpulse.x
+                                      : (axis == 1
+                                             ? release.worldImpulse.y
+                                             : release.worldImpulse.z),
+                            std::memory_order_relaxed);
+                        g_halo3ContactCommandPoint[axis].store(
+                            axis == 0 ? release.point.x
+                                      : (axis == 1 ? release.point.y
+                                                   : release.point.z),
+                            std::memory_order_relaxed);
+                    }
+                    g_halo3ContactCommandFlags.store(
+                        kHalo3ContactCommandPointImpulse,
+                        std::memory_order_relaxed);
+                    g_halo3ContactCommandGeneration.store(
+                        generation, std::memory_order_relaxed);
+                    g_halo3ContactCommandSampleMs.store(
+                        nowMs, std::memory_order_relaxed);
+                    const uint64_t releaseSerial =
+                        g_halo3ContactCommandSerial.load(
+                            std::memory_order_relaxed) + 1;
+                    g_halo3ContactCommandStatus.store(
+                        1, std::memory_order_relaxed);
+                    g_halo3ContactReleases.fetch_add(
+                        1, std::memory_order_relaxed);
+                    g_halo3ContactCommandSerial.store(
+                        releaseSerial ? releaseSerial : 1,
+                        std::memory_order_release);
+                }
                 g_halo3ContactDebounce.EndSample();
                 return;
             }
@@ -11930,6 +12047,8 @@ namespace
             const PhysicalContactAction action = PhysicalContactClassify(
                 relativeSpeed, weaponSpeed,
                 g_config.physical_weapon_melee_speed);
+            if (action == PhysicalContactAction::ImpulseAndMelee)
+                g_halo3ContactReleaseLatch.Reset();
             if (weaponSpeed >= g_config.physical_weapon_melee_speed &&
                 !PhysicalContactMeleeSpeedPlausible(weaponSpeed))
             {
@@ -12063,7 +12182,18 @@ namespace
                     PhysicalContactTargetDeltaVelocity(
                         constraintImpulse, targetMass);
                 if (PhysicalContactFinite(worldVelocity))
+                {
                     commandFlags |= kHalo3ContactCommandImpulse;
+                    if (action == PhysicalContactAction::ImpulseOnly)
+                    {
+                        const PhysicalContactVec3 releaseImpulse =
+                            PhysicalContactReleaseImpulse(
+                                constraintImpulse, worldScale);
+                        g_halo3ContactReleaseLatch.Arm(
+                            closestHandle, closest.point,
+                            releaseImpulse, nowMs);
+                    }
+                }
             }
 
             if (requestMelee)
@@ -12160,7 +12290,7 @@ namespace
             ? kStageNames[stage] : "invalid";
         LOG("H3 physical contact status: stage=%s eligible=%u "
             "weaponSpeed=%.2fm/s relativeSpeed=%.2fm/s "
-            "sweeps=%llu hits=%llu impulses=%llu melees=%llu "
+            "sweeps=%llu hits=%llu impulses=%llu releases=%llu melees=%llu "
             "command=%llu applied=%llu commandStatus=%u meleeStatus=%u "
             "damage=0x%08X response=0x%08X rawMaterial=%u material=%u "
             "target=0x%08X kind=%u weaponMass=%.3f targetMass=%.3f "
@@ -12186,6 +12316,8 @@ namespace
             (unsigned long long)g_halo3ContactHits.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactImpulses.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactReleases.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactMelees.load(
                 std::memory_order_relaxed),
