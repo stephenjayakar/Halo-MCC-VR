@@ -788,6 +788,52 @@ immediate re-contact, and invalid time. Runtime telemetry reports
 `bodyGapHolds`; no mass, impulse, geometry, or melee rule changes in this
 candidate.
 
+Source `b154546` packages behavior commit `8e56ca1`. Its Steam candidate DLL is
+SHA-256 `2666B42D9326132AB31452B319BC01EFF5CD812E0C0FFB5EE412687CE212D54A`.
+A live High Ground dynamic-body transaction exercised the new path with
+`bodyGapHolds=1`, real `464.835 kg` mass, detailed target geometry, bounded
+impulse/release, and zero melee.
+
+Visible menu capture then found a defect in the old unattended validator: its
+three Right presses in the game-type carousel selected Escalation Slayer. The
+validator now explicitly enters the map carousel, selects Construct 1/27, High
+Ground 4/27, or Valhalla 11/27, confirms the built-in Forge type, accepts Forge
+options, and enters Start. Earlier fixed-sequence results are not Forge
+evidence. With the corrected route, the installed `b154546` DLL passed:
+
+- Valhalla exact structure and placed-object wall transaction:
+  `out/debug-openxr/20260810-231804734Z-wall.log`, SHA-256
+  `349D7A3B6B7D54FAD3F99564021A954031706D4D0A134156B40EA1D19069F063`.
+- High Ground Mongoose dynamic nudge/release with detailed geometry and zero
+  melee: `out/debug-openxr/20260810-232213720Z-vehicle-nudge.log`, SHA-256
+  `EF57C56BC594BF79CA2A798983336E36CB6E8F482148F1F136B33A498BA3655A`.
+- Construct loose-weapon authored-geometry scoop/constraint with zero melee:
+  `out/debug-openxr/20260810-232902359Z-weapon-scoop.log`, SHA-256
+  `A58A143E1095EA289192F075220DB03D34166B788DB1328983F8E1E2FCEB746F`.
+- Construct native fast melee response and haptics:
+  `out/debug-openxr/20260810-233057407Z-melee.log`, SHA-256
+  `E4B09EE63E5D8072FC44242F69F8075AE0934BE8943ED6AC2AC24D695F670728`.
+- Construct exact visible-palette overlap/separation replay:
+  `out/debug-openxr/20260810-233244424Z-visible-weapon-gap.log`, SHA-256
+  `0C420AFABA1EAED27160B5025B3F5011C6B21511843E640DA9998642E4719694`.
+
+All are SteamVR null-driver binding/regression evidence, not headset
+acceptance.
+
+The official H3EK reflection definitions additionally prove
+`scenario_decorator_block` is `0x84` bytes, its decorator count is at `+0x34`,
+palette/set blocks are at `+0x6C/+0x78`, each scenario set is `0x10` bytes,
+and each authored placement is `0x18` bytes. Riverworld contains 25,971
+placements, 25,963 in the current BSP, three palettes, and 11 sets. A corrected
+read-only retail probe applied the engine's exact packed-address conversion
+without the earlier invalid high-bit cutoff and read 11,243 live tag roots in
+visibly confirmed Valhalla Forge. No root retained that exact scenario
+decorator block. The preserved report is
+`out/h3ek-valhalla/retail-valhalla-scenario-decorator-probe.json` (SHA-256
+`66A145F754C26D4EAB7104BEB39721237021D353185BF77CC5FF365AD281CDFA`). This closes
+the ordinary inline-tag route: render-only rock coverage still requires the
+streamed decorator resource or renderer-prepared instance data.
+
 Installed diagnostic candidate `cba2427` closed the automated wall-evidence
 gap in Halo 3 Construct Forge. The null-runtime transaction forced the exact
 visible Assault Rifle collision solid `0.12-0.16 m` through discovered native

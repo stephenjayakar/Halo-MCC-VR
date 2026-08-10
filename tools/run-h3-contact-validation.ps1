@@ -20,6 +20,9 @@ param(
     [ValidateRange(0, 300)]
     [int]$PostPassHoldSeconds = 0,
 
+    [ValidateSet('Auto', 'Construct', 'HighGround', 'Valhalla')]
+    [string]$ForgeMap = 'Auto',
+
     [switch]$ExternalMenuControl
 )
 
@@ -479,48 +482,45 @@ public static class HaloMccVrContactInput {
         Send-Enter
         Start-Sleep -Seconds 3
 
-        if ($Test -eq 'vehicle-nudge') {
-            # From the default Construct setup, select High Ground.
-            Send-Down
-            Send-Right
-            Send-Right
-            Send-Right
-            Send-Enter
-            Start-Sleep -Seconds 3
-            Send-Right
-            Send-Right
-            Send-Right
-        }
-        else {
-            # Construct is already selected; move to the Start tile.
-            Send-Right
-            Send-Right
-            Send-Right
-        }
-        Start-Sleep -Seconds 2
-
-        # A relative mouse click was tried here, but MCC's DPI-virtualized
-        # window rectangle did not address the visible Launch Game panel
-        # reliably. Keep that bounded helper dormant.
-        $enableDpiDependentLaunchClick = $false
-        if ($enableDpiDependentLaunchClick) {
-            $null = [HaloMccVrContactInput]::ClickRelative(
-                $mcc.MainWindowHandle, 0.20, 0.78)
-        }
-        Send-Down
-        Send-Enter
-        Start-Sleep -Seconds 2
-        Send-Enter
-        Start-Sleep -Seconds 8
-        for ($attempt = 0; $attempt -lt 3; ++$attempt) {
-            $text = Get-NewLogText $runtimeLog $startedUtc
-            if ($text -match 'Title adapter: detected supported title Halo 3') {
-                break
+        $selectedMap = $ForgeMap
+        if ($selectedMap -eq 'Auto') {
+            $selectedMap = if ($Test -eq 'vehicle-nudge') {
+                'HighGround'
+            } else {
+                'Construct'
             }
-            Send-Down
-            Send-Enter
-            Start-Sleep -Seconds 8
         }
+        # Enter the map carousel explicitly. Construct is 1/27, High Ground
+        # is 4/27, and Valhalla is 11/27 in the visible Halo 3 list.
+        Send-Down
+        $mapRightCount = switch ($selectedMap) {
+            'Construct' { 0 }
+            'HighGround' { 3 }
+            'Valhalla' { 10 }
+        }
+        for ($mapIndex = 0; $mapIndex -lt $mapRightCount; ++$mapIndex) {
+            Send-Right
+        }
+        # Confirm the map. MCC advances into the game-type carousel with the
+        # built-in Forge type selected. Confirm it explicitly; moving Right
+        # here selects Escalation Slayer and caused earlier false Forge runs.
+        Send-Enter
+        Start-Sleep -Seconds 3
+        Send-Enter
+        Start-Sleep -Seconds 3
+        # The Forge confirmation advances to Options. Accept the defaults,
+        # move one tile right to Start, then confirm its bounded two focus
+        # states.
+        Send-Enter
+        Start-Sleep -Seconds 2
+        Send-Right
+        Start-Sleep -Seconds 2
+        Send-Enter
+        Start-Sleep -Seconds 2
+        # Depending on which top-row tile retained focus, the first Enter can
+        # open the Launch Game panel without activating its Start row.
+        Send-Enter
+        Start-Sleep -Seconds 10
     }
     else {
         Write-Host 'MCC is ready for visible external Forge menu control.'

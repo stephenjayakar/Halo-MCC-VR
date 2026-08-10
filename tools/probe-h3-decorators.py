@@ -252,10 +252,109 @@ def inspect_sbsp(reader: Reader, tag_base: int, datum: int, root: int) -> dict:
     return result
 
 
+def inspect_valhalla_scenario_decorators(
+        reader: Reader, tag_base: int, datum: int, root: int) -> list[dict]:
+    """Find only the exact H3EK-authored Valhalla scenario decorator block.
+
+    H3EK's scenario_decorator_block is 0x84 bytes. Its decorator count is at
+    +0x34, palette tag_block at +0x6C, and decorator-set tag_block at +0x78.
+    Each decorator_scenario_set_block element is 0x10 bytes: a four-byte tag
+    reference followed by a twelve-byte placements tag_block. Placements are
+    exact 0x18-byte global_decorator_placement records. These constants come
+    from the official H3EK reflection definitions and printed Riverworld tag,
+    not from a retail layout guess.
+    """
+    results = []
+    try:
+        header = reader.read(root, 0x800)
+    except OSError:
+        return results
+    for offset in range(0, len(header) - 12, 4):
+        count, address = struct.unpack_from("<II", header, offset)
+        if count != 1 or not address:
+            continue
+        try:
+            block = reader.read(tag_base + address * 4, 0x84)
+        except OSError:
+            continue
+        decorator_count, current_bsp_count = struct.unpack_from("<II", block, 0x34)
+        palette_count, palette_address = struct.unpack_from("<II", block, 0x6C)
+        set_count, set_address = struct.unpack_from("<II", block, 0x78)
+        if (decorator_count != 25971 or current_bsp_count != 25963 or
+                palette_count != 3 or not palette_address or
+                set_count != 11 or not set_address):
+            continue
+        vectors = struct.unpack_from("<12f", block, 0x3C)
+        if not all(math.isfinite(value) for value in vectors):
+            continue
+        result = {
+            "datum": f"0x{datum:08X}",
+            "root": f"0x{root:X}",
+            "root_block_offset": f"0x{offset:X}",
+            "decorator_count": decorator_count,
+            "current_bsp_count": current_bsp_count,
+            "palette_count": palette_count,
+            "set_count": set_count,
+            "placement_total": 0,
+            "placements_valid": False,
+            "sets": [],
+        }
+        try:
+            sets = reader.read(tag_base + set_address * 4, set_count * 0x10)
+        except OSError:
+            result["failure"] = "decorator set block is not readable"
+            results.append(result)
+            continue
+        placement_sets = []
+        total_placements = 0
+        valid = True
+        for set_index in range(set_count):
+            element = set_index * 0x10
+            decorator_set, placement_count, placement_address = struct.unpack_from(
+                "<III", sets, element)
+            if (decorator_set == 0xFFFFFFFF or not placement_count or
+                    placement_count > decorator_count or not placement_address):
+                valid = False
+                break
+            try:
+                samples = reader.read(
+                    tag_base + placement_address * 4,
+                    placement_count * 0x18)
+            except OSError:
+                valid = False
+                break
+            for placement_index in {0, placement_count - 1}:
+                position = struct.unpack_from("<3f", samples, placement_index * 0x18)
+                if (not all(math.isfinite(value) for value in position) or
+                        any(abs(value) > 10000.0 for value in position)):
+                    valid = False
+                    break
+            if not valid:
+                break
+            total_placements += placement_count
+            placement_sets.append({
+                "set_index": set_index,
+                "decorator_set_datum": f"0x{decorator_set:08X}",
+                "placement_count": placement_count,
+                "placement_address_dword": f"0x{placement_address:08X}",
+            })
+        result["placement_total"] = total_placements
+        result["sets"] = placement_sets
+        result["placements_valid"] = (
+            valid and total_placements in (decorator_count, current_bsp_count))
+        if not valid:
+            result["failure"] = "a placement block failed H3EK bounds checks"
+        elif not result["placements_valid"]:
+            result["failure"] = "placement total did not match either authored count"
+        results.append(result)
+    return results
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--wait-seconds", type=int, default=120)
     parser.add_argument("--output", type=pathlib.Path)
+    parser.add_argument("--scenario-only", action="store_true")
     args = parser.parse_args()
     deadline = time.monotonic() + args.wait_seconds
     pid = None
@@ -301,6 +400,7 @@ def main() -> int:
         visited_roots = set()
         readable_roots = 0
         roots_with_candidate_block_counts = 0
+        valhalla_scenario_decorators = []
         for index in range(0x10000):
             group, address = struct.unpack_from("<II", entries, index * 8)
             name = fourcc(group)
@@ -322,7 +422,11 @@ def main() -> int:
         # bounds/stride before treating it as a BSP candidate.
         for index in range(0x10000):
             _, address = struct.unpack_from("<II", entries, index * 8)
-            if not address or address == 0xFFFFFFFF or address >= 0x40000000:
+            # Retail's tag base is a reserved low sentinel. Valid packed
+            # dword addresses commonly exceed 0x40000000 before the proven
+            # `tag_base + address * 4` conversion reaches committed memory.
+            # The engine accessor applies no high-bit cutoff either.
+            if not address or address == 0xFFFFFFFF:
                 continue
             root = tag_base + address * 4
             if root in visited_roots:
@@ -339,9 +443,13 @@ def main() -> int:
             ):
                 continue
             roots_with_candidate_block_counts += 1
-            candidate = inspect_sbsp(reader, tag_base, index, root)
-            if candidate["cluster_candidates"]:
-                sbsp_entries.append(candidate)
+            if not args.scenario_only:
+                candidate = inspect_sbsp(reader, tag_base, index, root)
+                if candidate["cluster_candidates"]:
+                    sbsp_entries.append(candidate)
+            valhalla_scenario_decorators.extend(
+                inspect_valhalla_scenario_decorators(
+                    reader, tag_base, index, root))
         report = {
             "pid": pid,
             "module_base": f"0x{module_base:X}",
@@ -356,6 +464,7 @@ def main() -> int:
             "roots_with_candidate_block_counts": roots_with_candidate_block_counts,
             "group_definition_entries": group_definitions,
             "sbsp": sbsp_entries,
+            "valhalla_scenario_decorators": valhalla_scenario_decorators,
         }
         text = json.dumps(report, indent=2)
         print(text)
