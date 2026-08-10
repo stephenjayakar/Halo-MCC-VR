@@ -726,6 +726,30 @@ wall solver and receives no impulse or damage. Invalid, attached, player, and
 held-weapon handles do not constrain the weapon. `wallObjectPlanes` records
 accepted native type-4 planes. Headset acceptance remains pending.
 
+### Valhalla decorator rocks are render-only
+
+The headset report that one Valhalla rock did not block the held weapon has a
+separate authored-data explanation. The official H3EK archive contains
+`riverworld.scenario_decorators_resource` alongside the BSP and scenery
+resources. Its shared `rocks.decorator_set` references only the custom render
+model `levels\shared\decorators\rocks\rocks` and its bitmap. H3EK's own
+`print-tag-to-xml` output exposes four visual meshes (`%rock_a` through
+`%rock_d`), random rotation, normal alignment, and per-type scale ranges. The
+tag has no collision-model or physics-model reference. The embedded official
+tag definition independently lists only the render model, instance names,
+texture, render/light flags, fade/cull data, and decorator types.
+
+Therefore the native BSP/object collision query cannot report these visible
+decorator instances. Expanding BSP or scenery bounds would not be visual-contact
+evidence and would reintroduce the rejected broad-proxy behavior. Complete
+coverage requires a distinct immutable decorator transaction: resolve the
+loaded scenario's decorator resource outside hot callbacks, resolve each
+decorator set's render-model mesh and exact placed transform, build a bounded
+spatial index, and query those triangles from the existing authored weapon
+vertices. Until that data path is proven and uniquely bound in retail, native
+BSP, instanced structure, and object walls remain exact while render-only
+decorators remain a stated gap.
+
 Installed diagnostic candidate `cba2427` closed the automated wall-evidence
 gap in Halo 3 Construct Forge. The null-runtime transaction forced the exact
 visible Assault Rifle collision solid `0.12-0.16 m` through discovered native
