@@ -354,7 +354,10 @@ try {
             $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '10'
         }
         'vehicle-nudge' {
-            $env:HALOMCCVR_H3_CONTACT_DEBUG_SCOOP = '1'
+            # A vehicle is a heavy nudge target, not a scoop-and-toss target.
+            # The scoop path crosses the full vehicle and then rejects it for
+            # failing loose-prop lift thresholds, creating artificial 1 m
+            # constraint peaks and target-to-target teleports.
             $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '1'
         }
         'visible-weapon-nudge' {
