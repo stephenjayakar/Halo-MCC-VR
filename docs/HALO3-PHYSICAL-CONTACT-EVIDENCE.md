@@ -1002,6 +1002,15 @@ is `out/debug-openxr/20260810-152353775Z-visible-weapon-nudge.log` (SHA-256
 The hook already receives the authoritative slot number, so the next probe
 reads slot 0 directly rather than inferring it from an unrelated buffer.
 
+Probe `71dea3c` then read the prepared slot directly on every call. It reported
+`prepared=0xFB9319FB`, 44 slot matches, zero misses, and the same two final
+submissions. Low tag `0x19FB` is therefore the 37-node first-person body; it is
+not the 5-node held weapon (`0x0B2B`). The earlier interpretation of `+0x4C`
+as the held weapon's render identity is runtime-rejected. The passing broad
+visible replay is preserved at
+`out/debug-openxr/20260810-152904233Z-visible-weapon-nudge.log` (SHA-256
+`7C00335429F9C9F34E04F2208098EDEB047EC14405D252AEFC8584C98464BC16`).
+
 ## Rejected first-person root composition
 
 The exact visible replay proved that the contact publication and the pixels do

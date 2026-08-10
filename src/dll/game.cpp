@@ -1213,6 +1213,9 @@ namespace
     std::atomic<uint64_t> g_halo3ContactVisibleIdentitySubmissions{0};
     std::atomic<uint64_t> g_halo3ContactVisibleIdentityLast{0};
     std::atomic<uint64_t> g_halo3ContactVisibleIdentityKeys[8]{};
+    std::atomic<uint32_t> g_halo3ContactPreparedWeaponProbeTag{0xFFFFFFFFu};
+    std::atomic<uint32_t> g_halo3ContactPreparedWeaponProbeMatches{0};
+    std::atomic<uint64_t> g_halo3ContactPreparedWeaponProbeFields[8]{};
     // Candidate e91f451 treated the prepared slot's +0x4C datum as the tag
     // passed to the final visible-palette submission. The exact-visible replay
     // reached Halo 3 gameplay but published zero palettes. Keep that strict
@@ -5378,6 +5381,39 @@ namespace
                 mappedRoot < 64 &&
                 (g_halo3ContactPaletteWristDescendants &
                  (uint64_t{1} << mappedRoot)) != 0 && finite;
+            uint32_t unprobedTag = 0xFFFFFFFFu;
+            if (boundedWristSubmission &&
+                g_halo3ContactPreparedWeaponProbeTag.compare_exchange_strong(
+                    unprobedTag, tag, std::memory_order_relaxed))
+            {
+                // One diagnostic pass over the fixed prepared-slot header.
+                // The interpolated bones begin at +0x4A4, so this never reads
+                // their changing matrices. Record only dwords whose tag index
+                // equals the bounded final weapon submission; no logging,
+                // allocation, lock, or module/signature scan occurs here.
+                const unsigned char* prepared = FirstPersonWeaponSlot(0);
+                if (prepared)
+                {
+                    for (uint32_t offset = 0; offset < 0x4A4; offset += 4)
+                    {
+                        const uint32_t datum =
+                            *reinterpret_cast<const uint32_t*>(
+                                prepared + offset);
+                        if (static_cast<uint16_t>(datum) != tag)
+                            continue;
+                        const uint32_t match =
+                            g_halo3ContactPreparedWeaponProbeMatches.fetch_add(
+                                1, std::memory_order_relaxed);
+                        if (match < std::size(
+                                g_halo3ContactPreparedWeaponProbeFields))
+                        {
+                            g_halo3ContactPreparedWeaponProbeFields[match].store(
+                                (static_cast<uint64_t>(offset) << 32) | datum,
+                                std::memory_order_relaxed);
+                        }
+                    }
+                }
+            }
             const uint64_t identityKey =
                 (uint64_t{1} << 63) |
                 static_cast<uint64_t>(tag) |
@@ -10231,6 +10267,12 @@ namespace
         g_halo3ContactVisibleIdentityLast.store(0, std::memory_order_relaxed);
         for (auto& key : g_halo3ContactVisibleIdentityKeys)
             key.store(0, std::memory_order_relaxed);
+        g_halo3ContactPreparedWeaponProbeTag.store(
+            0xFFFFFFFFu, std::memory_order_relaxed);
+        g_halo3ContactPreparedWeaponProbeMatches.store(
+            0, std::memory_order_relaxed);
+        for (auto& field : g_halo3ContactPreparedWeaponProbeFields)
+            field.store(0, std::memory_order_relaxed);
         g_halo3ContactLastMotionSerial = 0;
         g_halo3ContactWeaponHandle = -1;
         g_halo3ContactPreviousPoseValid = false;
@@ -13355,6 +13397,29 @@ namespace
             (unsigned long long)g_halo3ContactVisibleIdentityKeys[6].load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactVisibleIdentityKeys[7].load(
+                std::memory_order_relaxed));
+        LOG("H3 physical contact prepared weapon probe: tag=0x%04X "
+            "matches=%u fields=[%016llX %016llX %016llX %016llX "
+            "%016llX %016llX %016llX %016llX]",
+            g_halo3ContactPreparedWeaponProbeTag.load(
+                std::memory_order_relaxed),
+            g_halo3ContactPreparedWeaponProbeMatches.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactPreparedWeaponProbeFields[0].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactPreparedWeaponProbeFields[1].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactPreparedWeaponProbeFields[2].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactPreparedWeaponProbeFields[3].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactPreparedWeaponProbeFields[4].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactPreparedWeaponProbeFields[5].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactPreparedWeaponProbeFields[6].load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactPreparedWeaponProbeFields[7].load(
                 std::memory_order_relaxed));
         if (g_halo3ContactDebugRig.load(std::memory_order_acquire))
         {
