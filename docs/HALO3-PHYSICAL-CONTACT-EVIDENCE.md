@@ -667,6 +667,21 @@ wall solver and receives no impulse or damage. Invalid, attached, player, and
 held-weapon handles do not constrain the weapon. `wallObjectPlanes` records
 accepted native type-4 planes. Headset acceptance remains pending.
 
+Installed diagnostic candidate `cba2427` closed the automated wall-evidence
+gap in Halo 3 Construct Forge. The null-runtime transaction forced the exact
+visible Assault Rifle collision solid `0.12-0.16 m` through discovered native
+surfaces. `shapeSource=1` supplied all 20 authored vertices. Native structure
+type 1 and fixed Forge object `0xE2D10062` both produced rigid wall constraints;
+the run reached 1,987 successful wall solves, 39,420 current camera rays,
+12,925 continuous-motion rays, and 7,675 accepted static-object planes without
+a crash. Both `structureValidated` and `objectValidated` latched true. The
+preserved log is
+`out/debug-openxr/cba2427-forge-native-wall-success.log` (SHA-256
+`184879EFDE37AE84E580CB51ED8B2E4598319DE0DED6236937E1808C990F4BE9`).
+This proves the production solver covers authored BSP/instanced structure and
+fixed/keyframed Forge scenery with the same visible weapon geometry. Headset
+feel and pixel alignment remain acceptance items.
+
 Animated bipeds do not expose one root convex. The earlier branch traced three
 bounds-derived motion points and two non-temporal spine lines through Halo 3's
 native object query. Fractions from those different lines were not comparable.
