@@ -819,6 +819,16 @@ vertex block, 13 finite vertices, and 100 a complete ten-part walk. This probe
 exists only to replace the failed implementation with runtime evidence instead
 of another guessed fix.
 
+The installed `683d9cc` probe stopped at stage 2 for every selected High Ground
+vehicle: the interpolated-node provider returned false and supplied no bank.
+The preserved run is
+`out/debug-openxr/20260810-070234987Z-vehicle-nudge.log` (SHA-256
+`6BF60AF90C114D835B33038D7BD27788C90FA891EA8C09B92DA5CD558E076300`).
+This is not a provider fault. Halo's already verified visible-object renderer
+uses the raw object node bank when the same provider reports false. The next
+read-only probe copies that exact bounded fallback and reports `nodeSource=2`
+for raw or `1` for interpolated before it continues through the collision tag.
+
 The bounded synthetic Release benchmark uses 70 vertices per target child,
 matching the largest official Mongoose child. Four held-weapon children against
 all ten Mongoose children measured `0.0655 ms` p95. The full four-by-sixteen

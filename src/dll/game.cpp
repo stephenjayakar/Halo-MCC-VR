@@ -6370,6 +6370,7 @@ namespace
     std::atomic<float> g_halo3ContactDebugPeakReleaseSpeed{0.0f};
     std::atomic<int32_t> g_halo3ContactDebugGeometryHandle{-1};
     std::atomic<uint32_t> g_halo3ContactDebugGeometryStage{0};
+    std::atomic<uint32_t> g_halo3ContactDebugGeometryNodeSource{0};
     std::atomic<uint32_t> g_halo3ContactDebugGeometryNodes{0};
     std::atomic<uint32_t> g_halo3ContactDebugGeometryRegions{0};
     std::atomic<uint32_t> g_halo3ContactDebugGeometryRegion{0};
@@ -7338,6 +7339,87 @@ namespace
         return returned;
     }
 
+    // Copy the same visible-node bank used by Halo's object renderer. The
+    // native provider may legitimately report no interpolated bank for an
+    // object; in that case the renderer reads the object's bounded raw bank.
+    // A provider fault is different and rejects this optional contact sample.
+    bool Halo3ContactCopyVisibleNodes(
+        int32_t objectHandle, const unsigned char* objectData,
+        std::array<Halo3Matrix4x3,
+                   Halo3VisibleWeaponPosePublication::kMaximumNodes>& output,
+        int& outputCount, bool& outputInterpolated)
+    {
+        output = {};
+        outputCount = 0;
+        outputInterpolated = false;
+        if (!objectData ||
+            g_halo3NodeBinding.load(std::memory_order_acquire) !=
+                static_cast<uint8_t>(Halo3NodeBindingState::Installed) ||
+            !g_halo3InterpolatedNodes)
+            return false;
+
+        Halo3Matrix4x3* matrices = nullptr;
+        int matrixCount = 0;
+        bool providerReturned = false;
+        bool providerFaulted = false;
+        __try
+        {
+            providerReturned = g_halo3InterpolatedNodes(
+                objectHandle, &matrices, &matrixCount) != 0;
+            if (providerReturned)
+            {
+                if (!matrices || matrixCount <= 0 ||
+                    matrixCount > static_cast<int>(output.size()))
+                    return false;
+                std::memcpy(output.data(), matrices,
+                            static_cast<size_t>(matrixCount) *
+                                sizeof(Halo3Matrix4x3));
+                outputInterpolated = true;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            providerFaulted = true;
+        }
+        if (providerFaulted)
+            return false;
+
+        if (!providerReturned)
+        {
+            bool rawOk = false;
+            __try
+            {
+                const int nodeByteSize =
+                    *reinterpret_cast<const int16_t*>(
+                        objectData + kHalo3ObjectNodeByteSizeOffset);
+                matrixCount = nodeByteSize > 0
+                    ? Halo3MatrixCountFromByteSize(
+                          static_cast<uint16_t>(nodeByteSize),
+                          static_cast<int>(output.size()))
+                    : 0;
+                const int matrixOffset =
+                    *reinterpret_cast<const int16_t*>(
+                        objectData + kHalo3ObjectNodeMatricesOffset);
+                if (matrixCount > 0 && matrixOffset != 0)
+                {
+                    std::memcpy(output.data(), objectData + matrixOffset,
+                                static_cast<size_t>(matrixCount) *
+                                    sizeof(Halo3Matrix4x3));
+                    rawOk = true;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                rawOk = false;
+            }
+            if (!rawOk)
+                return false;
+        }
+
+        outputCount = matrixCount;
+        return Halo3MatrixValid(output[0]);
+    }
+
     // Debug-rig-only, read-only walk of a movable target's authored collision
     // model. It records the first failed validation stage without changing the
     // contact decision. This keeps discovery out of retail play and keeps all
@@ -7348,6 +7430,8 @@ namespace
         g_halo3ContactDebugGeometryHandle.store(
             objectHandle, std::memory_order_relaxed);
         g_halo3ContactDebugGeometryStage.store(1, std::memory_order_relaxed);
+        g_halo3ContactDebugGeometryNodeSource.store(
+            0, std::memory_order_relaxed);
         g_halo3ContactDebugGeometryNodes.store(0, std::memory_order_relaxed);
         g_halo3ContactDebugGeometryRegions.store(0, std::memory_order_relaxed);
         g_halo3ContactDebugGeometryRegion.store(0, std::memory_order_relaxed);
@@ -7364,12 +7448,18 @@ namespace
             !g_halo3InterpolatedNodes)
             return;
 
-        Halo3Matrix4x3* matrices = nullptr;
+        std::array<Halo3Matrix4x3,
+                   Halo3VisibleWeaponPosePublication::kMaximumNodes>
+            matrices{};
         int matrixCount = 0;
+        bool interpolated = false;
         g_halo3ContactDebugGeometryStage.store(2, std::memory_order_relaxed);
-        if (!Halo3ContactReadInterpolatedNodes(
-                objectHandle, &matrices, &matrixCount) || !matrices)
+        if (!Halo3ContactCopyVisibleNodes(
+                objectHandle, objectData, matrices, matrixCount,
+                interpolated))
             return;
+        g_halo3ContactDebugGeometryNodeSource.store(
+            interpolated ? 1u : 2u, std::memory_order_relaxed);
         g_halo3ContactDebugGeometryNodes.store(
             matrixCount > 0 ? static_cast<uint32_t>(matrixCount) : 0,
             std::memory_order_relaxed);
@@ -12700,13 +12790,15 @@ namespace
                     std::memory_order_relaxed) != -1)
             {
                 LOG("H3 physical contact DEBUG TARGET GEOMETRY: "
-                    "handle=0x%08X stage=%u nodes=%u regions=%u "
+                    "handle=0x%08X stage=%u nodeSource=%u nodes=%u regions=%u "
                     "region=%u permutations=%u children=%u node=%d "
                     "vertices=%d",
                     static_cast<uint32_t>(
                         g_halo3ContactDebugGeometryHandle.load(
                             std::memory_order_relaxed)),
                     g_halo3ContactDebugGeometryStage.load(
+                        std::memory_order_relaxed),
+                    g_halo3ContactDebugGeometryNodeSource.load(
                         std::memory_order_relaxed),
                     g_halo3ContactDebugGeometryNodes.load(
                         std::memory_order_relaxed),
@@ -17491,6 +17583,8 @@ namespace
         g_halo3ContactDebugGeometryHandle.store(
             -1, std::memory_order_release);
         g_halo3ContactDebugGeometryStage.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugGeometryNodeSource.store(
             0, std::memory_order_release);
         g_halo3ContactDebugGeometryNodes.store(
             0, std::memory_order_release);
