@@ -758,6 +758,82 @@ for props. The earliest body hit supplies the exact weapon child, target child,
 surface point, normal, and temporal fraction. A provider fault rejects only
 that contact sample. It does not change VR ownership or the node binding.
 
+### Post-separation velocity restoration
+
+The first headset result for sustained response proved that physical contact
+could move objects and that native melee worked in Campaign, but gentle nudging
+was usually lost and touching a vehicle could still cause a destructive event.
+Four bounded experiments identified the missing behavior. A tiny native wake
+impulse before or after the bound velocity setter did not survive separation.
+Replaying an absolute setter write after separation published and applied the
+commands but left the target nearly stationary. Reusing the last solver impulse
+was unstable because that correction shrinks while a target follows the weapon.
+Using only the last relative velocity had the same fault. Those experiments are
+preserved by commits `b60e971`, `ccbdbc6`, `dab6f9e`, and `70cba51`; each failed
+behavior was reverted before the next candidate.
+
+Installed product commit `2909e2d` instead retains the tracked weapon velocity
+at the exact contact point. After exact shape separation, the authoritative
+simulation hook waits until `objects_update` completes. It then rereads the
+target's real linear and angular velocity, recomputes target velocity at the
+same contact point, and sends only the missing velocity as one native point
+impulse. The command revalidates the datum generation, exact handle, dynamic
+motion type, finite values, bindings, and authored target mass. The native
+impulse is capped at `1 kg m/s`. Fast melee contact clears this slow-release
+latch, so it cannot receive both paths. Release adds no second haptic pulse.
+
+The installed DLL for these runs has SHA-256
+`0B105ACDD7303AAD9D658C43C72EA57DC492B0F6DC6F3E542614F6BBBB0D9919`.
+SteamVR's null driver exercised the following independent transactions against
+that exact product commit:
+
+- A dynamic kind-3 equipment body with authored mass `0.382 kg` used
+  `shapeSource=1`, lifted `0.254 m`, carried `0.310 m`, and retained
+  `0.068 m/s` after separation. It produced 55 release commands and no melee.
+  The preserved log is
+  `out/debug-openxr/20260810-034729106Z-equipment-scoop.log` (SHA-256
+  `D6373408E63278F1D50753E62D7719B9FEE3DBCB0B295E01DFAF73A3FB0EA08C`).
+- A dynamic kind-2 loose weapon with authored mass `2.764 kg` used the same
+  exact shape, lifted `0.048 m`, carried `0.351 m`, and retained `0.260 m/s`.
+  It produced 19 releases and no melee. The preserved log is
+  `out/debug-openxr/20260810-035042017Z-weapon-scoop.log` (SHA-256
+  `C9F684A7ABF68A7B49B71D53544A9FD00DE1FC7C9B0BEEC9CB32AC4151A34AB8`).
+- A dynamic kind-1 vehicle with authored mass `464.835 kg` received 33 slow
+  responses and five post-separation releases with zero melee. Its last native
+  release impulse was `0.34753 kg m/s`, below the fixed cap. The preserved log
+  is `out/debug-openxr/20260810-035810179Z-vehicle-nudge.log` (SHA-256
+  `92C66BF8E1692FF4D510EAD58E385CFB892A36264C300E7AEEA3B5086E6456E3`).
+  The original result file rejected this run because the two-second status
+  sample missed its one-frame haptic. Validator commit `f5dd5e5` replays the
+  log as valid by requiring durable applied-command counters, exact vehicle
+  type and shape, positive authored mass, zero melee, and a release impulse no
+  larger than `1 kg m/s`. Its negative checks reject an oversized impulse,
+  melee, a wrong object kind, or an unapplied command.
+- A dynamic kind-10 crate with authored mass `6.354 kg` accepted exact slow
+  contact at `0.20 m/s`, produced a bounded `0.07223 kg m/s` native impulse,
+  and produced no melee. The preserved log is
+  `out/debug-openxr/20260810-040602136Z-crate-nudge.log` (SHA-256
+  `55BC999E138F0EDD072C97F1DC3C0E5550D9C092FA31CFD7D3A9DD2E8CDE0AA5`).
+- The wall transaction forced the 20-vertex authored Assault Rifle solid
+  `0.158 m` into native structure and fixed-object surfaces. Both
+  `structureValidated` and `objectValidated` latched true. The preserved log is
+  `out/debug-openxr/20260810-040805553Z-wall.log` (SHA-256
+  `9E567529F86A0D2E19856E22B1A3BD2DF282E6F79E5B1CEA73BFA19D8BCC446A`).
+- The independent fast transaction crossed the threshold at `1.99 m/s`, used
+  `shapeSource=1`, and completed exactly one native melee response with
+  `meleeStatus=2`. The preserved log is
+  `out/debug-openxr/20260810-041342707Z-melee.log` (SHA-256
+  `D05943331BBEFEDEC6CA77ED47C0E51B740507451C5098F480E9BB004D180062`).
+
+These null-driver runs prove the installed command paths and their readback.
+They do not prove headset feel, natural hand tracking, visual alignment, or
+vehicle safety in ordinary play. Those remain headset acceptance items. The
+debug validator also now stops SteamVR before restoring the byte-exact user
+settings and leaves it stopped; commit `316dcf9` removed an intermittent late
+null-driver rewrite. One later navigation attempt selected Escalation Slayer
+instead of Forge and was rejected before Halo 3 gameplay validation. That menu
+failure is not product evidence.
+
 ## Exact-contact haptics
 
 Physical contact previously published no haptic event. The only feedback came
