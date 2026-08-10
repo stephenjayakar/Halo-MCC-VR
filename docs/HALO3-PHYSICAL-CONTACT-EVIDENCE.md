@@ -954,6 +954,30 @@ null-driver rewrite. One later navigation attempt selected Escalation Slayer
 instead of Forge and was rejected before Halo 3 gameplay validation. That menu
 failure is not product evidence.
 
+## First-person root composition
+
+The first visible replay exposed a space error that the earlier synthetic rig
+could not see. Halo's final weapon palette is still local to the first-person
+root passed to `FpVisiblePaletteHook`; the renderer consumes
+`root * destination[node]`. The existing arm and marker paths already prove
+this relation by composing a palette node with `root` before comparing it with
+a world-space controller target, then applying the inverse root before writing
+back to the local palette.
+
+Candidate `77011f0` moved the drawn weapon with exact authored support-point
+placement while intentionally retaining the old contact publication. The
+commanded surface gap swept from -6 cm to +2 cm, but the contact-side measured
+gap ranged from `1.7213 m` to `4.5880 m`; 5,470 current-pose intersection tests
+reported overlap and only two reported separation. This is direct evidence
+that publishing `destination[node]` without the first-person root does not put
+contact in the space Halo draws. The preserved failed probe is
+`out/debug-openxr/20260810-121701541Z-visible-weapon-gap.log` (SHA-256
+`BDBC587117559E3985994F9D20CFFA735AE1D329FB4307954049862ADB5F8AA0`).
+The failed placement behavior was disabled by `616acfd` before the product
+alternative. The alternative publishes `root * destination[node]` for every
+bounded weapon node and converts debug replay world transforms back through
+`inverse(root)` before writing the local render palette.
+
 ## Exact-contact haptics
 
 Physical contact previously published no haptic event. The only feedback came

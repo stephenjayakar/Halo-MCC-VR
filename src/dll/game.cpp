@@ -5269,15 +5269,16 @@ namespace
 
         g_origFpVisiblePalette(tag,root,destination,unused,selectedSource,boneMap);
 
-        // Contact must occupy the same space as the pixels. DesiredWristWorld
-        // is an IK target, not the matrix Halo ultimately skins with. Publish
-        // the small right-hand weapon render model only after the engine has
-        // composed the final palette. H3EK tags show fp_body is a large model,
+        // Contact must occupy the same space as the pixels. Halo's destination
+        // palette is still local to the first-person root passed to this hook;
+        // the renderer skins root * destination[node]. Publish that same world
+        // composition, not the local palette that caused the measured metre-
+        // scale contact offset. H3EK tags show fp_body is a large model,
         // while ordinary weapons, sword and hammer have <=16 nodes; requiring
         // node zero to map into the live right-wrist subtree rejects unrelated
         // small first-person submissions without a guessed tag identity.
-        if (source && source == g_halo3ContactPaletteSource && destination &&
-            boneMap && tag != 0xFFFFu)
+        if (source && source == g_halo3ContactPaletteSource && root &&
+            destination && boneMap && tag != 0xFFFFu)
         {
             int32_t renderNodeCount = 0;
             __try
@@ -5294,21 +5295,25 @@ namespace
             }
             const int32_t mappedRoot = renderNodeCount > 0
                 ? boneMap[0] : -1;
-            const BoneMatrix& visibleRoot = destination[0];
-            bool finite = std::isfinite(visibleRoot.scale) &&
-                std::fabs(visibleRoot.scale) > 0.001f;
-            for (float value : visibleRoot.rotation)
-                finite = finite && std::isfinite(value);
-            for (float value : visibleRoot.translation)
-                finite = finite && std::isfinite(value);
             if (renderNodeCount > 0 && renderNodeCount <= 16 &&
                 mappedRoot >= 0 &&
                 mappedRoot < g_halo3ContactPaletteBoneCount &&
                 mappedRoot < 64 &&
                 (g_halo3ContactPaletteWristDescendants &
-                 (uint64_t{1} << mappedRoot)) &&
-                finite)
+                 (uint64_t{1} << mappedRoot)))
             {
+                std::array<BoneMatrix,
+                           Halo3VisibleWeaponPosePublication::kMaximumNodes>
+                    worldNodes{};
+                bool worldFinite = true;
+                for (int node = 0;
+                     worldFinite && node < renderNodeCount; ++node)
+                {
+                    worldFinite = ComposeBoneMatrices(
+                        *root, destination[node], worldNodes[node]);
+                }
+                if (!worldFinite)
+                    return;
                 if (g_halo3ContactDebugVisibleReplay.load(
                         std::memory_order_acquire))
                 {
@@ -5320,19 +5325,25 @@ namespace
                             desiredRoot, desiredMs, desiredExact) &&
                         nowMs >= desiredMs && nowMs - desiredMs <= 100)
                     {
-                        BoneMatrix inverseRoot{}, delta{};
+                        BoneMatrix inverseWorldRoot{}, deltaWorld{},
+                            inverseFpRoot{};
                         std::array<BoneMatrix,
                                    Halo3VisibleWeaponPosePublication::
                                        kMaximumNodes> moved{};
                         bool movedFinite =
-                            InvertBoneMatrix(visibleRoot, inverseRoot) &&
+                            InvertBoneMatrix(
+                                worldNodes[0], inverseWorldRoot) &&
                             ComposeBoneMatrices(
-                                desiredRoot, inverseRoot, delta);
+                                desiredRoot, inverseWorldRoot, deltaWorld) &&
+                            InvertBoneMatrix(*root, inverseFpRoot);
                         for (int node = 0;
                              movedFinite && node < renderNodeCount; ++node)
                         {
+                            BoneMatrix movedWorld{};
                             movedFinite = ComposeBoneMatrices(
-                                delta, destination[node], moved[node]);
+                                deltaWorld, worldNodes[node], movedWorld) &&
+                                ComposeBoneMatrices(
+                                    inverseFpRoot, movedWorld, moved[node]);
                         }
                         if (movedFinite)
                         {
@@ -5344,9 +5355,20 @@ namespace
                             if (desiredExact)
                                 g_halo3ContactDebugVisibleExactPalettes.fetch_add(
                                     1, std::memory_order_relaxed);
+                            for (int node = 0;
+                                 movedFinite && node < renderNodeCount;
+                                 ++node)
+                            {
+                                movedFinite = ComposeBoneMatrices(
+                                    *root, destination[node],
+                                    worldNodes[node]);
+                            }
+                            if (!movedFinite)
+                                return;
                         }
                     }
                 }
+                const BoneMatrix& visibleRoot = worldNodes[0];
                 auto& published = g_halo3VisibleWeaponPose;
                 published.sequence.fetch_add(1, std::memory_order_acq_rel);
                 published.sampleMs.store(
@@ -5365,7 +5387,7 @@ namespace
                 for (int node = 0; node < renderNodeCount; ++node)
                 {
                     const float* values = reinterpret_cast<const float*>(
-                        &destination[node]);
+                        &worldNodes[node]);
                     for (int value = 0; value < 13; ++value)
                         published.nodes[node][value].store(
                             values[value], std::memory_order_relaxed);
@@ -10807,12 +10829,7 @@ namespace
             g_halo3ContactDebugWall.load(std::memory_order_acquire);
         const bool debugVisibleReplay =
             g_halo3ContactDebugVisibleReplay.load(std::memory_order_acquire);
-        // Candidate 77011f0 proved the palette is still local to Halo's
-        // first-person root. Keep its exact-placement probe dormant until the
-        // world-space publication fix is applied as a separate candidate.
-        constexpr bool kEnableHalo3ExactVisibleReplayPlacement = false;
         const bool debugExactVisibleReplay =
-            kEnableHalo3ExactVisibleReplayPlacement &&
             g_halo3ContactDebugVisibleExactReplay.load(
                 std::memory_order_acquire);
         // Candidate 51a3e6a did not produce an exact kind-10 hit in Construct.
