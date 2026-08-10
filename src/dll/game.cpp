@@ -6320,6 +6320,7 @@ namespace
     std::atomic<uint32_t> g_halo3ContactTargetKind{0xFFFFFFFFu};
     std::atomic<int32_t> g_halo3ContactCommandHandle{-1};
     std::atomic<float> g_halo3ContactCommandVelocity[3]{};
+    std::atomic<float> g_halo3ContactCommandWakeImpulse[3]{};
     std::atomic<uint32_t> g_halo3ContactCommandGeneration{0};
     std::atomic<uint64_t> g_halo3ContactCommandSampleMs{0};
     std::atomic<uint64_t> g_halo3ContactCommandSerial{0};
@@ -6328,6 +6329,7 @@ namespace
     constexpr uint32_t kHalo3ContactCommandImpulse = 1u << 0;
     constexpr uint32_t kHalo3ContactCommandMelee = 1u << 1;
     constexpr uint32_t kHalo3ContactCommandPointImpulse = 1u << 2;
+    constexpr uint32_t kHalo3ContactCommandWakeImpulse = 1u << 3;
     std::atomic<uint32_t> g_halo3ContactCommandFlags{0};
     std::atomic<int32_t> g_halo3ContactCommandUnitHandle{-1};
     std::atomic<int32_t> g_halo3ContactCommandWeaponHandle{-1};
@@ -9673,10 +9675,13 @@ namespace
     void __fastcall Halo3ObjectsUpdateHook()
     {
         bool deferredWorldVelocity = false;
+        bool deferredWakeImpulse = false;
         bool deferredHadMelee = false;
         uint32_t deferredGeneration = 0;
         int32_t deferredHandle = -1;
         float deferredVelocity[3]{};
+        float deferredPoint[3]{};
+        float deferredWake[3]{};
         float deferredHaptic = 0.0f;
         const uint64_t serial =
             g_halo3ContactCommandSerial.load(std::memory_order_acquire);
@@ -9704,12 +9709,16 @@ namespace
             const float contactHaptic =
                 g_halo3ContactCommandHaptic.load(std::memory_order_relaxed);
             float velocity[3]{};
+            float wakeImpulse[3]{};
             float point[3]{};
             float normal[3]{};
             for (int axis = 0; axis < 3; ++axis)
             {
                 velocity[axis] = g_halo3ContactCommandVelocity[axis].load(
                     std::memory_order_relaxed);
+                wakeImpulse[axis] =
+                    g_halo3ContactCommandWakeImpulse[axis].load(
+                        std::memory_order_relaxed);
                 point[axis] = g_halo3ContactCommandPoint[axis].load(
                     std::memory_order_relaxed);
                 normal[axis] = g_halo3ContactCommandNormal[axis].load(
@@ -9719,6 +9728,8 @@ namespace
                 (commandFlags & kHalo3ContactCommandImpulse) != 0;
             const bool wantsPointImpulse =
                 (commandFlags & kHalo3ContactCommandPointImpulse) != 0;
+            const bool wantsWakeImpulse =
+                (commandFlags & kHalo3ContactCommandWakeImpulse) != 0;
             const bool wantsMelee =
                 (commandFlags & kHalo3ContactCommandMelee) != 0;
             const bool commonValid = generation && generation ==
@@ -9726,6 +9737,7 @@ namespace
                 sampleMs && nowMs >= sampleMs && nowMs - sampleMs <= 500 &&
                 handle != -1 &&
                 (wantsImpulse || wantsPointImpulse || wantsMelee) &&
+                (!wantsWakeImpulse || wantsImpulse) &&
                 serial ==
                     g_halo3ContactCommandSerial.load(
                         std::memory_order_acquire);
@@ -9746,7 +9758,15 @@ namespace
                             std::isfinite(velocity[1]) &&
                             std::isfinite(velocity[2]) &&
                             ((!wantsPointImpulse &&
-                              g_halo3ObjectSetVelocities) ||
+                              g_halo3ObjectSetVelocities &&
+                              (!wantsWakeImpulse ||
+                               (std::isfinite(wakeImpulse[0]) &&
+                                std::isfinite(wakeImpulse[1]) &&
+                                std::isfinite(wakeImpulse[2]) &&
+                                std::isfinite(point[0]) &&
+                                std::isfinite(point[1]) &&
+                                std::isfinite(point[2]) &&
+                                g_halo3ComponentApplyPointImpulse))) ||
                              (wantsPointImpulse &&
                               std::isfinite(point[0]) &&
                               std::isfinite(point[1]) &&
@@ -9783,12 +9803,17 @@ namespace
                                     // target velocity. The pre-update call is
                                     // overwritten for a floor-loaded body.
                                     deferredWorldVelocity = true;
+                                    deferredWakeImpulse = wantsWakeImpulse;
                                     deferredHadMelee = wantsMelee;
                                     deferredGeneration = generation;
                                     deferredHandle = handle;
                                     deferredHaptic = contactHaptic;
                                     memcpy(deferredVelocity, velocity,
                                            sizeof(deferredVelocity));
+                                    memcpy(deferredPoint, point,
+                                           sizeof(deferredPoint));
+                                    memcpy(deferredWake, wakeImpulse,
+                                           sizeof(deferredWake));
                                     impulseApplied = true;
                                 }
                             }
@@ -10099,6 +10124,15 @@ namespace
                 std::isfinite(deferredVelocity[0]) &&
                 std::isfinite(deferredVelocity[1]) &&
                 std::isfinite(deferredVelocity[2]);
+            deferredValid = deferredValid &&
+                (!deferredWakeImpulse ||
+                 (g_halo3ComponentApplyPointImpulse &&
+                  std::isfinite(deferredPoint[0]) &&
+                  std::isfinite(deferredPoint[1]) &&
+                  std::isfinite(deferredPoint[2]) &&
+                  std::isfinite(deferredWake[0]) &&
+                  std::isfinite(deferredWake[1]) &&
+                  std::isfinite(deferredWake[2])));
             bool deferredFaulted = false;
             unsigned char* targetData = nullptr;
             void* component = nullptr;
@@ -10116,6 +10150,12 @@ namespace
             {
                 __try
                 {
+                    if (deferredWakeImpulse)
+                    {
+                        g_halo3ComponentApplyPointImpulse(
+                            component, bodyIndex, deferredPoint,
+                            deferredWake);
+                    }
                     g_halo3ObjectSetVelocities(
                         deferredHandle, deferredVelocity, nullptr);
                 }
@@ -11967,6 +12007,7 @@ namespace
                 contact->meleeArmed, nowMs, g_halo3ContactLastMeleeMs);
             uint32_t commandFlags = 0;
             PhysicalContactVec3 worldVelocity{};
+            PhysicalContactVec3 wakeImpulse{};
             if (debugRig &&
                 g_halo3ContactDebugTarget.load(
                     std::memory_order_relaxed) != closestHandle)
@@ -12062,8 +12103,14 @@ namespace
                 worldVelocity = worldVelocity +
                     PhysicalContactTargetDeltaVelocity(
                         constraintImpulse, targetMass);
-                if (PhysicalContactFinite(worldVelocity))
-                    commandFlags |= kHalo3ContactCommandImpulse;
+                wakeImpulse = PhysicalContactWakeImpulse(
+                    constraintImpulse, targetMass, worldScale);
+                if (PhysicalContactFinite(worldVelocity) &&
+                    PhysicalContactLengthSquared(wakeImpulse) > 0.0f)
+                {
+                    commandFlags |= kHalo3ContactCommandImpulse |
+                        kHalo3ContactCommandWakeImpulse;
+                }
             }
 
             if (requestMelee)
@@ -12097,6 +12144,11 @@ namespace
                         axis == 0 ? worldVelocity.x
                                   : (axis == 1 ? worldVelocity.y
                                                : worldVelocity.z),
+                        std::memory_order_relaxed);
+                    g_halo3ContactCommandWakeImpulse[axis].store(
+                        axis == 0 ? wakeImpulse.x
+                                  : (axis == 1 ? wakeImpulse.y
+                                               : wakeImpulse.z),
                         std::memory_order_relaxed);
                     g_halo3ContactCommandPoint[axis].store(
                         axis == 0 ? closest.point.x

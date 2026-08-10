@@ -9437,6 +9437,12 @@ int main()
             PhysicalContactTargetDeltaVelocity(sustainedCarry, 2.0f);
         const PhysicalContactVec3 invalidTargetDelta =
             PhysicalContactTargetDeltaVelocity(sustainedGentle, 0.0f);
+        const PhysicalContactVec3 gentleWake = PhysicalContactWakeImpulse(
+            sustainedGentle, 0.382f, 0.5f);
+        const PhysicalContactVec3 mongooseWake = PhysicalContactWakeImpulse(
+            sustainedMongoose, 500.0f, 0.5f);
+        const PhysicalContactVec3 invalidWake = PhysicalContactWakeImpulse(
+            sustainedGentle, 0.0f, 0.5f);
         Check(sustainedGentle.apply &&
               sustainedGentle.approachMetersPerSecond > 0.199f &&
               sustainedGentle.worldImpulse.x > 0.0f &&
@@ -9466,6 +9472,11 @@ int main()
               carryTargetDelta.x / 0.5f > 0.10f &&
               carryTargetDelta.z > 0.0f &&
               PhysicalContactLengthSquared(invalidTargetDelta) == 0.0f &&
+              gentleWake.x > 0.0f &&
+              gentleWake.x <= 0.382f * 0.001f * 0.5f + 1.0e-7f &&
+              mongooseWake.x > gentleWake.x * 1000.0f &&
+              mongooseWake.x <= 500.0f * 0.001f * 0.5f + 1.0e-6f &&
+              PhysicalContactLengthSquared(invalidWake) == 0.0f &&
               sustainedLift.apply && sustainedLift.worldImpulse.z > 0.0f &&
               sustainedLift.normalImpulseKilogramMetersPerSecond >=
                   2.0f * 9.80f / 60.0f &&
