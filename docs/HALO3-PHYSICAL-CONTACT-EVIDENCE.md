@@ -1056,6 +1056,54 @@ minimum. The universal `haptic_intensity` still scales both sources. Tracking,
 focus, menu, pause, and title-capability gates drop pending contact feedback.
 Headset amplitude acceptance remains pending.
 
+## Triangle-accurate collision replacement
+
+The per-BSP convex fallback is not precise enough to remain the contact
+authority. Reconstructing every official surface loop from the extracted H3EK
+XML proves that the Assault Rifle's one 20-vertex BSP occupies
+`0.000231689` cubic world units. The convex hull of those same authored
+vertices occupies `0.000271197`, 17.05 percent more volume. Across the 44
+available weapon collision tags, ordinary weapons are worse: the plasma pistol
+is 123.43 percent larger, the rocket launcher is 123.25 percent larger, and the
+plasma rifle is 117.18 percent larger under the old fallback. Vehicle/turret
+garbage can exceed 900 percent. This is direct evidence that one convex child
+per BSP creates contact in authored empty space.
+
+The Mongoose also disproves the assumption that its ten BSP children are
+individually convex. Its 502 authored triangles span ten default-permutation
+children. Weighted by triangle count, the old convex children add about 60.62
+percent extra volume. The hull child alone adds 152.31 percent; the bumper adds
+52.97 percent. This explains a contact being reported beside the visible
+vehicle even after its live animated collision model was loaded correctly.
+
+Official `guerilla.exe` field-definition tables close the loaded runtime
+layout instead of guessing it. Three collision-BSP field arrays list the same
+ordered blocks: `bsp3d nodes`, `planes`, `leaves`, `bsp2d references`,
+`bsp2d nodes`, `surfaces`, `edges`, and `vertices`. With the proven 12-byte
+loaded tag block and 0x64-byte BSP, the block offsets are respectively `+0x04`,
+`+0x10`, `+0x1C`, `+0x28`, `+0x34`, `+0x40`, `+0x4C`, and `+0x58`.
+The surface field table proves a 12-byte record whose first-edge index is the
+second 16-bit field. The edge table proves six consecutive 16-bit fields:
+start vertex, end vertex, forward edge, reverse edge, left surface, and right
+surface. No retail address or copied engine layout is used for discovery.
+
+The replacement walks each closed half-edge surface and triangulates it into
+fixed storage. The full official weapon census fits at most 222 triangles and
+three BSP groups. The complete Mongoose fits 502 triangles and ten groups. The
+runtime limits are 768 triangles and 32 groups; malformed, open, oversized, or
+non-finite geometry rejects only physical contact and falls back loudly through
+the existing `shapeSource` telemetry. A two-level group/triangle bounding-sphere
+test removes distant pairs before GJK. The actual surface decision uses the
+triangle mesh, a 2 mm continuous-sweep step, nine binary refinements, and a
+1.25 mm one-sided surface skin to prevent tunnelling between adjacent samples.
+The former convex child remains only for broad phase, support points, native
+material samples, and the already documented physics fallback.
+
+Pure tests cover fast thin-surface crossing, a grazing miss, separation between
+disjoint triangle groups, malformed group bounds, mesh-to-mesh contact, and
+mesh-to-convex fallback contact. Live Forge performance and headset acceptance
+remain pending for the replacement candidate.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

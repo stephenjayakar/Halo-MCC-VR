@@ -6570,10 +6570,14 @@ namespace
     std::atomic<uint32_t> g_halo3ContactNativeSamples{0};
     std::atomic<uint32_t> g_halo3ContactWeaponShapeSource{0};
     std::atomic<uint32_t> g_halo3ContactTargetShapeSource{0};
+    std::atomic<uint32_t> g_halo3ContactWeaponTriangles{0};
+    std::atomic<uint32_t> g_halo3ContactTargetTriangles{0};
     std::atomic<uint32_t> g_halo3ContactDetailedTargetCandidates{0};
     std::atomic<uint32_t> g_halo3ContactFallbackTargetCandidates{0};
     std::atomic<uint32_t> g_halo3ContactTargetConfirmationRejects{0};
     constexpr uint16_t kHalo3ContactMaximumHeldWeaponChildren = 4;
+    constexpr float kHalo3ContactTriangleStepMeters = 0.002f;
+    constexpr float kHalo3ContactTriangleSurfaceRadiusMeters = 0.00125f;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<uint32_t> g_halo3ContactTargetMotionType{0};
@@ -7334,9 +7338,12 @@ namespace
         const PhysicalContactTransform& visibleRoot,
         PhysicalContactCompoundShape& output,
         bool allowFirstPermutation = false,
-        bool* selectedFirstOfMany = nullptr)
+        bool* selectedFirstOfMany = nullptr,
+        PhysicalContactTriangleMesh* triangleMesh = nullptr)
     {
         output = {};
+        if (triangleMesh)
+            *triangleMesh = {};
         if (selectedFirstOfMany)
             *selectedFirstOfMany = false;
         if (!objectData || !visibleNodes || !visibleNodeCount ||
@@ -7447,9 +7454,181 @@ namespace
                 }
                 if (!PhysicalContactConvexValid(child))
                     return false;
+                if (triangleMesh)
+                {
+                    // Official H3EK field tables prove the collision-BSP
+                    // block order and loaded offsets: surfaces +0x40, edges
+                    // +0x4C, vertices +0x58. Surface and edge records are both
+                    // 0x0C bytes. Walk each authored half-edge loop and fan it
+                    // into fixed triangles. The convex child above remains a
+                    // bounds/support helper only; exact contact uses this mesh.
+                    const int32_t surfaceCount =
+                        *reinterpret_cast<const int32_t*>(bsp + 0x40);
+                    const uint32_t surfaceAddress =
+                        *reinterpret_cast<const uint32_t*>(bsp + 0x44);
+                    const int32_t edgeCount =
+                        *reinterpret_cast<const int32_t*>(bsp + 0x4C);
+                    const uint32_t edgeAddress =
+                        *reinterpret_cast<const uint32_t*>(bsp + 0x50);
+                    if (surfaceCount <= 0 || surfaceCount > 256 ||
+                        edgeCount <= 0 || edgeCount > 512 ||
+                        !surfaceAddress || !edgeAddress ||
+                        triangleMesh->groupCount >=
+                            PhysicalContactTriangleMesh::kMaximumGroups)
+                        return false;
+                    const auto* surfaces = tagBase +
+                        static_cast<size_t>(surfaceAddress) * 4;
+                    const auto* edges = tagBase +
+                        static_cast<size_t>(edgeAddress) * 4;
+                    PhysicalContactTriangleGroup& group =
+                        triangleMesh->groups[triangleMesh->groupCount++];
+                    group.firstTriangle = triangleMesh->triangleCount;
+                    PhysicalContactVec3 groupMinimum{
+                        FLT_MAX, FLT_MAX, FLT_MAX};
+                    PhysicalContactVec3 groupMaximum{
+                        -FLT_MAX, -FLT_MAX, -FLT_MAX};
+                    for (uint16_t vertex = 0;
+                         vertex < child.vertexCount; ++vertex)
+                    {
+                        groupMinimum.x = std::min(
+                            groupMinimum.x, child.vertices[vertex].x);
+                        groupMinimum.y = std::min(
+                            groupMinimum.y, child.vertices[vertex].y);
+                        groupMinimum.z = std::min(
+                            groupMinimum.z, child.vertices[vertex].z);
+                        groupMaximum.x = std::max(
+                            groupMaximum.x, child.vertices[vertex].x);
+                        groupMaximum.y = std::max(
+                            groupMaximum.y, child.vertices[vertex].y);
+                        groupMaximum.z = std::max(
+                            groupMaximum.z, child.vertices[vertex].z);
+                    }
+                    group.centre = (groupMinimum + groupMaximum) * 0.5f;
+                    group.halfExtents =
+                        (groupMaximum - groupMinimum) * 0.5f;
+                    for (uint16_t vertex = 0;
+                         vertex < child.vertexCount; ++vertex)
+                        group.boundRadius = std::max(
+                            group.boundRadius,
+                            PhysicalContactLength(
+                                child.vertices[vertex] - group.centre));
+
+                    std::array<uint16_t, 256> polygon{};
+                    for (int32_t surfaceIndex = 0;
+                         surfaceIndex < surfaceCount; ++surfaceIndex)
+                    {
+                        const auto* surface = surfaces +
+                            static_cast<size_t>(surfaceIndex) * 0x0C;
+                        const int16_t firstEdge =
+                            *reinterpret_cast<const int16_t*>(surface + 0x02);
+                        if (firstEdge < 0 || firstEdge >= edgeCount)
+                            return false;
+                        int16_t currentEdge = firstEdge;
+                        uint16_t polygonCount = 0;
+                        bool closed = false;
+                        for (int32_t step = 0; step <= edgeCount; ++step)
+                        {
+                            if (currentEdge < 0 || currentEdge >= edgeCount ||
+                                polygonCount >= polygon.size())
+                                return false;
+                            const auto* edge = edges +
+                                static_cast<size_t>(currentEdge) * 0x0C;
+                            const int16_t startVertex =
+                                *reinterpret_cast<const int16_t*>(edge + 0x00);
+                            const int16_t endVertex =
+                                *reinterpret_cast<const int16_t*>(edge + 0x02);
+                            const int16_t forwardEdge =
+                                *reinterpret_cast<const int16_t*>(edge + 0x04);
+                            const int16_t reverseEdge =
+                                *reinterpret_cast<const int16_t*>(edge + 0x06);
+                            const int16_t leftSurface =
+                                *reinterpret_cast<const int16_t*>(edge + 0x08);
+                            const int16_t rightSurface =
+                                *reinterpret_cast<const int16_t*>(edge + 0x0A);
+                            int16_t polygonVertex = -1;
+                            int16_t nextEdge = -1;
+                            if (leftSurface == surfaceIndex)
+                            {
+                                polygonVertex = startVertex;
+                                nextEdge = forwardEdge;
+                            }
+                            else if (rightSurface == surfaceIndex)
+                            {
+                                polygonVertex = endVertex;
+                                nextEdge = reverseEdge;
+                            }
+                            else
+                                return false;
+                            if (polygonVertex < 0 ||
+                                polygonVertex >= vertexCount)
+                                return false;
+                            polygon[polygonCount++] =
+                                static_cast<uint16_t>(polygonVertex);
+                            if (nextEdge == firstEdge)
+                            {
+                                closed = true;
+                                break;
+                            }
+                            currentEdge = nextEdge;
+                        }
+                        if (!closed || polygonCount < 3 ||
+                            static_cast<size_t>(triangleMesh->triangleCount) +
+                                    polygonCount - 2 >
+                                PhysicalContactTriangleMesh::kMaximumTriangles)
+                            return false;
+                        for (uint16_t vertex = 1;
+                             vertex + 1 < polygonCount; ++vertex)
+                        {
+                            PhysicalContactTriangle& triangle =
+                                triangleMesh->triangles[
+                                    triangleMesh->triangleCount++];
+                            triangle.vertices = {
+                                child.vertices[polygon[0]],
+                                child.vertices[polygon[vertex]],
+                                child.vertices[polygon[vertex + 1]]};
+                            PhysicalContactVec3 triangleMinimum{
+                                FLT_MAX, FLT_MAX, FLT_MAX};
+                            PhysicalContactVec3 triangleMaximum{
+                                -FLT_MAX, -FLT_MAX, -FLT_MAX};
+                            for (const PhysicalContactVec3 point :
+                                 triangle.vertices)
+                            {
+                                triangleMinimum.x = std::min(
+                                    triangleMinimum.x, point.x);
+                                triangleMinimum.y = std::min(
+                                    triangleMinimum.y, point.y);
+                                triangleMinimum.z = std::min(
+                                    triangleMinimum.z, point.z);
+                                triangleMaximum.x = std::max(
+                                    triangleMaximum.x, point.x);
+                                triangleMaximum.y = std::max(
+                                    triangleMaximum.y, point.y);
+                                triangleMaximum.z = std::max(
+                                    triangleMaximum.z, point.z);
+                            }
+                            triangle.centre =
+                                (triangleMinimum + triangleMaximum) * 0.5f;
+                            triangle.halfExtents =
+                                (triangleMaximum - triangleMinimum) * 0.5f;
+                            for (const PhysicalContactVec3 point :
+                                 triangle.vertices)
+                                triangle.boundRadius = std::max(
+                                    triangle.boundRadius,
+                                    PhysicalContactLength(
+                                        point - triangle.centre));
+                            if (!PhysicalContactTriangleValid(triangle))
+                                return false;
+                        }
+                    }
+                    group.triangleCount = static_cast<uint16_t>(
+                        triangleMesh->triangleCount - group.firstTriangle);
+                    if (!group.triangleCount)
+                        return false;
+                }
             }
         }
-        return PhysicalContactCompoundValid(output);
+        return PhysicalContactCompoundValid(output) &&
+            (!triangleMesh || PhysicalContactTriangleMeshValid(*triangleMesh));
     }
 
     // These accessors mirror object_get_center_of_mass and the native point
@@ -7699,7 +7878,8 @@ namespace
         int32_t objectHandle, const unsigned char* objectData,
         PhysicalContactCompoundShape& output,
         PhysicalContactTransform& outputTransform,
-        bool& requiresNativeConfirmation)
+        bool& requiresNativeConfirmation,
+        PhysicalContactTriangleMesh* triangleMesh = nullptr)
     {
         output = {};
         outputTransform = {};
@@ -7724,7 +7904,7 @@ namespace
         return Halo3ContactVisibleCollisionShape(
             objectData, visibleNodes.data(),
             static_cast<uint32_t>(matrixCount), outputTransform, output,
-            true, &requiresNativeConfirmation);
+            true, &requiresNativeConfirmation, triangleMesh);
     }
 
     bool Halo3ContactNativeSurfaceConfirms(
@@ -7953,8 +8133,10 @@ namespace
     bool Halo3ContactSweepAnimatedBodies(
         int32_t objectHandle, const unsigned char* objectData,
         const PhysicalContactCompoundShape& weaponShape,
+        const PhysicalContactTriangleMesh* weaponTriangleMesh,
         const PhysicalContactTransform& previousWeaponTransform,
         const PhysicalContactTransform& currentWeaponTransform,
+        float triangleStepWorldUnits, float triangleSurfaceRadius,
         Halo3ContactAnimatedBodyHit& output)
     {
         output = {};
@@ -8006,19 +8188,48 @@ namespace
             if (!PhysicalContactTransformFinite(targetTransform))
                 continue;
             resolvedAny = true;
-            const PhysicalContactCompoundHit candidate =
-                PhysicalContactSweepCompound(
+            PhysicalContactCompoundHit candidate{};
+            PhysicalContactConvexShape candidateWeaponShape{};
+            PhysicalContactConvexShape candidateTargetShape{};
+            if (weaponTriangleMesh &&
+                PhysicalContactTriangleMeshValid(*weaponTriangleMesh))
+            {
+                const PhysicalContactTriangleMeshHit meshHit =
+                    PhysicalContactSweepTriangleMeshCompound(
+                        *weaponTriangleMesh, previousWeaponTransform,
+                        currentWeaponTransform, targetShape, targetTransform,
+                        triangleStepWorldUnits, triangleSurfaceRadius);
+                static_cast<PhysicalContactConvexHit&>(candidate) = meshHit;
+                if (meshHit.hit)
+                {
+                    candidateWeaponShape =
+                        PhysicalContactConvexFromTriangle(
+                            weaponTriangleMesh->triangles[
+                                meshHit.weaponTriangle]);
+                    candidateTargetShape =
+                        targetShape.children[meshHit.targetIndex];
+                }
+            }
+            else
+            {
+                candidate = PhysicalContactSweepCompound(
                     weaponShape, previousWeaponTransform,
                     currentWeaponTransform, targetShape, targetTransform);
+                if (candidate.hit)
+                {
+                    candidateWeaponShape =
+                        weaponShape.children[candidate.weaponChild];
+                    candidateTargetShape =
+                        targetShape.children[candidate.targetChild];
+                }
+            }
             if (!candidate.hit ||
                 (output.hit.hit &&
                  candidate.fraction >= output.hit.fraction - 1.0e-6f))
                 continue;
             output.hit = candidate;
-            output.weaponShape =
-                weaponShape.children[candidate.weaponChild];
-            output.targetShape =
-                targetShape.children[candidate.targetChild];
+            output.weaponShape = candidateWeaponShape;
+            output.targetShape = candidateTargetShape;
             output.targetTransform = targetTransform;
             output.rigidBodyIndex = bodyIndex;
         }
@@ -10295,6 +10506,8 @@ namespace
         g_halo3ContactNativeSamples.store(0, std::memory_order_relaxed);
         g_halo3ContactWeaponShapeSource.store(0, std::memory_order_relaxed);
         g_halo3ContactTargetShapeSource.store(0, std::memory_order_relaxed);
+        g_halo3ContactWeaponTriangles.store(0, std::memory_order_relaxed);
+        g_halo3ContactTargetTriangles.store(0, std::memory_order_relaxed);
         g_halo3ContactDetailedTargetCandidates.store(
             0, std::memory_order_relaxed);
         g_halo3ContactFallbackTargetCandidates.store(
@@ -11708,6 +11921,7 @@ namespace
                 weaponTransform.up);
             weaponTransform.scale = visibleScale;
             PhysicalContactCompoundShape weaponShape{};
+            PhysicalContactTriangleMesh weaponTriangleMesh{};
             bool collisionShape = false;
             PhysicalContactTransform paletteRoot{};
             if (haveVisiblePalette)
@@ -11734,7 +11948,8 @@ namespace
                 PhysicalContactTransformFinite(paletteRoot))
                 collisionShape = Halo3ContactVisibleCollisionShape(
                     weaponData, visibleNodes.data(), visibleNodeCount,
-                    paletteRoot, weaponShape);
+                    paletteRoot, weaponShape, false, nullptr,
+                    &weaponTriangleMesh);
             if (collisionShape &&
                 weaponShape.childCount >
                     kHalo3ContactMaximumHeldWeaponChildren)
@@ -11761,6 +11976,9 @@ namespace
             g_halo3ContactWeaponShapeSource.store(
                 collisionShape ? 1u : (physicsFallback ? 2u : 0u),
                 std::memory_order_relaxed);
+            g_halo3ContactWeaponTriangles.store(
+                collisionShape ? weaponTriangleMesh.triangleCount : 0u,
+                std::memory_order_relaxed);
             if (!collisionShape && !physicsFallback)
             {
                 g_halo3ContactUnsupportedShapes.fetch_add(
@@ -11775,6 +11993,7 @@ namespace
             if (debugRig && debugExactVisibleReplay && debugAimData)
             {
                 PhysicalContactCompoundShape debugTargetShape{};
+                PhysicalContactTriangleMesh debugTargetTriangleMesh{};
                 PhysicalContactTransform debugTargetTransform{};
                 bool requiresNativeConfirmation = false;
                 const int32_t detailedTargetHandle =
@@ -11785,7 +12004,8 @@ namespace
                     (Halo3ContactDetailedTargetShape(
                          detailedTargetHandle, debugAimData,
                          debugTargetShape, debugTargetTransform,
-                         requiresNativeConfirmation) ||
+                         requiresNativeConfirmation,
+                         &debugTargetTriangleMesh) ||
                      (Halo3ContactShapeForObject(
                           debugAimData, debugTargetShape) &&
                       (debugTargetTransform =
@@ -11823,11 +12043,26 @@ namespace
                                 -FLT_MAX, std::memory_order_relaxed);
                         }
                         Halo3ContactDebugExpandGapRange(currentGapMeters);
-                        const PhysicalContactCompoundHit direct =
-                            PhysicalContactSweepCompound(
-                                weaponShape, weaponTransform, weaponTransform,
-                                debugTargetShape, debugTargetTransform);
-                        (direct.hit
+                        const bool directHit =
+                            PhysicalContactTriangleMeshValid(
+                                debugTargetTriangleMesh)
+                            ? PhysicalContactSweepTriangleMeshes(
+                                  weaponTriangleMesh, weaponTransform,
+                                  weaponTransform, debugTargetTriangleMesh,
+                                  debugTargetTransform,
+                                  kHalo3ContactTriangleStepMeters *
+                                      worldScale,
+                                  kHalo3ContactTriangleSurfaceRadiusMeters *
+                                      worldScale).hit
+                            : PhysicalContactSweepTriangleMeshCompound(
+                                  weaponTriangleMesh, weaponTransform,
+                                  weaponTransform, debugTargetShape,
+                                  debugTargetTransform,
+                                  kHalo3ContactTriangleStepMeters *
+                                      worldScale,
+                                  kHalo3ContactTriangleSurfaceRadiusMeters *
+                                      worldScale).hit;
+                        (directHit
                              ? g_halo3ContactDebugVisibleDirectOverlaps
                              : g_halo3ContactDebugVisibleDirectSeparations)
                             .fetch_add(1, std::memory_order_relaxed);
@@ -12543,6 +12778,7 @@ namespace
             PhysicalContactConvexShape closestTargetShape{};
             PhysicalContactTransform closestTargetTransform{};
             uint32_t closestTargetShapeSource = 0;
+            uint32_t closestTargetTriangleCount = 0;
             uint32_t eligibleObjects = 0;
             uint32_t detailedTargetCandidates = 0;
             uint32_t fallbackTargetCandidates = 0;
@@ -12692,19 +12928,49 @@ namespace
                 PhysicalContactTransform authoredTargetTransform{};
                 uint32_t targetShapeSource = 0;
                 PhysicalContactCompoundShape targetShape{};
+                PhysicalContactTriangleMesh targetTriangleMesh{};
+                uint32_t targetTriangleCount = 0;
                 bool requiresNativeConfirmation = false;
                 const bool hasDetailedTarget =
                     Halo3ContactDetailedTargetShape(
                         handle, data, targetShape,
                         authoredTargetTransform,
-                        requiresNativeConfirmation);
+                        requiresNativeConfirmation,
+                        &targetTriangleMesh);
                 if (hasDetailedTarget)
                 {
+                    targetTriangleCount = targetTriangleMesh.triangleCount;
                     ++detailedTargetCandidates;
                     targetShapeSource = 1;
-                    authored = PhysicalContactSweepCompound(
-                        weaponShape, previousWeaponTransform, weaponTransform,
-                        targetShape, authoredTargetTransform);
+                    if (collisionShape)
+                    {
+                        const PhysicalContactTriangleMeshHit meshHit =
+                            PhysicalContactSweepTriangleMeshes(
+                                weaponTriangleMesh,
+                                previousWeaponTransform, weaponTransform,
+                                targetTriangleMesh, authoredTargetTransform,
+                                kHalo3ContactTriangleStepMeters * worldScale,
+                                kHalo3ContactTriangleSurfaceRadiusMeters *
+                                    worldScale);
+                        static_cast<PhysicalContactConvexHit&>(authored) =
+                            meshHit;
+                        if (meshHit.hit)
+                        {
+                            authoredWeaponShape =
+                                PhysicalContactConvexFromTriangle(
+                                    weaponTriangleMesh.triangles[
+                                        meshHit.weaponTriangle]);
+                            authoredTargetShape =
+                                PhysicalContactConvexFromTriangle(
+                                    targetTriangleMesh.triangles[
+                                        meshHit.targetIndex]);
+                        }
+                    }
+                    else
+                        authored = PhysicalContactSweepCompound(
+                            weaponShape, previousWeaponTransform,
+                            weaponTransform, targetShape,
+                            authoredTargetTransform);
                     // A damaged vehicle can select a different collision-model
                     // permutation. The detailed default shape may narrow the
                     // broad phase, but only Halo's live native surface can
@@ -12718,7 +12984,7 @@ namespace
                         ++targetConfirmationRejects;
                         authored = {};
                     }
-                    if (authored.hit)
+                    if (authored.hit && !collisionShape)
                     {
                         authoredWeaponShape =
                             weaponShape.children[authored.weaponChild];
@@ -12735,10 +13001,34 @@ namespace
                     if (!PhysicalContactTransformFinite(
                             authoredTargetTransform))
                         continue;
-                    authored = PhysicalContactSweepCompound(
-                        weaponShape, previousWeaponTransform, weaponTransform,
-                        targetShape, authoredTargetTransform);
-                    if (authored.hit)
+                    if (collisionShape)
+                    {
+                        const PhysicalContactTriangleMeshHit meshHit =
+                            PhysicalContactSweepTriangleMeshCompound(
+                                weaponTriangleMesh,
+                                previousWeaponTransform, weaponTransform,
+                                targetShape, authoredTargetTransform,
+                                kHalo3ContactTriangleStepMeters * worldScale,
+                                kHalo3ContactTriangleSurfaceRadiusMeters *
+                                    worldScale);
+                        static_cast<PhysicalContactConvexHit&>(authored) =
+                            meshHit;
+                        if (meshHit.hit)
+                        {
+                            authoredWeaponShape =
+                                PhysicalContactConvexFromTriangle(
+                                    weaponTriangleMesh.triangles[
+                                        meshHit.weaponTriangle]);
+                            authoredTargetShape =
+                                targetShape.children[meshHit.targetIndex];
+                        }
+                    }
+                    else
+                        authored = PhysicalContactSweepCompound(
+                            weaponShape, previousWeaponTransform,
+                            weaponTransform, targetShape,
+                            authoredTargetTransform);
+                    if (authored.hit && !collisionShape)
                     {
                         authoredWeaponShape =
                             weaponShape.children[authored.weaponChild];
@@ -12752,7 +13042,11 @@ namespace
                     Halo3ContactAnimatedBodyHit animated{};
                     if (!Halo3ContactSweepAnimatedBodies(
                             handle, data, weaponShape,
+                            collisionShape ? &weaponTriangleMesh : nullptr,
                             previousWeaponTransform, weaponTransform,
+                            kHalo3ContactTriangleStepMeters * worldScale,
+                            kHalo3ContactTriangleSurfaceRadiusMeters *
+                                worldScale,
                             animated))
                         continue;
                     ++fallbackTargetCandidates;
@@ -12781,6 +13075,7 @@ namespace
                 closestTargetShape = authoredTargetShape;
                 closestTargetTransform = authoredTargetTransform;
                 closestTargetShapeSource = targetShapeSource;
+                closestTargetTriangleCount = targetTriangleCount;
                 if (targetShapeSource == 3)
                     g_halo3ContactAnimatedBodyHits.fetch_add(
                         1, std::memory_order_relaxed);
@@ -12796,6 +13091,8 @@ namespace
                 eligibleObjects, std::memory_order_relaxed);
             g_halo3ContactTargetShapeSource.store(
                 closestTargetShapeSource, std::memory_order_relaxed);
+            g_halo3ContactTargetTriangles.store(
+                closestTargetTriangleCount, std::memory_order_relaxed);
             g_halo3ContactDetailedTargetCandidates.store(
                 detailedTargetCandidates, std::memory_order_relaxed);
             g_halo3ContactFallbackTargetCandidates.store(
@@ -13299,7 +13596,8 @@ namespace
             "unsupportedShapes=%llu rejectNormal=%llu rejectPose=%llu "
             "rejectVelocity=%llu rejectMeleeSpike=%llu "
             "candidate=0x%08X candidateNormal=%u "
-            "shapeSource=%u targetShapeSource=%u targetDetailed=%u "
+            "shapeSource=%u weaponTriangles=%u targetShapeSource=%u "
+            "targetTriangles=%u targetDetailed=%u "
             "targetFallback=%u targetConfirmRejects=%u nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
@@ -13381,7 +13679,11 @@ namespace
                 std::memory_order_relaxed),
             g_halo3ContactWeaponShapeSource.load(
                 std::memory_order_relaxed),
+            g_halo3ContactWeaponTriangles.load(
+                std::memory_order_relaxed),
             g_halo3ContactTargetShapeSource.load(
+                std::memory_order_relaxed),
+            g_halo3ContactTargetTriangles.load(
                 std::memory_order_relaxed),
             g_halo3ContactDetailedTargetCandidates.load(
                 std::memory_order_relaxed),

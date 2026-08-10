@@ -230,6 +230,36 @@ struct PhysicalContactCompoundShape
     uint16_t childCount = 0;
 };
 
+struct PhysicalContactTriangle
+{
+    std::array<PhysicalContactVec3, 3> vertices{};
+    PhysicalContactVec3 centre{};
+    PhysicalContactVec3 halfExtents{};
+    float boundRadius = 0.0f;
+};
+
+struct PhysicalContactTriangleGroup
+{
+    PhysicalContactVec3 centre{};
+    PhysicalContactVec3 halfExtents{};
+    float boundRadius = 0.0f;
+    uint16_t firstTriangle = 0;
+    uint16_t triangleCount = 0;
+};
+
+struct PhysicalContactTriangleMesh
+{
+    // The official held-weapon census tops out at 222 triangles. The complete
+    // default Mongoose collision model has 502 triangles in ten node-bound
+    // BSPs. These fixed limits cover both without allocation in the hot path.
+    static constexpr size_t kMaximumTriangles = 768;
+    static constexpr size_t kMaximumGroups = 32;
+    std::array<PhysicalContactTriangle, kMaximumTriangles> triangles{};
+    std::array<PhysicalContactTriangleGroup, kMaximumGroups> groups{};
+    uint16_t triangleCount = 0;
+    uint16_t groupCount = 0;
+};
+
 // The first-person renderer can submit the held weapon and several smaller
 // attachment models through the same interpolated bone bank. Contact may use
 // only the render-model tag stored in the active primary-weapon runtime slot.
@@ -276,6 +306,69 @@ inline bool PhysicalContactCompoundValid(
         return false;
     for (uint16_t i = 0; i < shape.childCount; ++i)
         if (!PhysicalContactConvexValid(shape.children[i]))
+            return false;
+    return true;
+}
+
+inline bool PhysicalContactTriangleValid(
+    const PhysicalContactTriangle& triangle)
+{
+    if (!std::isfinite(triangle.boundRadius) ||
+        triangle.boundRadius < 0.0f || triangle.boundRadius > 10.0f ||
+        !PhysicalContactFinite(triangle.centre) ||
+        !PhysicalContactFinite(triangle.halfExtents) ||
+        triangle.halfExtents.x < 0.0f || triangle.halfExtents.y < 0.0f ||
+        triangle.halfExtents.z < 0.0f)
+        return false;
+    for (const PhysicalContactVec3 vertex : triangle.vertices)
+        if (!PhysicalContactFinite(vertex))
+            return false;
+    return true;
+}
+
+inline PhysicalContactConvexShape PhysicalContactConvexFromTriangle(
+    const PhysicalContactTriangle& triangle)
+{
+    PhysicalContactConvexShape shape{};
+    if (!PhysicalContactTriangleValid(triangle))
+        return shape;
+    shape.vertexCount = 3;
+    shape.vertices[0] = triangle.vertices[0];
+    shape.vertices[1] = triangle.vertices[1];
+    shape.vertices[2] = triangle.vertices[2];
+    return shape;
+}
+
+inline bool PhysicalContactTriangleMeshValid(
+    const PhysicalContactTriangleMesh& mesh)
+{
+    if (!mesh.triangleCount ||
+        mesh.triangleCount > PhysicalContactTriangleMesh::kMaximumTriangles ||
+        !mesh.groupCount ||
+        mesh.groupCount > PhysicalContactTriangleMesh::kMaximumGroups)
+        return false;
+    uint32_t expectedFirst = 0;
+    for (uint16_t groupIndex = 0; groupIndex < mesh.groupCount; ++groupIndex)
+    {
+        const PhysicalContactTriangleGroup& group = mesh.groups[groupIndex];
+        if (!PhysicalContactFinite(group.centre) ||
+            !PhysicalContactFinite(group.halfExtents) ||
+            group.halfExtents.x < 0.0f ||
+            group.halfExtents.y < 0.0f ||
+            group.halfExtents.z < 0.0f ||
+            !std::isfinite(group.boundRadius) || group.boundRadius < 0.0f ||
+            group.boundRadius > 10.0f || !group.triangleCount ||
+            group.firstTriangle != expectedFirst ||
+            static_cast<uint32_t>(group.firstTriangle) +
+                    group.triangleCount >
+                mesh.triangleCount)
+            return false;
+        expectedFirst += group.triangleCount;
+    }
+    if (expectedFirst != mesh.triangleCount)
+        return false;
+    for (uint16_t triangle = 0; triangle < mesh.triangleCount; ++triangle)
+        if (!PhysicalContactTriangleValid(mesh.triangles[triangle]))
             return false;
     return true;
 }
@@ -357,6 +450,17 @@ inline float PhysicalContactCompoundBoundRadius(
     return radius;
 }
 
+inline float PhysicalContactTriangleMeshBoundRadius(
+    const PhysicalContactTriangleMesh& mesh)
+{
+    float radius = 0.0f;
+    for (uint16_t group = 0; group < mesh.groupCount; ++group)
+        radius = std::max(
+            radius, PhysicalContactLength(mesh.groups[group].centre) +
+                        mesh.groups[group].boundRadius);
+    return radius;
+}
+
 inline PhysicalContactVec3 PhysicalContactConvexSupport(
     const PhysicalContactConvexShape& shape,
     const PhysicalContactTransform& transform,
@@ -383,6 +487,56 @@ inline PhysicalContactVec3 PhysicalContactConvexSupport(
     if (scaledRadius > 0.0f)
         result = result + PhysicalContactNormalize(worldDirection) *
             scaledRadius;
+    return result;
+}
+
+inline PhysicalContactVec3 PhysicalContactTriangleSupport(
+    const PhysicalContactTriangle& triangle,
+    const PhysicalContactTransform& transform,
+    PhysicalContactVec3 worldDirection, float surfaceRadius)
+{
+    const PhysicalContactVec3 localDirection =
+        PhysicalContactInverseTransformVector(transform, worldDirection);
+    uint16_t best = 0;
+    float bestProjection = PhysicalContactDot(
+        triangle.vertices[0], localDirection);
+    for (uint16_t vertex = 1; vertex < 3; ++vertex)
+    {
+        const float projection = PhysicalContactDot(
+            triangle.vertices[vertex], localDirection);
+        if (projection > bestProjection)
+        {
+            bestProjection = projection;
+            best = vertex;
+        }
+    }
+    PhysicalContactVec3 result = PhysicalContactTransformPoint(
+        transform, triangle.vertices[best]);
+    if (surfaceRadius > 0.0f)
+        result = result + PhysicalContactNormalize(worldDirection) *
+            surfaceRadius;
+    return result;
+}
+
+inline PhysicalContactVec3 PhysicalContactTriangleMeshSupport(
+    const PhysicalContactTriangleMesh& mesh,
+    const PhysicalContactTransform& transform,
+    PhysicalContactVec3 worldDirection, float surfaceRadius)
+{
+    PhysicalContactVec3 result = transform.position;
+    float bestProjection = -FLT_MAX;
+    for (uint16_t triangle = 0; triangle < mesh.triangleCount; ++triangle)
+    {
+        const PhysicalContactVec3 candidate = PhysicalContactTriangleSupport(
+            mesh.triangles[triangle], transform, worldDirection,
+            surfaceRadius);
+        const float projection = PhysicalContactDot(candidate, worldDirection);
+        if (projection > bestProjection)
+        {
+            bestProjection = projection;
+            result = candidate;
+        }
+    }
     return result;
 }
 
@@ -576,6 +730,398 @@ inline bool PhysicalContactConvexIntersect(
     return false;
 }
 
+inline bool PhysicalContactBoundingSpheresOverlap(
+    PhysicalContactVec3 centreA, float radiusA,
+    PhysicalContactVec3 centreB, float radiusB)
+{
+    if (!PhysicalContactFinite(centreA) || !PhysicalContactFinite(centreB) ||
+        !std::isfinite(radiusA) || !std::isfinite(radiusB) ||
+        radiusA < 0.0f || radiusB < 0.0f)
+        return false;
+    const float radius = radiusA + radiusB;
+    return PhysicalContactLengthSquared(centreA - centreB) <= radius * radius;
+}
+
+inline PhysicalContactVec3 PhysicalContactWorldAabbHalfExtents(
+    const PhysicalContactTransform& transform,
+    PhysicalContactVec3 localHalfExtents)
+{
+    const float scale = transform.scale;
+    return {
+        scale * (std::fabs(transform.forward.x) * localHalfExtents.x +
+                 std::fabs(transform.left.x) * localHalfExtents.y +
+                 std::fabs(transform.up.x) * localHalfExtents.z),
+        scale * (std::fabs(transform.forward.y) * localHalfExtents.x +
+                 std::fabs(transform.left.y) * localHalfExtents.y +
+                 std::fabs(transform.up.y) * localHalfExtents.z),
+        scale * (std::fabs(transform.forward.z) * localHalfExtents.x +
+                 std::fabs(transform.left.z) * localHalfExtents.y +
+                 std::fabs(transform.up.z) * localHalfExtents.z)};
+}
+
+inline bool PhysicalContactAabbsOverlap(
+    PhysicalContactVec3 centreA, PhysicalContactVec3 halfExtentsA,
+    PhysicalContactVec3 centreB, PhysicalContactVec3 halfExtentsB,
+    float expansionA)
+{
+    if (!PhysicalContactFinite(centreA) ||
+        !PhysicalContactFinite(halfExtentsA) ||
+        !PhysicalContactFinite(centreB) ||
+        !PhysicalContactFinite(halfExtentsB) ||
+        !std::isfinite(expansionA) || expansionA < 0.0f)
+        return false;
+    return std::fabs(centreA.x - centreB.x) <=
+               halfExtentsA.x + halfExtentsB.x + expansionA &&
+        std::fabs(centreA.y - centreB.y) <=
+               halfExtentsA.y + halfExtentsB.y + expansionA &&
+        std::fabs(centreA.z - centreB.z) <=
+               halfExtentsA.z + halfExtentsB.z + expansionA;
+}
+
+template <typename Support>
+inline bool PhysicalContactGjkIntersectSupport(
+    PhysicalContactVec3 direction, Support support,
+    PhysicalContactVec3* separatingDirection)
+{
+    if (PhysicalContactLengthSquared(direction) <= 1.0e-10f)
+        direction = {1.0f, 0.0f, 0.0f};
+    PhysicalContactGjkSimplex simplex{};
+    simplex.points[0] = support(direction);
+    simplex.count = 1;
+    direction = simplex.points[0] * -1.0f;
+    for (int iteration = 0; iteration < 32; ++iteration)
+    {
+        if (!PhysicalContactFinite(direction))
+            break;
+        if (PhysicalContactLengthSquared(direction) <= 1.0e-12f)
+            return true;
+        const PhysicalContactVec3 point = support(direction);
+        if (!PhysicalContactFinite(point) ||
+            PhysicalContactDot(point, direction) < 0.0f)
+        {
+            if (separatingDirection)
+                *separatingDirection = direction;
+            return false;
+        }
+        simplex.points[simplex.count++] = point;
+        if (PhysicalContactGjkContainsOrigin(simplex, direction))
+            return true;
+    }
+    if (separatingDirection)
+        *separatingDirection = direction;
+    return false;
+}
+
+inline bool PhysicalContactTriangleTriangleIntersect(
+    const PhysicalContactTriangle& a,
+    const PhysicalContactTransform& transformA,
+    const PhysicalContactTriangle& b,
+    const PhysicalContactTransform& transformB,
+    float surfaceRadius, PhysicalContactVec3* separatingDirection = nullptr)
+{
+    const PhysicalContactVec3 centreA = PhysicalContactTransformPoint(
+        transformA, a.centre);
+    const PhysicalContactVec3 centreB = PhysicalContactTransformPoint(
+        transformB, b.centre);
+    const PhysicalContactVec3 halfExtentsA =
+        PhysicalContactWorldAabbHalfExtents(transformA, a.halfExtents);
+    const PhysicalContactVec3 halfExtentsB =
+        PhysicalContactWorldAabbHalfExtents(transformB, b.halfExtents);
+    if (!PhysicalContactAabbsOverlap(
+            centreA, halfExtentsA, centreB, halfExtentsB, surfaceRadius))
+    {
+        if (separatingDirection)
+            *separatingDirection = centreB - centreA;
+        return false;
+    }
+    const float radiusA = a.boundRadius * transformA.scale + surfaceRadius;
+    const float radiusB = b.boundRadius * transformB.scale;
+    if (!PhysicalContactBoundingSpheresOverlap(
+            centreA, radiusA, centreB, radiusB))
+    {
+        if (separatingDirection)
+            *separatingDirection = centreB - centreA;
+        return false;
+    }
+    const auto support = [&](PhysicalContactVec3 direction) {
+        return PhysicalContactTriangleSupport(
+                   a, transformA, direction, surfaceRadius) -
+            PhysicalContactTriangleSupport(
+                   b, transformB, direction * -1.0f, 0.0f);
+    };
+    return PhysicalContactGjkIntersectSupport(
+        centreB - centreA, support, separatingDirection);
+}
+
+inline bool PhysicalContactTriangleConvexIntersectPrepared(
+    const PhysicalContactTriangle& triangle,
+    const PhysicalContactTransform& triangleTransform,
+    const PhysicalContactConvexShape& convex,
+    const PhysicalContactTransform& convexTransform,
+    PhysicalContactVec3 convexCentre, PhysicalContactVec3 convexHalfExtents,
+    float convexRadius,
+    float surfaceRadius, PhysicalContactVec3* separatingDirection = nullptr)
+{
+    const PhysicalContactVec3 triangleCentre = PhysicalContactTransformPoint(
+        triangleTransform, triangle.centre);
+    const PhysicalContactVec3 triangleHalfExtents =
+        PhysicalContactWorldAabbHalfExtents(
+            triangleTransform, triangle.halfExtents);
+    if (!PhysicalContactAabbsOverlap(
+            triangleCentre, triangleHalfExtents,
+            convexCentre, convexHalfExtents, surfaceRadius))
+    {
+        if (separatingDirection)
+            *separatingDirection = convexCentre - triangleCentre;
+        return false;
+    }
+    const float triangleRadius =
+        triangle.boundRadius * triangleTransform.scale + surfaceRadius;
+    if (!PhysicalContactBoundingSpheresOverlap(
+            triangleCentre, triangleRadius, convexCentre, convexRadius))
+    {
+        if (separatingDirection)
+            *separatingDirection = convexCentre - triangleCentre;
+        return false;
+    }
+    const auto support = [&](PhysicalContactVec3 direction) {
+        return PhysicalContactTriangleSupport(
+                   triangle, triangleTransform, direction, surfaceRadius) -
+            PhysicalContactConvexSupport(
+                   convex, convexTransform, direction * -1.0f);
+    };
+    return PhysicalContactGjkIntersectSupport(
+        convexCentre - triangleCentre, support, separatingDirection);
+}
+
+inline bool PhysicalContactTriangleConvexIntersect(
+    const PhysicalContactTriangle& triangle,
+    const PhysicalContactTransform& triangleTransform,
+    const PhysicalContactConvexShape& convex,
+    const PhysicalContactTransform& convexTransform,
+    float surfaceRadius, PhysicalContactVec3* separatingDirection = nullptr)
+{
+    PhysicalContactVec3 minimum{
+        FLT_MAX, FLT_MAX, FLT_MAX};
+    PhysicalContactVec3 maximum{
+        -FLT_MAX, -FLT_MAX, -FLT_MAX};
+    for (uint16_t vertex = 0; vertex < convex.vertexCount; ++vertex)
+    {
+        minimum.x = std::min(minimum.x, convex.vertices[vertex].x);
+        minimum.y = std::min(minimum.y, convex.vertices[vertex].y);
+        minimum.z = std::min(minimum.z, convex.vertices[vertex].z);
+        maximum.x = std::max(maximum.x, convex.vertices[vertex].x);
+        maximum.y = std::max(maximum.y, convex.vertices[vertex].y);
+        maximum.z = std::max(maximum.z, convex.vertices[vertex].z);
+    }
+    const PhysicalContactVec3 convexLocalCentre =
+        (minimum + maximum) * 0.5f;
+    const PhysicalContactVec3 convexCentre =
+        PhysicalContactTransformPoint(convexTransform, convexLocalCentre);
+    const PhysicalContactVec3 convexHalfExtents =
+        PhysicalContactWorldAabbHalfExtents(
+            convexTransform, (maximum - minimum) * 0.5f);
+    const float convexRadius =
+        PhysicalContactConvexBoundRadius(convex) * convexTransform.scale;
+    return PhysicalContactTriangleConvexIntersectPrepared(
+        triangle, triangleTransform, convex, convexTransform,
+        convexCentre, convexHalfExtents, convexRadius,
+        surfaceRadius, separatingDirection);
+}
+
+struct PhysicalContactTrianglePair
+{
+    bool hit = false;
+    uint16_t weaponTriangle = 0;
+    uint16_t targetIndex = 0;
+    PhysicalContactVec3 separation{};
+};
+
+inline PhysicalContactTrianglePair PhysicalContactTriangleMeshesIntersect(
+    const PhysicalContactTriangleMesh& weapon,
+    const PhysicalContactTransform& weaponTransform,
+    const PhysicalContactTriangleMesh& target,
+    const PhysicalContactTransform& targetTransform,
+    float surfaceRadius)
+{
+    PhysicalContactTrianglePair result{};
+    float nearestGap = FLT_MAX;
+    for (uint16_t weaponGroup = 0;
+         weaponGroup < weapon.groupCount; ++weaponGroup)
+    {
+        const PhysicalContactTriangleGroup& groupA =
+            weapon.groups[weaponGroup];
+        const PhysicalContactVec3 groupCentreA =
+            PhysicalContactTransformPoint(weaponTransform, groupA.centre);
+        const PhysicalContactVec3 groupHalfExtentsA =
+            PhysicalContactWorldAabbHalfExtents(
+                weaponTransform, groupA.halfExtents);
+        const float groupRadiusA =
+            groupA.boundRadius * weaponTransform.scale + surfaceRadius;
+        for (uint16_t targetGroup = 0;
+             targetGroup < target.groupCount; ++targetGroup)
+        {
+            const PhysicalContactTriangleGroup& groupB =
+                target.groups[targetGroup];
+            const PhysicalContactVec3 groupCentreB =
+                PhysicalContactTransformPoint(targetTransform, groupB.centre);
+            const PhysicalContactVec3 groupHalfExtentsB =
+                PhysicalContactWorldAabbHalfExtents(
+                    targetTransform, groupB.halfExtents);
+            const float groupRadiusB =
+                groupB.boundRadius * targetTransform.scale;
+            if (!PhysicalContactAabbsOverlap(
+                    groupCentreA, groupHalfExtentsA,
+                    groupCentreB, groupHalfExtentsB, surfaceRadius) ||
+                !PhysicalContactBoundingSpheresOverlap(
+                    groupCentreA, groupRadiusA,
+                    groupCentreB, groupRadiusB))
+            {
+                const float gap = PhysicalContactLengthSquared(
+                    groupCentreB - groupCentreA);
+                if (gap < nearestGap)
+                {
+                    nearestGap = gap;
+                    result.separation = groupCentreB - groupCentreA;
+                }
+                continue;
+            }
+            const uint16_t weaponEnd = static_cast<uint16_t>(
+                groupA.firstTriangle + groupA.triangleCount);
+            const uint16_t targetEnd = static_cast<uint16_t>(
+                groupB.firstTriangle + groupB.triangleCount);
+            for (uint16_t weaponTriangle = groupA.firstTriangle;
+                 weaponTriangle < weaponEnd; ++weaponTriangle)
+            {
+                const PhysicalContactTriangle& triangleA =
+                    weapon.triangles[weaponTriangle];
+                for (uint16_t targetTriangle = groupB.firstTriangle;
+                     targetTriangle < targetEnd; ++targetTriangle)
+                {
+                    const PhysicalContactTriangle& triangleB =
+                        target.triangles[targetTriangle];
+                    PhysicalContactVec3 separation{};
+                    if (PhysicalContactTriangleTriangleIntersect(
+                            triangleA, weaponTransform,
+                            triangleB, targetTransform,
+                            surfaceRadius, &separation))
+                    {
+                        result.hit = true;
+                        result.weaponTriangle = weaponTriangle;
+                        result.targetIndex = targetTriangle;
+                        return result;
+                    }
+                    const float gap = PhysicalContactLengthSquared(separation);
+                    if (PhysicalContactFinite(separation) && gap < nearestGap)
+                    {
+                        nearestGap = gap;
+                        result.separation = separation;
+                        result.weaponTriangle = weaponTriangle;
+                        result.targetIndex = targetTriangle;
+                    }
+                }
+            }
+        }
+    }
+    return result;
+}
+
+inline PhysicalContactTrianglePair PhysicalContactTriangleMeshCompoundIntersect(
+    const PhysicalContactTriangleMesh& weapon,
+    const PhysicalContactTransform& weaponTransform,
+    const PhysicalContactCompoundShape& target,
+    const PhysicalContactTransform& targetTransform,
+    float surfaceRadius)
+{
+    PhysicalContactTrianglePair result{};
+    float nearestGap = FLT_MAX;
+    for (uint16_t targetChild = 0;
+         targetChild < target.childCount; ++targetChild)
+    {
+        const PhysicalContactConvexShape& convex =
+            target.children[targetChild];
+        PhysicalContactVec3 minimum{FLT_MAX, FLT_MAX, FLT_MAX};
+        PhysicalContactVec3 maximum{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+        for (uint16_t vertex = 0; vertex < convex.vertexCount; ++vertex)
+        {
+            minimum.x = std::min(minimum.x, convex.vertices[vertex].x);
+            minimum.y = std::min(minimum.y, convex.vertices[vertex].y);
+            minimum.z = std::min(minimum.z, convex.vertices[vertex].z);
+            maximum.x = std::max(maximum.x, convex.vertices[vertex].x);
+            maximum.y = std::max(maximum.y, convex.vertices[vertex].y);
+            maximum.z = std::max(maximum.z, convex.vertices[vertex].z);
+        }
+        const PhysicalContactVec3 convexLocalCentre =
+            (minimum + maximum) * 0.5f;
+        const PhysicalContactVec3 convexCentre =
+            PhysicalContactTransformPoint(
+                targetTransform, convexLocalCentre);
+        const PhysicalContactVec3 convexHalfExtents =
+            PhysicalContactWorldAabbHalfExtents(
+                targetTransform, (maximum - minimum) * 0.5f);
+        const float convexRadius =
+            PhysicalContactConvexBoundRadius(convex) * targetTransform.scale;
+        for (uint16_t weaponGroup = 0;
+             weaponGroup < weapon.groupCount; ++weaponGroup)
+        {
+            const PhysicalContactTriangleGroup& group =
+                weapon.groups[weaponGroup];
+            const PhysicalContactVec3 groupCentre =
+                PhysicalContactTransformPoint(
+                    weaponTransform, group.centre);
+            const PhysicalContactVec3 groupHalfExtents =
+                PhysicalContactWorldAabbHalfExtents(
+                    weaponTransform, group.halfExtents);
+            const float groupRadius =
+                group.boundRadius * weaponTransform.scale + surfaceRadius;
+            if (!PhysicalContactAabbsOverlap(
+                    groupCentre, groupHalfExtents,
+                    convexCentre, convexHalfExtents, surfaceRadius) ||
+                !PhysicalContactBoundingSpheresOverlap(
+                    groupCentre, groupRadius,
+                    convexCentre, convexRadius))
+            {
+                const PhysicalContactVec3 separation =
+                    convexCentre - groupCentre;
+                const float gap = PhysicalContactLengthSquared(separation);
+                if (gap < nearestGap)
+                {
+                    nearestGap = gap;
+                    result.separation = separation;
+                }
+                continue;
+            }
+            const uint16_t weaponEnd = static_cast<uint16_t>(
+                group.firstTriangle + group.triangleCount);
+            for (uint16_t weaponTriangle = group.firstTriangle;
+                 weaponTriangle < weaponEnd; ++weaponTriangle)
+            {
+                PhysicalContactVec3 separation{};
+                if (PhysicalContactTriangleConvexIntersectPrepared(
+                        weapon.triangles[weaponTriangle], weaponTransform,
+                        convex, targetTransform, convexCentre,
+                        convexHalfExtents, convexRadius,
+                        surfaceRadius, &separation))
+                {
+                    result.hit = true;
+                    result.weaponTriangle = weaponTriangle;
+                    result.targetIndex = targetChild;
+                    return result;
+                }
+                const float gap = PhysicalContactLengthSquared(separation);
+                if (PhysicalContactFinite(separation) && gap < nearestGap)
+                {
+                    nearestGap = gap;
+                    result.separation = separation;
+                    result.weaponTriangle = weaponTriangle;
+                    result.targetIndex = targetChild;
+                }
+            }
+        }
+    }
+    return result;
+}
+
 struct PhysicalContactConvexHit
 {
     bool hit = false;
@@ -732,6 +1278,207 @@ inline PhysicalContactCompoundHit PhysicalContactSweepCompound(
         }
     }
     return closest;
+}
+
+struct PhysicalContactTriangleMeshHit : PhysicalContactConvexHit
+{
+    uint16_t weaponTriangle = 0;
+    uint16_t targetIndex = 0;
+};
+
+template <typename IntersectAt, typename IntersectPairAt,
+          typename TargetSupport>
+inline PhysicalContactTriangleMeshHit PhysicalContactSweepTriangleMeshInternal(
+    const PhysicalContactTriangleMesh& weapon,
+    const PhysicalContactTransform& previousWeaponTransform,
+    const PhysicalContactTransform& currentWeaponTransform,
+    const PhysicalContactTransform& targetTransform,
+    float stepWorldUnits, float surfaceRadius,
+    IntersectAt intersectAt, IntersectPairAt intersectPairAt,
+    TargetSupport targetSupport)
+{
+    PhysicalContactTriangleMeshHit result{};
+    if (!PhysicalContactTriangleMeshValid(weapon) ||
+        !PhysicalContactTransformFinite(previousWeaponTransform) ||
+        !PhysicalContactTransformFinite(currentWeaponTransform) ||
+        !PhysicalContactTransformFinite(targetTransform) ||
+        !std::isfinite(stepWorldUnits) || stepWorldUnits < 1.0e-5f ||
+        stepWorldUnits > 0.05f || !std::isfinite(surfaceRadius) ||
+        surfaceRadius < 0.0f || surfaceRadius > 0.05f)
+        return result;
+
+    PhysicalContactTrianglePair pair = intersectAt(previousWeaponTransform);
+    PhysicalContactVec3 separation = pair.separation;
+    if (pair.hit)
+    {
+        result.hit = true;
+        result.fraction = 0.0f;
+        result.weaponTriangle = pair.weaponTriangle;
+        result.targetIndex = pair.targetIndex;
+    }
+    else
+    {
+        const float translation = PhysicalContactLength(
+            currentWeaponTransform.position -
+            previousWeaponTransform.position);
+        const float axisChange = std::max({
+            PhysicalContactLength(currentWeaponTransform.forward -
+                                  previousWeaponTransform.forward),
+            PhysicalContactLength(currentWeaponTransform.left -
+                                  previousWeaponTransform.left),
+            PhysicalContactLength(currentWeaponTransform.up -
+                                  previousWeaponTransform.up)});
+        const float sweptDistance = translation + axisChange *
+            PhysicalContactTriangleMeshBoundRadius(weapon) *
+                std::max(previousWeaponTransform.scale,
+                         currentWeaponTransform.scale);
+        const int steps = std::clamp(
+            static_cast<int>(std::ceil(sweptDistance / stepWorldUnits)),
+            1, 64);
+        float low = 0.0f;
+        float high = 1.0f;
+        bool found = false;
+        for (int step = 1; step <= steps; ++step)
+        {
+            const float fraction = static_cast<float>(step) /
+                static_cast<float>(steps);
+            const PhysicalContactTransform transform =
+                PhysicalContactInterpolateTransform(
+                    previousWeaponTransform, currentWeaponTransform,
+                    fraction);
+            const PhysicalContactTrianglePair candidate =
+                intersectAt(transform);
+            if (candidate.hit)
+            {
+                high = fraction;
+                low = static_cast<float>(step - 1) /
+                    static_cast<float>(steps);
+                pair = candidate;
+                found = true;
+                break;
+            }
+            separation = candidate.separation;
+        }
+        if (!found)
+            return result;
+        for (int iteration = 0; iteration < 9; ++iteration)
+        {
+            const float middle = (low + high) * 0.5f;
+            const PhysicalContactTransform transform =
+                PhysicalContactInterpolateTransform(
+                    previousWeaponTransform, currentWeaponTransform,
+                    middle);
+            const PhysicalContactTrianglePair candidate =
+                intersectPairAt(
+                    transform, pair.weaponTriangle, pair.targetIndex);
+            if (candidate.hit)
+            {
+                high = middle;
+                pair = candidate;
+            }
+            else
+            {
+                low = middle;
+                separation = candidate.separation;
+            }
+        }
+        result.hit = true;
+        result.fraction = high;
+        result.weaponTriangle = pair.weaponTriangle;
+        result.targetIndex = pair.targetIndex;
+        result.normalReliable =
+            PhysicalContactLengthSquared(separation) > 1.0e-12f;
+    }
+
+    const PhysicalContactTransform impact =
+        PhysicalContactInterpolateTransform(
+            previousWeaponTransform, currentWeaponTransform,
+            result.fraction);
+    const PhysicalContactVec3 fallbackNormal = PhysicalContactNormalize(
+        impact.position - targetTransform.position,
+        currentWeaponTransform.position - previousWeaponTransform.position);
+    result.normal = PhysicalContactNormalize(
+        separation * -1.0f, fallbackNormal);
+    result.weaponPoint = PhysicalContactTriangleSupport(
+        weapon.triangles[result.weaponTriangle], impact,
+        result.normal * -1.0f, 0.0f);
+    result.targetPoint = targetSupport(result.targetIndex, result.normal);
+    result.point = (result.weaponPoint + result.targetPoint) * 0.5f;
+    return result;
+}
+
+inline PhysicalContactTriangleMeshHit PhysicalContactSweepTriangleMeshes(
+    const PhysicalContactTriangleMesh& weapon,
+    const PhysicalContactTransform& previousWeaponTransform,
+    const PhysicalContactTransform& currentWeaponTransform,
+    const PhysicalContactTriangleMesh& target,
+    const PhysicalContactTransform& targetTransform,
+    float stepWorldUnits, float surfaceRadius)
+{
+    if (!PhysicalContactTriangleMeshValid(target))
+        return {};
+    const auto intersectAt = [&](const PhysicalContactTransform& transform) {
+        return PhysicalContactTriangleMeshesIntersect(
+            weapon, transform, target, targetTransform, surfaceRadius);
+    };
+    const auto targetSupport = [&](uint16_t triangle,
+                                   PhysicalContactVec3 direction) {
+        return PhysicalContactTriangleSupport(
+            target.triangles[triangle], targetTransform, direction, 0.0f);
+    };
+    const auto intersectPairAt = [&] (
+        const PhysicalContactTransform& transform,
+        uint16_t weaponTriangle, uint16_t targetTriangle) {
+        PhysicalContactTrianglePair pair{};
+        pair.weaponTriangle = weaponTriangle;
+        pair.targetIndex = targetTriangle;
+        pair.hit = PhysicalContactTriangleTriangleIntersect(
+            weapon.triangles[weaponTriangle], transform,
+            target.triangles[targetTriangle], targetTransform,
+            surfaceRadius, &pair.separation);
+        return pair;
+    };
+    return PhysicalContactSweepTriangleMeshInternal(
+        weapon, previousWeaponTransform, currentWeaponTransform,
+        targetTransform, stepWorldUnits, surfaceRadius,
+        intersectAt, intersectPairAt, targetSupport);
+}
+
+inline PhysicalContactTriangleMeshHit PhysicalContactSweepTriangleMeshCompound(
+    const PhysicalContactTriangleMesh& weapon,
+    const PhysicalContactTransform& previousWeaponTransform,
+    const PhysicalContactTransform& currentWeaponTransform,
+    const PhysicalContactCompoundShape& target,
+    const PhysicalContactTransform& targetTransform,
+    float stepWorldUnits, float surfaceRadius)
+{
+    if (!PhysicalContactCompoundValid(target))
+        return {};
+    const auto intersectAt = [&](const PhysicalContactTransform& transform) {
+        return PhysicalContactTriangleMeshCompoundIntersect(
+            weapon, transform, target, targetTransform, surfaceRadius);
+    };
+    const auto targetSupport = [&](uint16_t child,
+                                   PhysicalContactVec3 direction) {
+        return PhysicalContactConvexSupport(
+            target.children[child], targetTransform, direction);
+    };
+    const auto intersectPairAt = [&] (
+        const PhysicalContactTransform& transform,
+        uint16_t weaponTriangle, uint16_t targetChild) {
+        PhysicalContactTrianglePair pair{};
+        pair.weaponTriangle = weaponTriangle;
+        pair.targetIndex = targetChild;
+        pair.hit = PhysicalContactTriangleConvexIntersect(
+            weapon.triangles[weaponTriangle], transform,
+            target.children[targetChild], targetTransform,
+            surfaceRadius, &pair.separation);
+        return pair;
+    };
+    return PhysicalContactSweepTriangleMeshInternal(
+        weapon, previousWeaponTransform, currentWeaponTransform,
+        targetTransform, stepWorldUnits, surfaceRadius,
+        intersectAt, intersectPairAt, targetSupport);
 }
 
 inline PhysicalContactPointVelocity PhysicalContactRigidPointVelocity(

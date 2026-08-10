@@ -1,4 +1,5 @@
 #include <array>
+#include <chrono>
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
@@ -8935,6 +8936,211 @@ int main()
             "keeps space between parts empty, selects the exact child, caps "
             "storage at sixteen, and only opts into the first damage "
             "permutation when native confirmation is available");
+
+        const auto finishTriangle = [](PhysicalContactTriangle triangle) {
+            PhysicalContactVec3 minimum{FLT_MAX, FLT_MAX, FLT_MAX};
+            PhysicalContactVec3 maximum{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+            for (const PhysicalContactVec3 vertex : triangle.vertices)
+            {
+                minimum.x = std::min(minimum.x, vertex.x);
+                minimum.y = std::min(minimum.y, vertex.y);
+                minimum.z = std::min(minimum.z, vertex.z);
+                maximum.x = std::max(maximum.x, vertex.x);
+                maximum.y = std::max(maximum.y, vertex.y);
+                maximum.z = std::max(maximum.z, vertex.z);
+            }
+            triangle.centre = (minimum + maximum) * 0.5f;
+            triangle.halfExtents = (maximum - minimum) * 0.5f;
+            for (const PhysicalContactVec3 vertex : triangle.vertices)
+                triangle.boundRadius = std::max(
+                    triangle.boundRadius,
+                    PhysicalContactLength(vertex - triangle.centre));
+            return triangle;
+        };
+        const auto finishSingleGroupMesh = [](
+            PhysicalContactTriangleMesh mesh) {
+            mesh.groupCount = 1;
+            mesh.groups[0].firstTriangle = 0;
+            mesh.groups[0].triangleCount = mesh.triangleCount;
+            PhysicalContactVec3 centre{};
+            PhysicalContactVec3 minimum{FLT_MAX, FLT_MAX, FLT_MAX};
+            PhysicalContactVec3 maximum{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+            for (uint16_t triangle = 0;
+                 triangle < mesh.triangleCount; ++triangle)
+                for (const PhysicalContactVec3 vertex :
+                     mesh.triangles[triangle].vertices)
+                {
+                    minimum.x = std::min(minimum.x, vertex.x);
+                    minimum.y = std::min(minimum.y, vertex.y);
+                    minimum.z = std::min(minimum.z, vertex.z);
+                    maximum.x = std::max(maximum.x, vertex.x);
+                    maximum.y = std::max(maximum.y, vertex.y);
+                    maximum.z = std::max(maximum.z, vertex.z);
+                }
+            centre = (minimum + maximum) * 0.5f;
+            mesh.groups[0].centre = centre;
+            mesh.groups[0].halfExtents = (maximum - minimum) * 0.5f;
+            for (uint16_t triangle = 0;
+                 triangle < mesh.triangleCount; ++triangle)
+                for (const PhysicalContactVec3 vertex :
+                     mesh.triangles[triangle].vertices)
+                    mesh.groups[0].boundRadius = std::max(
+                        mesh.groups[0].boundRadius,
+                        PhysicalContactLength(vertex - centre));
+            return mesh;
+        };
+        PhysicalContactTriangleMesh movingTriangleMesh{};
+        movingTriangleMesh.triangleCount = 1;
+        movingTriangleMesh.triangles[0] = finishTriangle({{{
+            {0.0f, -0.10f, -0.10f},
+            {0.0f, 0.10f, -0.10f},
+            {0.0f, 0.0f, 0.10f}}}});
+        movingTriangleMesh = finishSingleGroupMesh(movingTriangleMesh);
+        PhysicalContactTriangleMesh targetTriangleMesh = movingTriangleMesh;
+        PhysicalContactTransform triangleFrom{};
+        PhysicalContactTransform triangleTo{};
+        triangleTo.position = {2.0f, 0.0f, 0.0f};
+        PhysicalContactTransform triangleTargetTransform{};
+        triangleTargetTransform.position = {1.0f, 0.0f, 0.0f};
+        const PhysicalContactTriangleMeshHit triangleMeshTunnelling =
+            PhysicalContactSweepTriangleMeshes(
+                movingTriangleMesh, triangleFrom, triangleTo,
+                targetTriangleMesh, triangleTargetTransform,
+                0.002f, 0.001f);
+        triangleTargetTransform.position = {1.0f, 0.25f, 0.0f};
+        const PhysicalContactTriangleMeshHit triangleMeshGrazingMiss =
+            PhysicalContactSweepTriangleMeshes(
+                movingTriangleMesh, triangleFrom, triangleTo,
+                targetTriangleMesh, triangleTargetTransform,
+                0.002f, 0.001f);
+
+        PhysicalContactTriangleMesh separatedSurfaceMesh{};
+        separatedSurfaceMesh.triangleCount = 2;
+        separatedSurfaceMesh.triangles[0] = finishTriangle({{{
+            {-0.50f, -0.10f, -0.10f},
+            {-0.50f, 0.10f, -0.10f},
+            {-0.50f, 0.0f, 0.10f}}}});
+        separatedSurfaceMesh.triangles[1] = finishTriangle({{{
+            {0.50f, -0.10f, -0.10f},
+            {0.50f, 0.10f, -0.10f},
+            {0.50f, 0.0f, 0.10f}}}});
+        separatedSurfaceMesh.groupCount = 2;
+        for (uint16_t group = 0; group < 2; ++group)
+        {
+            separatedSurfaceMesh.groups[group].firstTriangle = group;
+            separatedSurfaceMesh.groups[group].triangleCount = 1;
+            separatedSurfaceMesh.groups[group].centre =
+                separatedSurfaceMesh.triangles[group].centre;
+            separatedSurfaceMesh.groups[group].halfExtents =
+                separatedSurfaceMesh.triangles[group].halfExtents;
+            separatedSurfaceMesh.groups[group].boundRadius =
+                separatedSurfaceMesh.triangles[group].boundRadius;
+        }
+        PhysicalContactCompoundShape gapTarget{};
+        gapTarget.childCount = 1;
+        gapTarget.children[0] = makeBox({0.05f, 0.05f, 0.05f}, 0.0f);
+        PhysicalContactTransform identityTransform{};
+        const PhysicalContactTriangleMeshHit exactMeshGap =
+            PhysicalContactSweepTriangleMeshCompound(
+                separatedSurfaceMesh, identityTransform, identityTransform,
+                gapTarget, identityTransform, 0.002f, 0.001f);
+        PhysicalContactTriangleMesh invalidTriangleMesh = movingTriangleMesh;
+        invalidTriangleMesh.groups[0].triangleCount = 2;
+        Check(PhysicalContactTriangleMeshValid(movingTriangleMesh) &&
+              PhysicalContactTriangleMeshValid(separatedSurfaceMesh) &&
+              !PhysicalContactTriangleMeshValid(invalidTriangleMesh) &&
+              triangleMeshTunnelling.hit &&
+              triangleMeshTunnelling.fraction > 0.40f &&
+              triangleMeshTunnelling.fraction < 0.60f &&
+              triangleMeshTunnelling.normalReliable &&
+              !triangleMeshGrazingMiss.hit && !exactMeshGap.hit,
+            "Triangle-accurate contact catches a fast thin-surface crossing, "
+            "preserves grazing and concave gaps, and rejects malformed fixed "
+            "mesh bounds");
+
+        const auto makeBenchmarkMesh = [&](uint16_t triangleCount,
+                                           uint16_t groupCount) {
+            PhysicalContactTriangleMesh mesh{};
+            mesh.triangleCount = triangleCount;
+            mesh.groupCount = groupCount;
+            uint16_t first = 0;
+            for (uint16_t group = 0; group < groupCount; ++group)
+            {
+                const uint16_t end = static_cast<uint16_t>(
+                    (static_cast<uint32_t>(group + 1) * triangleCount) /
+                    groupCount);
+                PhysicalContactTriangleGroup& bounds = mesh.groups[group];
+                bounds.firstTriangle = first;
+                bounds.triangleCount = static_cast<uint16_t>(end - first);
+                PhysicalContactVec3 minimum{FLT_MAX, FLT_MAX, FLT_MAX};
+                PhysicalContactVec3 maximum{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+                for (uint16_t triangle = first; triangle < end; ++triangle)
+                {
+                    const uint16_t local =
+                        static_cast<uint16_t>(triangle - first);
+                    const float x = static_cast<float>(group) * 0.50f;
+                    const float y = static_cast<float>(local % 11) * 0.004f;
+                    const float z = static_cast<float>(local / 11) * 0.004f;
+                    mesh.triangles[triangle] = finishTriangle({{{
+                        {x, y - 0.0015f, z - 0.0015f},
+                        {x, y + 0.0015f, z - 0.0015f},
+                        {x, y, z + 0.0015f}}}});
+                    for (const PhysicalContactVec3 vertex :
+                         mesh.triangles[triangle].vertices)
+                    {
+                        minimum.x = std::min(minimum.x, vertex.x);
+                        minimum.y = std::min(minimum.y, vertex.y);
+                        minimum.z = std::min(minimum.z, vertex.z);
+                        maximum.x = std::max(maximum.x, vertex.x);
+                        maximum.y = std::max(maximum.y, vertex.y);
+                        maximum.z = std::max(maximum.z, vertex.z);
+                    }
+                }
+                bounds.centre = (minimum + maximum) * 0.5f;
+                bounds.halfExtents = (maximum - minimum) * 0.5f;
+                for (uint16_t triangle = first; triangle < end; ++triangle)
+                    for (const PhysicalContactVec3 vertex :
+                         mesh.triangles[triangle].vertices)
+                        bounds.boundRadius = std::max(
+                            bounds.boundRadius,
+                            PhysicalContactLength(vertex - bounds.centre));
+                first = end;
+            }
+            return mesh;
+        };
+        const PhysicalContactTriangleMesh censusMaximumWeapon =
+            makeBenchmarkMesh(222, 3);
+        const PhysicalContactTriangleMesh mongooseTriangleCount =
+            makeBenchmarkMesh(502, 10);
+        PhysicalContactTransform benchmarkFrom{};
+        benchmarkFrom.position = {-0.01f, 0.0f, 0.0f};
+        PhysicalContactTransform benchmarkTo{};
+        benchmarkTo.position = {0.01f, 0.0f, 0.0f};
+        PhysicalContactTransform benchmarkTarget{};
+        std::array<double, 128> triangleSweepMicroseconds{};
+        volatile float benchmarkSink = 0.0f;
+        for (double& elapsed : triangleSweepMicroseconds)
+        {
+            const auto started = std::chrono::steady_clock::now();
+            const PhysicalContactTriangleMeshHit hit =
+                PhysicalContactSweepTriangleMeshes(
+                    censusMaximumWeapon, benchmarkFrom, benchmarkTo,
+                    mongooseTriangleCount, benchmarkTarget,
+                    0.00066f, 0.00041f);
+            const auto finished = std::chrono::steady_clock::now();
+            elapsed = std::chrono::duration<double, std::micro>(
+                finished - started).count();
+            benchmarkSink = benchmarkSink + hit.fraction;
+        }
+        std::sort(triangleSweepMicroseconds.begin(),
+                  triangleSweepMicroseconds.end());
+        const double triangleSweepP95 = triangleSweepMicroseconds[
+            triangleSweepMicroseconds.size() * 95 / 100];
+        std::cout << "Triangle contact census benchmark p95: "
+                  << triangleSweepP95 << " us\n";
+        Check(benchmarkSink >= 0.0f && triangleSweepP95 <= 250.0,
+            "The 222-by-502 triangle census maximum remains within the "
+            "0.25 ms p95 contact budget");
 
         bool gjkGridExact = true;
         const PhysicalContactConvexShape gridBox =
