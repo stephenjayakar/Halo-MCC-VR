@@ -11438,7 +11438,13 @@ namespace
                 const int32_t detailedTargetHandle =
                     g_halo3ContactDebugAimTarget.load(
                         std::memory_order_relaxed);
+                // The first whole-compound alignment experiment is retained
+                // inert. A vehicle's global bottom and compound centroid can
+                // belong to different disjoint children and place the weapon
+                // in empty space between them.
+                constexpr bool kUseDetailedTargetForDebugAlignment = false;
                 const bool detailedDebugTarget =
+                    kUseDetailedTargetForDebugAlignment &&
                     detailedTargetHandle != -1 &&
                     Halo3ContactDetailedTargetShape(
                         detailedTargetHandle, debugAimData, debugTargetShape,

@@ -847,6 +847,16 @@ decision used the ten-part collision model. The next validator-only change
 aligns its scoop trajectory to the same detailed target shape and transform.
 Normal tracked-controller contact is unchanged.
 
+That whole-compound validator alignment failed and is disabled. Installed
+`1ba6663` still loaded `targetDetailed=1` with no fallback and completed the
+ten-child probe, but it produced zero exact hits. The preserved run is
+`out/debug-openxr/20260810-094547644Z-vehicle-nudge.log` (SHA-256
+`21B9D71247DE7D111DEA3130758E55BA78CCB89AA2D41B435C2F6A1C5FDFCD11`).
+The geometry is disjoint: a global lowest support point can lie on a wheel
+while the compound centroid lies in empty space between vehicle parts. The
+next validator must align one concrete convex child to one weapon child, not
+mix extrema from the whole compound.
+
 The bounded synthetic Release benchmark uses 70 vertices per target child,
 matching the largest official Mongoose child. Four held-weapon children against
 all ten Mongoose children measured `0.0655 ms` p95. The full four-by-sixteen
