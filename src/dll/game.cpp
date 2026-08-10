@@ -6342,6 +6342,12 @@ namespace
     std::atomic<bool> g_halo3ContactDebugRig{false};
     std::atomic<bool> g_halo3ContactDebugMelee{false};
     std::atomic<bool> g_halo3ContactDebugScoop{false};
+    std::atomic<bool> g_halo3ContactDebugWall{false};
+    std::atomic<int32_t> g_halo3ContactDebugWallType{-1};
+    std::atomic<int32_t> g_halo3ContactDebugWallHandle{-1};
+    std::atomic<bool> g_halo3ContactDebugStructureWallValidated{false};
+    std::atomic<bool> g_halo3ContactDebugObjectWallValidated{false};
+    std::atomic<float> g_halo3ContactDebugWallPenetrationMeters{0.0f};
     uint64_t g_halo3ContactDebugScoopStartMs = 0;
     std::array<int32_t, 32> g_halo3ContactDebugRejectedTargets{};
     std::atomic<uint32_t> g_halo3ContactDebugRejectedTargetCount{0};
@@ -10164,6 +10170,8 @@ namespace
             g_halo3ContactDebugMelee.load(std::memory_order_acquire);
         const bool debugScoop =
             g_halo3ContactDebugScoop.load(std::memory_order_acquire);
+        const bool debugWall =
+            g_halo3ContactDebugWall.load(std::memory_order_acquire);
         constexpr float kDebugCycleMs = 1000.0f;
         constexpr float kDebugAngularRate = 6.28318530718f;
         const float debugPhase = static_cast<float>(nowMs % 1000u) *
@@ -10347,7 +10355,7 @@ namespace
             }
             auto* entries = *reinterpret_cast<unsigned char**>(
                 table + kOdstDataArrayElementsOffset);
-            if (debugRig && entries)
+            if (debugRig && !debugWall && entries)
             {
                 uint32_t live = 0;
                 uint32_t finite = 0;
@@ -10409,7 +10417,7 @@ namespace
                 g_halo3ContactDebugObjectKinds.store(
                     kinds, std::memory_order_relaxed);
             }
-            if (debugRig && entries)
+            if (debugRig && !debugWall && entries)
             {
                 const int32_t debugHandle =
                     g_halo3ContactDebugTarget.load(std::memory_order_relaxed);
@@ -10609,7 +10617,7 @@ namespace
             PhysicalContactVec3 forward = PhysicalContactNormalize({
                 basis[0], basis[1], basis[2]});
             unsigned char* debugAimData = nullptr;
-            if (debugRig)
+            if (debugRig && !debugWall)
             {
                 const PhysicalContactVec3 camera{
                     g_baseCamX.load(std::memory_order_relaxed),
@@ -11025,13 +11033,195 @@ namespace
                 return cachedWallObjectBlocks;
             };
 
+            // The null-runtime wall transaction discovers real native Halo 3
+            // surfaces, then places the exact visible weapon solid through one
+            // of them. The production wall solver below must return the whole
+            // solid to the camera side. It alternates between structure and a
+            // validated fixed/keyframed object when the map exposes both.
+            if (debugWall)
+            {
+                struct DebugWallCandidate
+                {
+                    bool valid = false;
+                    int32_t type = -1;
+                    int32_t handle = -1;
+                    float distanceSquared = FLT_MAX;
+                    PhysicalContactVec3 surface{};
+                };
+                const PhysicalContactVec3 camera{
+                    g_camX.load(std::memory_order_relaxed),
+                    g_camY.load(std::memory_order_relaxed),
+                    g_camZ.load(std::memory_order_relaxed)};
+                DebugWallCandidate structureCandidate{};
+                DebugWallCandidate objectCandidate{};
+                const auto considerNativeHit = [&camera](
+                    const PhysicalContactVec3& ray,
+                    const Halo3CollisionResult& native,
+                    DebugWallCandidate& candidate)
+                {
+                    if (!std::isfinite(native.fraction) ||
+                        native.fraction < 0.0f || native.fraction > 1.0f)
+                        return;
+                    const PhysicalContactVec3 surface =
+                        camera + ray * native.fraction;
+                    const float distanceSquared =
+                        PhysicalContactLengthSquared(surface - camera);
+                    if (!PhysicalContactFinite(surface) ||
+                        !std::isfinite(distanceSquared) ||
+                        distanceSquared >= candidate.distanceSquared)
+                        return;
+                    candidate.valid = true;
+                    candidate.type = native.type;
+                    candidate.handle = native.objectHandle;
+                    candidate.distanceSquared = distanceSquared;
+                    candidate.surface = surface;
+                };
+
+                if (PhysicalContactFinite(camera))
+                {
+                    const std::array<PhysicalContactVec3, 14> directions{{
+                        weaponTransform.forward,
+                        weaponTransform.forward * -1.0f,
+                        weaponTransform.left,
+                        weaponTransform.left * -1.0f,
+                        weaponTransform.up,
+                        weaponTransform.up * -1.0f,
+                        weaponTransform.forward + weaponTransform.left,
+                        weaponTransform.forward - weaponTransform.left,
+                        weaponTransform.forward + weaponTransform.up,
+                        weaponTransform.forward - weaponTransform.up,
+                        weaponTransform.left + weaponTransform.up,
+                        weaponTransform.left - weaponTransform.up,
+                        weaponTransform.forward + weaponTransform.left +
+                            weaponTransform.up,
+                        weaponTransform.forward - weaponTransform.left -
+                            weaponTransform.up,
+                    }};
+                    for (PhysicalContactVec3 direction : directions)
+                    {
+                        direction = PhysicalContactNormalize(direction, {});
+                        if (PhysicalContactLengthSquared(direction) <= 1.0e-10f)
+                            continue;
+                        const PhysicalContactVec3 ray =
+                            direction * (20.0f * worldScale);
+                        const float point[3] = {
+                            camera.x, camera.y, camera.z};
+                        const float delta[3] = {ray.x, ray.y, ray.z};
+                        Halo3CollisionResult native{};
+                        native.type = -1;
+                        native.fraction = 1.0f;
+                        native.objectHandle = -1;
+                        if (g_halo3CollisionTestVector(
+                                1ull, false, point, delta, unitHandle,
+                                weaponHandle, -1, &native) &&
+                            native.type >= 0 && native.type < 4)
+                            considerNativeHit(
+                                ray, native, structureCandidate);
+                    }
+
+                    const uint32_t objectLimit = std::min(
+                        header.firstUnallocated, header.maximumCount);
+                    for (uint32_t index = 0; index < objectLimit; ++index)
+                    {
+                        auto* entry = entries + static_cast<size_t>(index) *
+                            kHalo3ObjectEntryStride;
+                        const uint16_t identifier =
+                            *reinterpret_cast<const uint16_t*>(entry);
+                        if (!OdstObjectEntryIsLive(identifier))
+                            continue;
+                        const int32_t handle = static_cast<int32_t>(
+                            (uint32_t{identifier} << 16) | index);
+                        if (handle == unitHandle || handle == weaponHandle)
+                            continue;
+                        auto* data = *reinterpret_cast<unsigned char**>(
+                            entry + kHalo3ObjectEntryDataOffset);
+                        if (!data || *reinterpret_cast<const int32_t*>(
+                                         data + kHalo3ObjectParentOffset) != -1)
+                            continue;
+                        void* component = nullptr;
+                        int32_t bodyIndex = -1;
+                        float massKilograms = 0.0f;
+                        uint8_t motionType = 0;
+                        const bool bodyResolved = Halo3ContactMassForObjectData(
+                            data, component, bodyIndex, massKilograms,
+                            &motionType);
+                        if (!PhysicalContactObjectBlocksAsStatic(
+                                true, false, bodyResolved, motionType))
+                            continue;
+                        const auto* center = reinterpret_cast<const float*>(
+                            data + kHalo3ObjectBoundingCenterOffset);
+                        const PhysicalContactVec3 ray{
+                            center[0] - camera.x, center[1] - camera.y,
+                            center[2] - camera.z};
+                        if (!PhysicalContactFinite(ray) ||
+                            PhysicalContactLengthSquared(ray) <= 1.0e-8f ||
+                            PhysicalContactLengthSquared(ray) >
+                                40.0f * 40.0f * worldScale * worldScale)
+                            continue;
+                        const float point[3] = {
+                            camera.x, camera.y, camera.z};
+                        const float delta[3] = {ray.x, ray.y, ray.z};
+                        Halo3CollisionResult native{};
+                        native.type = -1;
+                        native.fraction = 1.0f;
+                        native.objectHandle = -1;
+                        if (g_halo3CollisionTestVector(
+                                kWallCollisionFlags, false, point, delta,
+                                unitHandle, weaponHandle, -1, &native) &&
+                            native.type == 4 &&
+                            native.objectHandle == handle &&
+                            nativeHitBlocksWall(native))
+                            considerNativeHit(ray, native, objectCandidate);
+                    }
+                }
+
+                const bool preferObject = ((nowMs / 6000u) & 1u) != 0;
+                const DebugWallCandidate& selected =
+                    preferObject && objectCandidate.valid
+                    ? objectCandidate
+                    : (structureCandidate.valid
+                           ? structureCandidate : objectCandidate);
+                if (selected.valid)
+                {
+                    const PhysicalContactVec3 direction =
+                        PhysicalContactNormalize(
+                            selected.surface - camera,
+                            weaponTransform.forward);
+                    const float penetrationMeters =
+                        0.12f + 0.04f * std::sin(debugPhase);
+                    const PhysicalContactVec3 weaponFront =
+                        Halo3ContactCompoundSupport(
+                            weaponShape, weaponTransform, direction);
+                    weaponTransform.position = weaponTransform.position +
+                        selected.surface +
+                        direction * (penetrationMeters * worldScale) -
+                        weaponFront;
+                    grip = weaponTransform.position;
+                    g_halo3ContactDebugWallType.store(
+                        selected.type, std::memory_order_relaxed);
+                    g_halo3ContactDebugWallHandle.store(
+                        selected.handle, std::memory_order_relaxed);
+                    g_halo3ContactDebugWallPenetrationMeters.store(
+                        penetrationMeters, std::memory_order_relaxed);
+                }
+                else
+                {
+                    g_halo3ContactDebugWallType.store(
+                        -1, std::memory_order_relaxed);
+                    g_halo3ContactDebugWallHandle.store(
+                        -1, std::memory_order_relaxed);
+                    g_halo3ContactDebugWallPenetrationMeters.store(
+                        0.0f, std::memory_order_relaxed);
+                }
+            }
+
             // Constrain the final rendered weapon against native BSP,
             // instanced structure, and exact static object collision. The
             // palette publication already includes the prior
             // frame's rigid wall translation, so remove that translation before
             // querying. This prevents the filter from alternately treating its
             // own correction as the unconstrained controller pose.
-            if (!debugRig)
+            if (!debugRig || debugWall)
             {
                 const PhysicalContactVec3 camera{
                     g_camX.load(std::memory_order_relaxed),
@@ -11039,8 +11229,11 @@ namespace
                     g_camZ.load(std::memory_order_relaxed)};
                 PhysicalContactTransform unconstrainedWeaponTransform =
                     weaponTransform;
-                unconstrainedWeaponTransform.position =
-                    weaponTransform.position - g_halo3ContactWallOffset;
+                if (!debugWall)
+                {
+                    unconstrainedWeaponTransform.position =
+                        weaponTransform.position - g_halo3ContactWallOffset;
+                }
                 const bool previousWallPoseValid =
                     g_halo3ContactPreviousWallPoseValid &&
                     g_halo3ContactWallWeaponHandle == weaponHandle &&
@@ -11184,6 +11377,23 @@ namespace
                 const PhysicalContactWallConstraint requested =
                     PhysicalContactSolveWallPlanes(
                         wallPlanes.data(), wallPlaneCount, worldScale);
+                if (debugWall && requested.constrained &&
+                    wallPlaneCount > 0 &&
+                    PhysicalContactLength(requested.offset) / worldScale >=
+                        0.05f)
+                {
+                    const int32_t debugWallType =
+                        g_halo3ContactDebugWallType.load(
+                            std::memory_order_relaxed);
+                    if (debugWallType >= 0 && debugWallType < 4)
+                        g_halo3ContactDebugStructureWallValidated.store(
+                            true, std::memory_order_relaxed);
+                    else if (debugWallType == 4 &&
+                             g_halo3ContactWallObjectPlanes.load(
+                                 std::memory_order_relaxed) > 0)
+                        g_halo3ContactDebugObjectWallValidated.store(
+                            true, std::memory_order_relaxed);
+                }
                 const float wallDt = g_halo3ContactWallUpdateMs &&
                         nowMs > g_halo3ContactWallUpdateMs
                     ? std::min(
@@ -12070,6 +12280,23 @@ namespace
                 static_cast<uint32_t>((census >> 48) & 0xFFFu),
                 g_halo3ContactDebugObjectKinds.load(
                     std::memory_order_relaxed));
+            if (g_halo3ContactDebugWall.load(std::memory_order_acquire))
+            {
+                LOG("H3 physical contact DEBUG WALL: nativeType=%d "
+                    "handle=0x%08X penetration=%.3fm structureValidated=%u "
+                    "objectValidated=%u",
+                    g_halo3ContactDebugWallType.load(
+                        std::memory_order_relaxed),
+                    static_cast<uint32_t>(
+                        g_halo3ContactDebugWallHandle.load(
+                            std::memory_order_relaxed)),
+                    g_halo3ContactDebugWallPenetrationMeters.load(
+                        std::memory_order_relaxed),
+                    g_halo3ContactDebugStructureWallValidated.load(
+                        std::memory_order_relaxed) ? 1u : 0u,
+                    g_halo3ContactDebugObjectWallValidated.load(
+                        std::memory_order_relaxed) ? 1u : 0u);
+            }
         }
     }
 
@@ -16745,15 +16972,32 @@ namespace
         const bool contactDebugScoopEnabled = contactDebugScoopLength > 0 &&
             contactDebugScoopLength < std::size(contactDebugScoopValue) &&
             contactDebugScoopValue[0] != L'0';
+        wchar_t contactDebugWallValue[8]{};
+        const DWORD contactDebugWallLength = GetEnvironmentVariableW(
+            L"HALOMCCVR_H3_CONTACT_DEBUG_WALL", contactDebugWallValue,
+            static_cast<DWORD>(std::size(contactDebugWallValue)));
+        const bool contactDebugWallEnabled = contactDebugWallLength > 0 &&
+            contactDebugWallLength < std::size(contactDebugWallValue) &&
+            contactDebugWallValue[0] != L'0';
         const bool contactDebugRigEnabled =
             contactDebugEnabled || contactDebugMeleeEnabled ||
-            contactDebugScoopEnabled;
+            contactDebugScoopEnabled || contactDebugWallEnabled;
         g_halo3ContactDebugRig.store(
             contactDebugRigEnabled, std::memory_order_release);
         g_halo3ContactDebugMelee.store(
             contactDebugMeleeEnabled, std::memory_order_release);
         g_halo3ContactDebugScoop.store(
             contactDebugScoopEnabled, std::memory_order_release);
+        g_halo3ContactDebugWall.store(
+            contactDebugWallEnabled, std::memory_order_release);
+        g_halo3ContactDebugWallType.store(-1, std::memory_order_release);
+        g_halo3ContactDebugWallHandle.store(-1, std::memory_order_release);
+        g_halo3ContactDebugStructureWallValidated.store(
+            false, std::memory_order_release);
+        g_halo3ContactDebugObjectWallValidated.store(
+            false, std::memory_order_release);
+        g_halo3ContactDebugWallPenetrationMeters.store(
+            0.0f, std::memory_order_release);
         g_halo3ContactDebugScoopStartMs = 0;
         g_halo3ContactDebugRejectedTargets.fill(-1);
         g_halo3ContactDebugRejectedTargetCount.store(
@@ -16766,6 +17010,9 @@ namespace
             0.0f, std::memory_order_release);
         g_halo3ContactDebugPeakReleaseSpeed.store(
             0.0f, std::memory_order_release);
+        g_halo3ContactDebugAimTarget.store(-1, std::memory_order_release);
+        g_halo3ContactDebugAimKind.store(
+            0xFFFFFFFFu, std::memory_order_release);
         g_halo3ContactDebugTarget.store(-1, std::memory_order_release);
         g_halo3ContactDebugAnchorValid = false;
         g_halo3ContactDebugAnchorGeneration = 0;
@@ -16811,6 +17058,10 @@ namespace
             LOG("H3 physical contact DEBUG SCOOP enabled by environment; "
                 "one-shot sub-melee lift, carry, separation, and object-state "
                 "readback active");
+        if (contactDebugWallEnabled)
+            LOG("H3 physical contact DEBUG WALL enabled by environment; exact "
+                "visible collision geometry will test native structure and "
+                "fixed-object wall constraints");
         LocateNativePauseFlag(base, size);
         LocateCinematicState(base, size);
         uintptr_t hit = sig::Find(base, size, kCamCopySig);
