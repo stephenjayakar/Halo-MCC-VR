@@ -1527,35 +1527,6 @@ inline PhysicalContactVec3 PhysicalContactTargetDeltaVelocity(
     return PhysicalContactFinite(delta) ? delta : PhysicalContactVec3{};
 }
 
-// object_set_velocities can move a sleeping Halo body for one simulation
-// update without leaving its Havok rigid body active. Retain the bounded
-// whole-body correction, then apply a much smaller native point impulse so the
-// last operation belongs to Havok and wakes the exact rigid body. The fixed
-// target-delta limit keeps authored mass in the wake request and makes the
-// vehicle case over two orders of magnitude smaller than the rejected full
-// point impulse.
-inline PhysicalContactVec3 PhysicalContactWakeImpulse(
-    const PhysicalContactConstraintImpulse& response,
-    float targetMassKilograms, float worldUnitsPerMeter)
-{
-    if (!response.apply || !PhysicalContactFinite(response.worldImpulse) ||
-        !std::isfinite(targetMassKilograms) ||
-        targetMassKilograms <= 0.001f ||
-        targetMassKilograms > 1000000.0f ||
-        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f)
-        return {};
-    constexpr float kMaximumWakeDeltaMetersPerSecond = 0.001f;
-    const float responseLength = PhysicalContactLength(response.worldImpulse);
-    if (!std::isfinite(responseLength) || responseLength <= 1.0e-8f)
-        return {};
-    const float maximumWakeImpulse = targetMassKilograms *
-        kMaximumWakeDeltaMetersPerSecond * worldUnitsPerMeter;
-    const float wakeLength = std::min(responseLength, maximumWakeImpulse);
-    const PhysicalContactVec3 wake =
-        response.worldImpulse * (wakeLength / responseLength);
-    return PhysicalContactFinite(wake) ? wake : PhysicalContactVec3{};
-}
-
 // Convert the exact mass-aware point impulse into portable controller feedback.
 // The square-root response keeps a light prop readable without letting a heavy
 // vehicle saturate the controller. Native melee gets a clear minimum pulse.
