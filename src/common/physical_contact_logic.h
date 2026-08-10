@@ -1185,10 +1185,13 @@ inline PhysicalContactDebugScoopPose PhysicalContactDebugScoopTrajectory(
     return {
         0.35f * smoothStep(liftPhase),
         0.35f * smoothStep(carryPhase),
-        0.40f * smoothStep(releasePhase),
+        // Separate below the target without carrying it back to the floor.
+        // The former 0.40 m descent exceeded the 0.35 m lift, so Halo's floor
+        // contact erased the lateral velocity before the validation window.
+        0.20f * smoothStep(releasePhase),
         0.35f * smoothStepVelocity(liftPhase, 1.5f),
         0.35f * smoothStepVelocity(carryPhase, 2.5f),
-        0.40f * smoothStepVelocity(releasePhase, 0.5f)};
+        0.20f * smoothStepVelocity(releasePhase, 0.5f)};
 }
 
 inline bool PhysicalContactDebugScoopPassed(
