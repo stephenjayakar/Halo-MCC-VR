@@ -1207,6 +1207,11 @@ namespace
     thread_local int g_halo3ContactPaletteBoneCount = 0;
     thread_local uint64_t g_halo3ContactPaletteWristDescendants = 0;
     thread_local uint16_t g_halo3ContactExpectedRenderTag = 0xFFFFu;
+    // Candidate e91f451 treated the prepared slot's +0x4C datum as the tag
+    // passed to the final visible-palette submission. The exact-visible replay
+    // reached Halo 3 gameplay but published zero palettes. Keep that strict
+    // identity experiment inert until runtime telemetry proves the mapping.
+    constexpr bool kEnableHalo3ExactContactRenderTag = false;
     thread_local BoneMatrix g_fpPaletteScratch[kReachFpMaxSourceNodeCount];
     thread_local BoneMatrix g_scopeHiddenPalette[64];
     // The render-thread IK path publishes only pointer-sized diagnostics.
@@ -5334,11 +5339,22 @@ namespace
                 finite = finite && std::isfinite(value);
             for (float value : visibleRoot.translation)
                 finite = finite && std::isfinite(value);
-            if (PhysicalContactVisibleWeaponSubmissionAccepted(
-                    g_halo3ContactExpectedRenderTag, tag,
-                    renderNodeCount, mappedRoot,
-                    g_halo3ContactPaletteBoneCount,
-                    g_halo3ContactPaletteWristDescendants, finite))
+            const bool boundedWristSubmission =
+                renderNodeCount > 0 && renderNodeCount <= 16 &&
+                mappedRoot >= 0 &&
+                mappedRoot < g_halo3ContactPaletteBoneCount &&
+                mappedRoot < 64 &&
+                (g_halo3ContactPaletteWristDescendants &
+                 (uint64_t{1} << mappedRoot)) != 0 && finite;
+            const bool acceptedSubmission =
+                kEnableHalo3ExactContactRenderTag
+                ? PhysicalContactVisibleWeaponSubmissionAccepted(
+                      g_halo3ContactExpectedRenderTag, tag,
+                      renderNodeCount, mappedRoot,
+                      g_halo3ContactPaletteBoneCount,
+                      g_halo3ContactPaletteWristDescendants, finite)
+                : boundedWristSubmission;
+            if (acceptedSubmission)
             {
                 if (g_halo3ContactDebugVisibleReplay.load(
                         std::memory_order_acquire))

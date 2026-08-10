@@ -977,6 +977,20 @@ null-driver rewrite. One later navigation attempt selected Escalation Slayer
 instead of Forge and was rejected before Halo 3 gameplay validation. That menu
 failure is not product evidence.
 
+## Rejected exact render-model identity
+
+Candidate `e91f451` read the primary prepared first-person slot's datum at
+`+0x4C` and required its low 16 bits to equal the tag passed to the final
+visible-palette submission. The automated exact-visible Forge replay reached
+Halo 3 gameplay, but `palettes=0`, `shapeSource=0`, and the contact state
+remained at `visible-pose`. The strict equality therefore rejected every final
+weapon palette instead of separating the weapon from its attachments. The
+preserved log is
+`out/debug-openxr/20260810-151337682Z-visible-weapon-nudge.log` (SHA-256
+`134262C419761FFC7D53604EC60D4CB45E1174BB6DC707FAFEE66C26DF2B3650`).
+The equality is disabled before any replacement experiment; the proven slot,
+field, and submission hook remain leads, not a proven cross-hook identity.
+
 ## Rejected first-person root composition
 
 The exact visible replay proved that the contact publication and the pixels do
