@@ -17,6 +17,9 @@ param(
     [ValidateRange(30, 600)]
     [int]$MenuControlTimeoutSeconds = 300,
 
+    [ValidateRange(0, 300)]
+    [int]$PostPassHoldSeconds = 0,
+
     [switch]$ExternalMenuControl
 )
 
@@ -539,6 +542,10 @@ public static class HaloMccVrContactInput {
         Save-DesktopScreenshot $successScreenshot
     }
     $passed = $true
+    if ($PostPassHoldSeconds -gt 0) {
+        Write-Host "Holding the validated Forge process for $PostPassHoldSeconds seconds."
+        Start-Sleep -Seconds $PostPassHoldSeconds
+    }
 }
 catch {
     $failure = $_.Exception.Message
