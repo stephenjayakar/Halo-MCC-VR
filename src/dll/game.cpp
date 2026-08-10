@@ -6522,7 +6522,9 @@ namespace
     uint64_t g_halo3ContactPreviousPoseMs = 0;
     bool g_halo3ContactPreviousPoseValid = false;
     PhysicalContactVec3 g_halo3ContactWallOffset{};
+    PhysicalContactVec3 g_halo3ContactBodyOffset{};
     uint64_t g_halo3ContactWallUpdateMs = 0;
+    uint64_t g_halo3ContactBodyUpdateMs = 0;
     PhysicalContactTransform g_halo3ContactPreviousWallTransform{};
     int32_t g_halo3ContactWallWeaponHandle = -1;
     bool g_halo3ContactPreviousWallPoseValid = false;
@@ -6553,6 +6555,7 @@ namespace
     std::atomic<float> g_halo3ContactRelativeSpeed{0.0f};
     std::atomic<uint64_t> g_halo3ContactWallBlocks{0};
     std::atomic<float> g_halo3ContactWallSetbackMeters{0.0f};
+    std::atomic<float> g_halo3ContactBodySetbackMeters{0.0f};
     std::atomic<uint64_t> g_halo3ContactWallRays{0};
     std::atomic<uint64_t> g_halo3ContactWallMotionRays{0};
     std::atomic<uint64_t> g_halo3ContactWallObjectPlanes{0};
@@ -10489,7 +10492,9 @@ namespace
         g_halo3ContactPreviousPoseValid = false;
         g_halo3ContactPreviousPoseMs = 0;
         g_halo3ContactWallOffset = {};
+        g_halo3ContactBodyOffset = {};
         g_halo3ContactWallUpdateMs = 0;
+        g_halo3ContactBodyUpdateMs = 0;
         g_halo3ContactPreviousWallTransform = {};
         g_halo3ContactWallWeaponHandle = -1;
         g_halo3ContactPreviousWallPoseValid = false;
@@ -10516,6 +10521,8 @@ namespace
             0, std::memory_order_relaxed);
         Halo3PublishWeaponWallOffset({}, 0);
         g_halo3ContactWallSetbackMeters.store(0.0f,
+                                               std::memory_order_relaxed);
+        g_halo3ContactBodySetbackMeters.store(0.0f,
                                                std::memory_order_relaxed);
         g_halo3ContactWallVertices.store(0, std::memory_order_relaxed);
         g_halo3ContactWallPlanes.store(0, std::memory_order_relaxed);
@@ -12517,6 +12524,10 @@ namespace
             // frame's rigid wall translation, so remove that translation before
             // querying. This prevents the filter from alternately treating its
             // own correction as the unconstrained controller pose.
+            const PhysicalContactVec3 previouslyAppliedWallOffset =
+                g_halo3ContactWallOffset;
+            const PhysicalContactVec3 previouslyAppliedBodyOffset =
+                g_halo3ContactBodyOffset;
             if (!debugRig || debugWall)
             {
                 const PhysicalContactVec3 camera{
@@ -12528,7 +12539,8 @@ namespace
                 if (!debugWall)
                 {
                     unconstrainedWeaponTransform.position =
-                        weaponTransform.position - g_halo3ContactWallOffset;
+                        weaponTransform.position - previouslyAppliedWallOffset -
+                        previouslyAppliedBodyOffset;
                 }
                 const bool previousWallPoseValid =
                     g_halo3ContactPreviousWallPoseValid &&
@@ -12702,7 +12714,7 @@ namespace
                     requested.constrained, wallDt, worldScale);
                 g_halo3ContactWallUpdateMs = nowMs;
                 Halo3PublishWeaponWallOffset(
-                    g_halo3ContactWallOffset, nowMs);
+                    g_halo3ContactWallOffset + g_halo3ContactBodyOffset, nowMs);
                 g_halo3ContactPreviousWallTransform =
                     unconstrainedWeaponTransform;
                 g_halo3ContactWallWeaponHandle = weaponHandle;
@@ -12726,13 +12738,59 @@ namespace
                     0, std::memory_order_relaxed);
                 g_halo3ContactWallPlanes.store(
                     0, std::memory_order_relaxed);
-                Halo3PublishWeaponWallOffset({}, 0);
+                Halo3PublishWeaponWallOffset(
+                    g_halo3ContactBodyOffset,
+                    g_halo3ContactBodyUpdateMs ? nowMs : 0);
             }
+            PhysicalContactTransform intendedWeaponTransform = weaponTransform;
+            PhysicalContactVec3 intendedGrip = grip;
+            PhysicalContactVec3 intendedTip = tip;
+            if (!debugRig)
+            {
+                // The rendered palette contains the previous frame's visual
+                // wall/body correction. Recover the controller-intended pose,
+                // then apply only this frame's static-wall result. Exact body
+                // contact below decides the new dynamic correction.
+                intendedWeaponTransform.position =
+                    weaponTransform.position - previouslyAppliedWallOffset -
+                    previouslyAppliedBodyOffset + g_halo3ContactWallOffset;
+                const PhysicalContactVec3 intendedDelta =
+                    intendedWeaponTransform.position - weaponTransform.position;
+                intendedGrip = grip + intendedDelta;
+                intendedTip = tip + intendedDelta;
+            }
+            const auto updateBodyConstraint = [&] (
+                bool constrained, PhysicalContactVec3 requestedOffset)
+            {
+                const float bodyDt = g_halo3ContactBodyUpdateMs &&
+                        nowMs > g_halo3ContactBodyUpdateMs
+                    ? std::min(
+                          static_cast<float>(
+                              nowMs - g_halo3ContactBodyUpdateMs) * 0.001f,
+                          0.1f)
+                    : 0.0f;
+                g_halo3ContactBodyOffset = PhysicalContactUpdateWallOffset(
+                    g_halo3ContactBodyOffset, requestedOffset,
+                    constrained, bodyDt, worldScale);
+                g_halo3ContactBodyUpdateMs = nowMs;
+                const float setbackMeters = PhysicalContactLength(
+                    g_halo3ContactBodyOffset) / worldScale;
+                g_halo3ContactBodySetbackMeters.store(
+                    std::isfinite(setbackMeters) ? setbackMeters : 0.0f,
+                    std::memory_order_relaxed);
+                Halo3PublishWeaponWallOffset(
+                    g_halo3ContactWallOffset + g_halo3ContactBodyOffset, nowMs);
+            };
             if (weaponHandle != g_halo3ContactWeaponHandle)
             {
                 g_halo3ContactDebounce.Reset();
                 g_halo3ContactWeaponHandle = weaponHandle;
                 g_halo3ContactPreviousPoseValid = false;
+                g_halo3ContactBodyOffset = {};
+                g_halo3ContactBodyUpdateMs = nowMs;
+                g_halo3ContactBodySetbackMeters.store(
+                    0.0f, std::memory_order_relaxed);
+                Halo3PublishWeaponWallOffset(g_halo3ContactWallOffset, nowMs);
             }
             if (!g_halo3ContactPreviousPoseValid)
             {
@@ -12752,7 +12810,7 @@ namespace
                 g_halo3ContactPreviousWeaponTransform;
             const uint64_t previousPoseMs = g_halo3ContactPreviousPoseMs;
             const PhysicalContactVec3 movementDirection =
-                PhysicalContactNormalize(tip - previousTip,
+                PhysicalContactNormalize(intendedTip - previousTip,
                                          forward);
             std::array<PhysicalContactVec3, 264> nativeLocalSamples{};
             const size_t nativeLocalSampleCount =
@@ -12804,7 +12862,8 @@ namespace
                         nativeLocalSamples[sampleIndex]);
                 const PhysicalContactVec3 currentPoint =
                     PhysicalContactTransformPoint(
-                        weaponTransform, nativeLocalSamples[sampleIndex]);
+                        intendedWeaponTransform,
+                        nativeLocalSamples[sampleIndex]);
                 const PhysicalContactVec3 vector =
                     currentPoint - previousPoint;
                 if (!PhysicalContactFinite(previousPoint) ||
@@ -12872,7 +12931,7 @@ namespace
             const float weaponBroadRadius =
                 PhysicalContactCompoundBoundRadius(weaponShape) *
                 std::max(previousWeaponTransform.scale,
-                         weaponTransform.scale);
+                         intendedWeaponTransform.scale);
             const uint32_t limit = std::min(
                 header.firstUnallocated, header.maximumCount);
             for (uint32_t index = 0; index < limit; ++index)
@@ -12906,7 +12965,7 @@ namespace
                     continue;
                 const PhysicalContactHit proxy = PhysicalContactSweepPoint(
                     previousWeaponTransform.position,
-                    weaponTransform.position, targetCenter,
+                    intendedWeaponTransform.position, targetCenter,
                     weaponBroadRadius + radius);
                 if (!proxy.hit)
                     continue;
@@ -12947,7 +13006,8 @@ namespace
                         const PhysicalContactTriangleMeshHit meshHit =
                             PhysicalContactSweepTriangleMeshes(
                                 weaponTriangleMesh,
-                                previousWeaponTransform, weaponTransform,
+                                previousWeaponTransform,
+                                intendedWeaponTransform,
                                 targetTriangleMesh, authoredTargetTransform,
                                 kHalo3ContactTriangleStepMeters * worldScale,
                                 kHalo3ContactTriangleSurfaceRadiusMeters *
@@ -12969,7 +13029,7 @@ namespace
                     else
                         authored = PhysicalContactSweepCompound(
                             weaponShape, previousWeaponTransform,
-                            weaponTransform, targetShape,
+                            intendedWeaponTransform, targetShape,
                             authoredTargetTransform);
                     // A damaged vehicle can select a different collision-model
                     // permutation. The detailed default shape may narrow the
@@ -13006,7 +13066,8 @@ namespace
                         const PhysicalContactTriangleMeshHit meshHit =
                             PhysicalContactSweepTriangleMeshCompound(
                                 weaponTriangleMesh,
-                                previousWeaponTransform, weaponTransform,
+                                previousWeaponTransform,
+                                intendedWeaponTransform,
                                 targetShape, authoredTargetTransform,
                                 kHalo3ContactTriangleStepMeters * worldScale,
                                 kHalo3ContactTriangleSurfaceRadiusMeters *
@@ -13026,7 +13087,7 @@ namespace
                     else
                         authored = PhysicalContactSweepCompound(
                             weaponShape, previousWeaponTransform,
-                            weaponTransform, targetShape,
+                            intendedWeaponTransform, targetShape,
                             authoredTargetTransform);
                     if (authored.hit && !collisionShape)
                     {
@@ -13043,7 +13104,7 @@ namespace
                     if (!Halo3ContactSweepAnimatedBodies(
                             handle, data, weaponShape,
                             collisionShape ? &weaponTriangleMesh : nullptr,
-                            previousWeaponTransform, weaponTransform,
+                            previousWeaponTransform, intendedWeaponTransform,
                             kHalo3ContactTriangleStepMeters * worldScale,
                             kHalo3ContactTriangleSurfaceRadiusMeters *
                                 worldScale,
@@ -13106,6 +13167,7 @@ namespace
             g_halo3ContactDebounce.BeginSample();
             if (!closest.hit)
             {
+                updateBodyConstraint(false, {});
                 const PhysicalContactReleaseCommand release =
                     g_halo3ContactReleaseLatch.TakeIfSeparated(-1, nowMs);
                 if (release.apply)
@@ -13160,6 +13222,7 @@ namespace
                     1, std::memory_order_relaxed);
             if (closestType != 4 || closestHandle == -1)
             {
+                updateBodyConstraint(false, {});
                 g_halo3ContactCandidateHandle.store(
                     -1, std::memory_order_relaxed);
                 g_halo3ContactCandidateNormalReliable.store(
@@ -13181,6 +13244,7 @@ namespace
             if (closestHandle == unitHandle || closestHandle == weaponHandle ||
                 closestIndex >= header.maximumCount)
             {
+                updateBodyConstraint(false, {});
                 g_halo3ContactDebounce.EndSample();
                 return;
             }
@@ -13190,6 +13254,7 @@ namespace
                 static_cast<uint16_t>(
                     static_cast<uint32_t>(closestHandle) >> 16))
             {
+                updateBodyConstraint(false, {});
                 g_halo3ContactDebounce.EndSample();
                 return;
             }
@@ -13198,6 +13263,7 @@ namespace
             if (!closestData || *reinterpret_cast<const int32_t*>(
                                     closestData + kHalo3ObjectParentOffset) != -1)
             {
+                updateBodyConstraint(false, {});
                 g_halo3ContactDebounce.EndSample();
                 return;
             }
@@ -13220,11 +13286,12 @@ namespace
                     // inventing a center-to-center force direction.
                     g_halo3ContactUnreliableNormalRejects.fetch_add(
                         1, std::memory_order_relaxed);
+                    updateBodyConstraint(false, {});
                     g_halo3ContactDebounce.EndSample();
                     return;
                 }
                 closestWeaponPoint = PhysicalContactConvexSupport(
-                    closestWeaponShape, weaponTransform,
+                    closestWeaponShape, intendedWeaponTransform,
                     closest.normal * -1.0f);
                 const PhysicalContactVec3 targetPoint =
                     PhysicalContactConvexSupport(
@@ -13240,6 +13307,14 @@ namespace
                 // material point used to measure rigid weapon velocity.
                 closest.point = targetPoint;
             }
+            const PhysicalContactWallConstraint bodyConstraint =
+                PhysicalContactDynamicBodyOffset(
+                    previousWeaponTransform, intendedWeaponTransform,
+                    closest.fraction, closest.normal,
+                    closestPenetrationMeters,
+                    kHalo3ContactTriangleSurfaceRadiusMeters, worldScale);
+            updateBodyConstraint(
+                bodyConstraint.constrained, bodyConstraint.offset);
             if (!previousPoseMs || visiblePoseMs <= previousPoseMs ||
                 visiblePoseMs - previousPoseMs > 100 ||
                 !g_halo3ObjectGetVelocities || !g_halo3ObjectGetCenter)
@@ -13319,7 +13394,7 @@ namespace
                 ? PhysicalContactTrackedPointVelocity(
                       weaponLinearMetersPerSecond,
                       weaponAngularRadiansPerSecond,
-                      weaponTransform.position, weaponContactPoint,
+                      intendedWeaponTransform.position, weaponContactPoint,
                       {targetLinear[0], targetLinear[1], targetLinear[2]},
                       {targetAngular[0], targetAngular[1], targetAngular[2]},
                       {targetCenterRaw[0], targetCenterRaw[1],
@@ -13599,7 +13674,8 @@ namespace
             "shapeSource=%u weaponTriangles=%u targetShapeSource=%u "
             "targetTriangles=%u targetDetailed=%u "
             "targetFallback=%u targetConfirmRejects=%u nativeSamples=%u "
-            "wallBlocks=%llu wallSetback=%.3fm wallRays=%llu "
+            "wallBlocks=%llu wallSetback=%.3fm bodySetback=%.3fm "
+            "wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
             "wallVertices=%u wallPlanes=%u",
             stageName,
@@ -13695,6 +13771,8 @@ namespace
             (unsigned long long)g_halo3ContactWallBlocks.load(
                 std::memory_order_relaxed),
             g_halo3ContactWallSetbackMeters.load(
+                std::memory_order_relaxed),
+            g_halo3ContactBodySetbackMeters.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactWallRays.load(
                 std::memory_order_relaxed),

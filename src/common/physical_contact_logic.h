@@ -1653,6 +1653,56 @@ inline PhysicalContactVec3 PhysicalContactUpdateWallOffset(
     return currentOffset * ((currentLength - release) / currentLength);
 }
 
+// Keep the rendered kinematic weapon on the target-facing side of an exact
+// dynamic-body hit. Only normal travel is rejected, so the controller may still
+// slide along a surface to scoop or carry it. The current pose is the
+// unconstrained controller intent; the previous pose is the last rendered,
+// constrained pose. Measured end-pose penetration also covers rotation about
+// the grip, where position travel alone is insufficient.
+inline PhysicalContactWallConstraint PhysicalContactDynamicBodyOffset(
+    const PhysicalContactTransform& previousWeaponTransform,
+    const PhysicalContactTransform& intendedWeaponTransform,
+    float hitFraction, PhysicalContactVec3 targetToWeaponNormal,
+    float penetrationMeters, float clearanceMeters,
+    float worldUnitsPerMeter)
+{
+    PhysicalContactWallConstraint result{};
+    if (!PhysicalContactTransformFinite(previousWeaponTransform) ||
+        !PhysicalContactTransformFinite(intendedWeaponTransform) ||
+        !std::isfinite(hitFraction) || hitFraction < 0.0f ||
+        hitFraction > 1.0f || !PhysicalContactFinite(targetToWeaponNormal) ||
+        !std::isfinite(penetrationMeters) || penetrationMeters < 0.0f ||
+        penetrationMeters > 10.0f || !std::isfinite(clearanceMeters) ||
+        clearanceMeters < 0.0f || clearanceMeters > 0.05f ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f)
+        return result;
+
+    const PhysicalContactVec3 outward = PhysicalContactNormalize(
+        targetToWeaponNormal, {});
+    if (PhysicalContactLengthSquared(outward) <= 1.0e-12f)
+        return result;
+    const PhysicalContactTransform impact = PhysicalContactInterpolateTransform(
+        previousWeaponTransform, intendedWeaponTransform, hitFraction);
+    const PhysicalContactVec3 postImpact =
+        intendedWeaponTransform.position - impact.position;
+    const float inwardTravelWorldUnits = std::max(
+        0.0f, PhysicalContactDot(postImpact, outward * -1.0f));
+    const float measuredPenetrationWorldUnits =
+        penetrationMeters * worldUnitsPerMeter;
+    float setback = std::max(
+        inwardTravelWorldUnits, measuredPenetrationWorldUnits) +
+        clearanceMeters * worldUnitsPerMeter;
+    const float maximum = worldUnitsPerMeter;
+    setback = std::min(setback, maximum);
+    if (!std::isfinite(setback) || setback <= 1.0e-5f)
+        return result;
+
+    result.offset = outward * setback;
+    result.setbackWorldUnits = setback;
+    result.constrained = PhysicalContactFinite(result.offset);
+    return result;
+}
+
 // Compute velocity where contact actually occurred rather than classifying a
 // rotational strike from controller-origin speed. The same capsule fraction is
 // evaluated at the previous and current visible weapon poses. Target velocity

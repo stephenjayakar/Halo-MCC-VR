@@ -1104,6 +1104,39 @@ disjoint triangle groups, malformed group bounds, mesh-to-mesh contact, and
 mesh-to-convex fallback contact. Live Forge performance and headset acceptance
 remain pending for the replacement candidate.
 
+### Valhalla headset result and dynamic separation constraint
+
+Source `6a7ae5a` was tested in Halo 3 Valhalla Forge on the Steam edition,
+SteamVR/OpenXR 2.17.6, Oculus/Quest path, at 120 Hz. The installed DLL was
+`F83AA191034F3E56D1CE3EB1976B6CC277E4750050A98E9F083684D4C769489A`.
+The preserved log is
+`out/test-runs/6a7ae5a-h3-valhalla-headset-rejected-20260810-131849PDT/halo3xr.log`
+(SHA-256 `4F5ECD45D5DD15DBE34E18CA84E7101BBEA7520BC5054C50A4BA0D007F131DDA`).
+The user reported that exact weapon/object geometry was a large improvement,
+so the triangle replacement remains active. The same run rejected response
+behavior: the weapon could clip through a body after a nudge, lifting therefore
+failed, and sustained Mongoose pushing caused accidental melee damage.
+
+The log agrees with that distinction. Exact held meshes remained active at 36
+and later 80 triangles, while exact targets ranged from 12 to 438 triangles.
+The response nevertheless recorded end-pose penetration from centimetres to
+more than half a metre, and 42 native melee events during the session. An
+impulse can change target velocity but cannot by itself constrain the rendered
+kinematic weapon, especially against a floor-loaded or very heavy body.
+
+The next response candidate therefore keeps the exact triangle sweep and
+mass-correct impulse, but adds a separate visual dynamic-body constraint. It
+recovers the controller-intended pose by removing the prior published wall and
+body translations, sweeps from the last rendered constrained pose to that
+intent, and rejects only travel into the exact target-facing normal. Tangential
+motion remains free for sliding, scooping, and carrying. End-pose penetration
+covers rotation about the grip; a 1.25 mm clearance and one-metre bound preserve
+finite behavior. Blocking engages in one update and releases at the existing
+bounded 1.5 m/s rate. `bodySetback` reports the independent live correction.
+Pure tests cover tunnelling, tangential sliding, rotational penetration,
+clamping, and invalid normals. Headless Forge and headset acceptance remain
+pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

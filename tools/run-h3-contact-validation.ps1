@@ -154,6 +154,11 @@ function Test-DetailedTargetGeometrySeen([string]$Text) {
         'H3 physical contact status:.*targetShapeSource=1.*targetDetailed=([1-9][0-9]*)'
 }
 
+function Test-DynamicBodyConstraintSeen([string]$Text) {
+    return $Text -match
+        'H3 physical contact status:.*bodySetback=(?!0\.000m)([0-9]+\.[0-9]{3})m'
+}
+
 function Test-SlowResult([string]$Text, [int]$Kind, [bool]$RequireScoop) {
     if ($Text -match 'H3 physical contact status:.*melees=[1-9][0-9]*') {
         return $false
@@ -211,6 +216,7 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
         'weapon-scoop' {
             return (Test-DetailedTargetGeometrySeen $Text) -and
+                (Test-DynamicBodyConstraintSeen $Text) -and
                 (Test-SlowResult $Text 2 $true)
         }
         'equipment-scoop' {
@@ -220,10 +226,12 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
             return Test-SlowResult $Text 10 $false
         }
         'vehicle-nudge' {
-            return Test-VehicleReleaseResult $Text
+            return (Test-DynamicBodyConstraintSeen $Text) -and
+                (Test-VehicleReleaseResult $Text)
         }
         'visible-weapon-nudge' {
             return (Test-DetailedTargetGeometrySeen $Text) -and
+                (Test-DynamicBodyConstraintSeen $Text) -and
                 (Test-SlowResult $Text 2 $false) -and
                 $Text -match
                     'H3 physical contact DEBUG VISIBLE REPLAY: palettes=([1-9][0-9]*)'
