@@ -829,6 +829,16 @@ uses the raw object node bank when the same provider reports false. The next
 read-only probe copies that exact bounded fallback and reports `nodeSource=2`
 for raw or `1` for interpolated before it continues through the collision tag.
 
+The installed `77486ce` probe completed at stage 100 with `nodeSource=2`.
+It read all 14 Mongoose render nodes, all six collision regions, and all ten
+simultaneous default-permutation BSP children. The final child used wheel node
+13 and contained 18 finite vertices. The preserved run is
+`out/debug-openxr/20260810-092001942Z-vehicle-nudge.log` (SHA-256
+`DBCA7E9B71E638294D7C38066CDAAF096B8CF5A0579DE50406049CD5FFBABA8C`).
+This closes the failed vehicle geometry path: detailed target contact may use
+the renderer-proven raw bank when the interpolated provider reports false,
+while a provider fault still rejects only that contact sample.
+
 The bounded synthetic Release benchmark uses 70 vertices per target child,
 matching the largest official Mongoose child. Four held-weapon children against
 all ten Mongoose children measured `0.0655 ms` p95. The full four-by-sixteen
