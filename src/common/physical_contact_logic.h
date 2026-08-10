@@ -1527,28 +1527,6 @@ inline PhysicalContactVec3 PhysicalContactTargetDeltaVelocity(
     return PhysicalContactFinite(delta) ? delta : PhysicalContactVec3{};
 }
 
-// The rejected vehicle trace applied 114 kg m/s through the point-impulse
-// path. A release needs one native impulse to leave the floor solver, but it
-// does not need the full heavy-body contact load. Keep the exact mass-aware
-// direction and light-object response while imposing a fixed 1 kg m/s ceiling.
-inline PhysicalContactVec3 PhysicalContactReleaseImpulse(
-    const PhysicalContactConstraintImpulse& response,
-    float worldUnitsPerMeter)
-{
-    if (!response.apply || !PhysicalContactFinite(response.worldImpulse) ||
-        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f)
-        return {};
-    const float length = PhysicalContactLength(response.worldImpulse);
-    if (!std::isfinite(length) || length <= 1.0e-8f)
-        return {};
-    constexpr float kMaximumReleaseImpulseKilogramMetersPerSecond = 1.0f;
-    const float maximum =
-        kMaximumReleaseImpulseKilogramMetersPerSecond * worldUnitsPerMeter;
-    const float scale = length > maximum ? maximum / length : 1.0f;
-    const PhysicalContactVec3 result = response.worldImpulse * scale;
-    return PhysicalContactFinite(result) ? result : PhysicalContactVec3{};
-}
-
 // Convert the exact mass-aware point impulse into portable controller feedback.
 // The square-root response keeps a light prop readable without letting a heavy
 // vehicle saturate the controller. Native melee gets a clear minimum pulse.
@@ -1652,71 +1630,4 @@ public:
 private:
     std::array<PhysicalContactTargetState, kCapacity> slots_{};
     size_t replacement_ = 0;
-};
-
-struct PhysicalContactReleaseCommand
-{
-    int32_t handle = -1;
-    PhysicalContactVec3 point{};
-    PhysicalContactVec3 worldImpulse{};
-    bool apply = false;
-};
-
-// Keep only the newest bounded slow-contact impulse. It is consumed once after
-// exact shape separation. A different target and stale or invalid state clear
-// the latch without transferring force.
-class PhysicalContactReleaseLatch
-{
-public:
-    void Arm(int32_t handle, PhysicalContactVec3 point,
-             PhysicalContactVec3 worldImpulse, uint64_t sampleMs)
-    {
-        if (handle == -1 || !sampleMs || !PhysicalContactFinite(point) ||
-            !PhysicalContactFinite(worldImpulse) ||
-            PhysicalContactLengthSquared(worldImpulse) <= 1.0e-12f)
-        {
-            Reset();
-            return;
-        }
-        handle_ = handle;
-        point_ = point;
-        worldImpulse_ = worldImpulse;
-        sampleMs_ = sampleMs;
-    }
-
-    PhysicalContactReleaseCommand TakeIfSeparated(
-        int32_t currentContactHandle, uint64_t nowMs)
-    {
-        PhysicalContactReleaseCommand result{};
-        if (handle_ == -1)
-            return result;
-        if (currentContactHandle == handle_)
-            return result;
-        if (currentContactHandle != -1 || !nowMs || nowMs < sampleMs_ ||
-            nowMs - sampleMs_ > 100)
-        {
-            Reset();
-            return result;
-        }
-        result.handle = handle_;
-        result.point = point_;
-        result.worldImpulse = worldImpulse_;
-        result.apply = true;
-        Reset();
-        return result;
-    }
-
-    void Reset()
-    {
-        handle_ = -1;
-        point_ = {};
-        worldImpulse_ = {};
-        sampleMs_ = 0;
-    }
-
-private:
-    int32_t handle_ = -1;
-    PhysicalContactVec3 point_{};
-    PhysicalContactVec3 worldImpulse_{};
-    uint64_t sampleMs_ = 0;
 };
