@@ -682,6 +682,20 @@ This proves the production solver covers authored BSP/instanced structure and
 fixed/keyframed Forge scenery with the same visible weapon geometry. Headset
 feel and pixel alignment remain acceptance items.
 
+Installed candidate `01f9401` extended only the environment-gated validation
+selector so a run can require one Halo object kind. With kind `3` required, the
+Construct Forge scoop transaction rejected 11 map-constrained equipment
+objects before selecting live handle `0xE2BE004F`: a dynamic motion-type-4 body
+with an authored runtime mass of `0.382 kg`. The exact visible weapon shape
+(`shapeSource=1`) lifted it `0.088 m`, carried it `0.158 m`, and left it moving
+at `0.106 m/s` after separation. The run applied 203 mass-correct responses,
+published no melee or damage event, and kept the same target handle alive for
+the extended observation window without an explosion. This proves gentle
+scoop-and-toss behavior for the engine's equipment/grenade class; it does not
+identify the exact frag, plasma, or other equipment tag. The preserved log is
+`out/debug-openxr/01f9401-forge-equipment-scoop-success.log` (SHA-256
+`605B119D8E50F8303A6363F8D3CA8D3F03A34A1E688D368A0E4658988C9F11AF`).
+
 Animated bipeds do not expose one root convex. The earlier branch traced three
 bounds-derived motion points and two non-temporal spine lines through Halo 3's
 native object query. Fractions from those different lines were not comparable.
