@@ -800,6 +800,15 @@ confirmation rejects, so a missed contact can be separated from unavailable
 geometry without hot-path logging. This candidate still requires Forge runtime
 and headset validation.
 
+The bounded synthetic Release benchmark uses 70 vertices per target child,
+matching the largest official Mongoose child. Four held-weapon children against
+all ten Mongoose children measured `0.0655 ms` p95. The full four-by-sixteen
+storage bound measured `0.1044 ms` p95. Both remain below the fixed `0.25 ms`
+contact budget. The Forge validator now rejects weapon and vehicle results
+unless the runtime log proves `targetShapeSource=1` and at least one detailed
+target candidate. Physics-fallback movement cannot pass as precision-contact
+evidence.
+
 ### Post-separation velocity restoration
 
 The first headset result for sustained response proved that physical contact

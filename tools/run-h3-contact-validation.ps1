@@ -147,6 +147,11 @@ function Test-ContactHaptic([string]$Line) {
     return [double]$Matches[1] -gt 0.0
 }
 
+function Test-DetailedTargetGeometrySeen([string]$Text) {
+    return $Text -match
+        'H3 physical contact status:.*targetShapeSource=1.*targetDetailed=([1-9][0-9]*)'
+}
+
 function Test-SlowResult([string]$Text, [int]$Kind, [bool]$RequireScoop) {
     if ($Text -match 'H3 physical contact status:.*melees=[1-9][0-9]*') {
         return $false
@@ -167,6 +172,9 @@ function Test-SlowResult([string]$Text, [int]$Kind, [bool]$RequireScoop) {
 
 function Test-VehicleReleaseResult([string]$Text) {
     if ($Text -match 'H3 physical contact status:.*melees=[1-9][0-9]*') {
+        return $false
+    }
+    if (-not (Test-DetailedTargetGeometrySeen $Text)) {
         return $false
     }
     $lines = $Text -split "`r?`n" | Where-Object {
@@ -200,7 +208,8 @@ function Test-VehicleReleaseResult([string]$Text) {
 function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
         'weapon-scoop' {
-            return Test-SlowResult $Text 2 $true
+            return (Test-DetailedTargetGeometrySeen $Text) -and
+                (Test-SlowResult $Text 2 $true)
         }
         'equipment-scoop' {
             return Test-SlowResult $Text 3 $true
