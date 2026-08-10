@@ -9230,12 +9230,11 @@ int main()
               std::fabs(
                   trackedLinearOnly.weaponMetersPerSecond.x - 0.90f) <
                   1.0e-5f &&
-              PhysicalContactClassify(
-                  PhysicalContactLength(
-                      trackedLinearOnly.relativeMetersPerSecond),
-                  PhysicalContactLength(
-                      trackedLinearOnly.weaponMetersPerSecond),
-                  1.50f) == PhysicalContactAction::ImpulseOnly &&
+               PhysicalContactClassify(
+                   PhysicalContactLength(
+                       trackedLinearOnly.relativeMetersPerSecond),
+                   0.0f,
+                   1.50f) == PhysicalContactAction::ImpulseOnly &&
               !invalidTrackedPoint.valid,
             "Tracked contact speed includes angular tip motion and target "
             "surface motion, converts native world scale, ignores visible "
@@ -9308,8 +9307,21 @@ int main()
             "rotational tip speed, subtracts target angular velocity at the "
             "hit, converts world scale, and rejects invalid timing/data");
 
-        Check(PhysicalContactClassify(0.049f, 2.00f, 1.50f) ==
-                  PhysicalContactAction::None &&
+        const float closingImpact = PhysicalContactMeleeImpactSpeed(
+            true, {-2.0f, 6.0f, 0.0f}, {1.0f, 0.0f, 0.0f});
+        const float tangentialImpact = PhysicalContactMeleeImpactSpeed(
+            true, {0.0f, 6.0f, 0.0f}, {1.0f, 0.0f, 0.0f});
+        const float separatingImpact = PhysicalContactMeleeImpactSpeed(
+            true, {2.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f});
+        const float continuedContactImpact = PhysicalContactMeleeImpactSpeed(
+            false, {-6.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f});
+        const float invalidNormalImpact = PhysicalContactMeleeImpactSpeed(
+            true, {-6.0f, 0.0f, 0.0f}, {});
+        Check(std::fabs(closingImpact - 2.0f) < 1.0e-6f &&
+              tangentialImpact == 0.0f && separatingImpact == 0.0f &&
+              continuedContactImpact == 0.0f && invalidNormalImpact == 0.0f &&
+              PhysicalContactClassify(0.049f, 2.00f, 1.50f) ==
+                   PhysicalContactAction::None &&
               PhysicalContactClassify(0.05f, 0.00f, 1.50f) ==
                   PhysicalContactAction::ImpulseOnly &&
               PhysicalContactClassify(3.00f, 0.90f, 1.50f) ==
@@ -9331,41 +9343,51 @@ int main()
                   2.00f, std::numeric_limits<float>::quiet_NaN(), 1.50f) ==
                   PhysicalContactAction::None,
             "Relative tracking noise and non-finite velocity do nothing, "
-            "target motion can push but cannot cause melee, melee begins "
-            "exactly at the configured threshold, and implausible headset "
-            "spikes remain impulse-only");
+            "only first-contact velocity closing into the exact surface can "
+            "melee, tangential or sustained shoving stays physics-only, melee "
+            "begins exactly at the configured threshold, and implausible "
+            "headset spikes remain impulse-only");
 
         PhysicalContactDebounce debounce;
         bool first = false;
         debounce.BeginSample();
-        PhysicalContactTargetState* target = debounce.Touch(0x12340007, &first);
+        PhysicalContactTargetState* target = debounce.Touch(
+            0x12340007, 1000, &first);
         const bool initial = first && target && target->meleeArmed;
         target->meleeArmed = false;
         target->contactNormalValid = true;
         target->contactNormal = exactTranslation.normal;
-        debounce.EndSample();
+        debounce.EndSample(1000);
         debounce.BeginSample();
-        target = debounce.Touch(0x12340007, &first);
+        target = debounce.Touch(0x12340007, 1016, &first);
         const bool held = !first && target && !target->meleeArmed &&
             target->contactNormalValid &&
             target->contactNormal.x < -0.90f;
-        debounce.EndSample();
+        debounce.EndSample(1016);
         debounce.BeginSample();
-        debounce.EndSample();
+        debounce.EndSample(1032);
         debounce.BeginSample();
-        target = debounce.Touch(0x12340007, &first);
+        target = debounce.Touch(0x12340007, 1048, &first);
+        const bool gapHeld = !first && target && !target->meleeArmed &&
+            target->contactNormalValid;
+        debounce.EndSample(1048);
+        debounce.BeginSample();
+        debounce.EndSample(1148);
+        debounce.BeginSample();
+        target = debounce.Touch(0x12340007, 1149, &first);
         const bool rearmed = first && target && target->meleeArmed &&
             !target->contactNormalValid;
-        debounce.EndSample();
+        debounce.EndSample(1149);
         debounce.Reset(); // weapon/title/tracking change
         debounce.BeginSample();
-        target = debounce.Touch(0x12340007, &first);
+        target = debounce.Touch(0x12340007, 1200, &first);
         const bool resetRearmed = first && target && target->meleeArmed &&
             !target->contactNormalValid;
-        debounce.EndSample();
-        Check(initial && held && rearmed && resetRearmed,
+        debounce.EndSample(1200);
+        Check(initial && held && gapHeld && rearmed && resetRearmed,
             "Per-target contact preserves the swept surface normal during "
-            "overlap and rearms cleanly after separation or reset");
+            "overlap and one-frame gaps, then rearms after 100 ms of real "
+            "separation or an explicit reset");
 
         Check(!PhysicalContactMeleeReady(
                   PhysicalContactAction::ImpulseOnly, true, true, 1000, 0) &&

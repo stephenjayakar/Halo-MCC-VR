@@ -1847,25 +1847,45 @@ enum class PhysicalContactAction : uint8_t
 // bounded physics path without turning them into native damage events.
 inline constexpr float kPhysicalContactMaximumMeleeSpeedMetersPerSecond = 8.0f;
 
-inline bool PhysicalContactMeleeSpeedPlausible(float weaponSpeedMetersPerSecond)
+inline bool PhysicalContactMeleeSpeedPlausible(float impactSpeedMetersPerSecond)
 {
-    return std::isfinite(weaponSpeedMetersPerSecond) &&
-        weaponSpeedMetersPerSecond >= 0.0f &&
-        weaponSpeedMetersPerSecond <=
+    return std::isfinite(impactSpeedMetersPerSecond) &&
+        impactSpeedMetersPerSecond >= 0.0f &&
+        impactSpeedMetersPerSecond <=
             kPhysicalContactMaximumMeleeSpeedMetersPerSecond;
 }
 
+// Melee is an impact, not general hand motion. Only the first exact contact
+// may damage, and only velocity closing into the target-facing normal counts.
+// Tangential sliding, pulling away, and sustained pressure remain physics-only.
+inline float PhysicalContactMeleeImpactSpeed(
+    bool firstContact, PhysicalContactVec3 relativeVelocityMetersPerSecond,
+    PhysicalContactVec3 targetToWeaponNormal)
+{
+    if (!firstContact ||
+        !PhysicalContactFinite(relativeVelocityMetersPerSecond) ||
+        !PhysicalContactFinite(targetToWeaponNormal))
+        return 0.0f;
+    const PhysicalContactVec3 outward = PhysicalContactNormalize(
+        targetToWeaponNormal, {});
+    if (PhysicalContactLengthSquared(outward) <= 1.0e-12f)
+        return 0.0f;
+    const float closing = -PhysicalContactDot(
+        relativeVelocityMetersPerSecond, outward);
+    return std::isfinite(closing) ? std::max(0.0f, closing) : 0.0f;
+}
+
 inline PhysicalContactAction PhysicalContactClassify(
-    float relativeSpeedMetersPerSecond, float weaponSpeedMetersPerSecond,
+    float relativeSpeedMetersPerSecond, float meleeImpactSpeedMetersPerSecond,
     float meleeThresholdMetersPerSecond)
 {
     if (!std::isfinite(relativeSpeedMetersPerSecond) ||
-        !std::isfinite(weaponSpeedMetersPerSecond) ||
+        !std::isfinite(meleeImpactSpeedMetersPerSecond) ||
         !std::isfinite(meleeThresholdMetersPerSecond) ||
         relativeSpeedMetersPerSecond < 0.05f)
         return PhysicalContactAction::None;
-    return weaponSpeedMetersPerSecond >= meleeThresholdMetersPerSecond &&
-        PhysicalContactMeleeSpeedPlausible(weaponSpeedMetersPerSecond)
+    return meleeImpactSpeedMetersPerSecond >= meleeThresholdMetersPerSecond &&
+        PhysicalContactMeleeSpeedPlausible(meleeImpactSpeedMetersPerSecond)
         ? PhysicalContactAction::ImpulseAndMelee
         : PhysicalContactAction::ImpulseOnly;
 }
@@ -2433,12 +2453,14 @@ struct PhysicalContactTargetState
     bool contactNormalValid = false;
     PhysicalContactVec3 contactNormal{1.0f, 0.0f, 0.0f};
     uint64_t belowHalfSinceMs = 0;
+    uint64_t lastOverlapMs = 0;
 };
 
 class PhysicalContactDebounce
 {
 public:
     static constexpr size_t kCapacity = 32;
+    static constexpr uint64_t kSeparationRearmMs = 100;
 
     void BeginSample()
     {
@@ -2449,16 +2471,27 @@ public:
         }
     }
 
-    PhysicalContactTargetState* Touch(int32_t handle, bool* firstContact = nullptr)
+    PhysicalContactTargetState* Touch(
+        int32_t handle, uint64_t nowMs, bool* firstContact = nullptr)
     {
         PhysicalContactTargetState* empty = nullptr;
         for (auto& slot : slots_)
         {
             if (slot.handle == handle)
             {
+                const bool separated = !slot.lastOverlapMs ||
+                    nowMs < slot.lastOverlapMs ||
+                    nowMs - slot.lastOverlapMs >= kSeparationRearmMs;
+                if (separated)
+                {
+                    slot.meleeArmed = true;
+                    slot.contactNormalValid = false;
+                    slot.belowHalfSinceMs = 0;
+                }
                 if (firstContact)
-                    *firstContact = !slot.previouslyOverlapping;
+                    *firstContact = separated;
                 slot.overlapping = true;
+                slot.lastOverlapMs = nowMs;
                 return &slot;
             }
             if (!empty && slot.handle == -1)
@@ -2469,15 +2502,18 @@ public:
         *empty = {};
         empty->handle = handle;
         empty->overlapping = true;
+        empty->lastOverlapMs = nowMs;
         if (firstContact)
             *firstContact = true;
         return empty;
     }
 
-    void EndSample()
+    void EndSample(uint64_t nowMs)
     {
         for (auto& slot : slots_)
-            if (slot.handle != -1 && !slot.overlapping)
+            if (slot.handle != -1 && !slot.overlapping &&
+                (!slot.lastOverlapMs || nowMs < slot.lastOverlapMs ||
+                 nowMs - slot.lastOverlapMs >= kSeparationRearmMs))
                 slot = {};
     }
 

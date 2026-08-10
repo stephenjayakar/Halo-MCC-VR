@@ -6553,6 +6553,8 @@ namespace
     std::atomic<uint64_t> g_halo3ContactMelees{0};
     std::atomic<float> g_halo3ContactWeaponSpeed{0.0f};
     std::atomic<float> g_halo3ContactRelativeSpeed{0.0f};
+    std::atomic<float> g_halo3ContactMeleeImpactSpeed{0.0f};
+    std::atomic<uint32_t> g_halo3ContactFirstContact{0};
     std::atomic<uint64_t> g_halo3ContactWallBlocks{0};
     std::atomic<float> g_halo3ContactWallSetbackMeters{0.0f};
     std::atomic<float> g_halo3ContactBodySetbackMeters{0.0f};
@@ -10503,6 +10505,9 @@ namespace
         g_halo3ContactWeaponMass.store(0.0f, std::memory_order_relaxed);
         g_halo3ContactTargetMass.store(0.0f, std::memory_order_relaxed);
         g_halo3ContactTargetMotionType.store(0, std::memory_order_relaxed);
+        g_halo3ContactMeleeImpactSpeed.store(0.0f,
+                                              std::memory_order_relaxed);
+        g_halo3ContactFirstContact.store(0, std::memory_order_relaxed);
         g_halo3ContactPenetrationMeters.store(
             0.0f, std::memory_order_relaxed);
         g_halo3ContactNormalImpulse.store(0.0f, std::memory_order_relaxed);
@@ -13232,7 +13237,7 @@ namespace
                         releaseSerial ? releaseSerial : 1,
                         std::memory_order_release);
                 }
-                g_halo3ContactDebounce.EndSample();
+                g_halo3ContactDebounce.EndSample(nowMs);
                 return;
             }
             g_halo3ContactHits.fetch_add(1, std::memory_order_relaxed);
@@ -13250,7 +13255,7 @@ namespace
                     static_cast<uint32_t>(
                         Halo3PhysicalContactStage::StaticBlock),
                     std::memory_order_relaxed);
-                g_halo3ContactDebounce.EndSample();
+                g_halo3ContactDebounce.EndSample(nowMs);
                 return; // exact static/instanced surface blocks this sweep
             }
             g_halo3ContactCandidateHandle.store(
@@ -13264,7 +13269,7 @@ namespace
                 closestIndex >= header.maximumCount)
             {
                 updateBodyConstraint(false, {});
-                g_halo3ContactDebounce.EndSample();
+                g_halo3ContactDebounce.EndSample(nowMs);
                 return;
             }
             auto* closestEntry = entries +
@@ -13274,7 +13279,7 @@ namespace
                     static_cast<uint32_t>(closestHandle) >> 16))
             {
                 updateBodyConstraint(false, {});
-                g_halo3ContactDebounce.EndSample();
+                g_halo3ContactDebounce.EndSample(nowMs);
                 return;
             }
             auto* closestData = *reinterpret_cast<unsigned char**>(
@@ -13283,12 +13288,13 @@ namespace
                                     closestData + kHalo3ObjectParentOffset) != -1)
             {
                 updateBodyConstraint(false, {});
-                g_halo3ContactDebounce.EndSample();
+                g_halo3ContactDebounce.EndSample(nowMs);
                 return;
             }
             bool firstContact = false;
             PhysicalContactTargetState* contact =
-                g_halo3ContactDebounce.Touch(closestHandle, &firstContact);
+                g_halo3ContactDebounce.Touch(
+                    closestHandle, nowMs, &firstContact);
             if (closestUsesAuthoredShape)
             {
                 if (closestNormalReliable)
@@ -13306,7 +13312,7 @@ namespace
                     g_halo3ContactUnreliableNormalRejects.fetch_add(
                         1, std::memory_order_relaxed);
                     updateBodyConstraint(false, {});
-                    g_halo3ContactDebounce.EndSample();
+                    g_halo3ContactDebounce.EndSample(nowMs);
                     return;
                 }
                 closestWeaponPoint = PhysicalContactConvexSupport(
@@ -13340,7 +13346,7 @@ namespace
             {
                 g_halo3ContactPoseDeltaRejects.fetch_add(
                     1, std::memory_order_relaxed);
-                g_halo3ContactDebounce.EndSample();
+                g_halo3ContactDebounce.EndSample(nowMs);
                 return;
             }
             const float dt = static_cast<float>(
@@ -13424,7 +13430,7 @@ namespace
             {
                 g_halo3ContactPointVelocityRejects.fetch_add(
                     1, std::memory_order_relaxed);
-                g_halo3ContactDebounce.EndSample();
+                g_halo3ContactDebounce.EndSample(nowMs);
                 return;
             }
             const PhysicalContactVec3 relativeVelocity =
@@ -13432,15 +13438,17 @@ namespace
             const float relativeSpeed = PhysicalContactLength(relativeVelocity);
             const float weaponSpeed = PhysicalContactLength(
                 pointVelocity.weaponMetersPerSecond);
+            const float meleeImpactSpeed = PhysicalContactMeleeImpactSpeed(
+                firstContact, relativeVelocity, closest.normal);
             const PhysicalContactVec3 contactDirection =
                 PhysicalContactNormalize(relativeVelocity, movementDirection);
             const PhysicalContactAction action = PhysicalContactClassify(
-                relativeSpeed, weaponSpeed,
+                relativeSpeed, meleeImpactSpeed,
                 g_config.physical_weapon_melee_speed);
             if (action == PhysicalContactAction::ImpulseAndMelee)
                 g_halo3ContactReleaseLatch.Reset();
-            if (weaponSpeed >= g_config.physical_weapon_melee_speed &&
-                !PhysicalContactMeleeSpeedPlausible(weaponSpeed))
+            if (meleeImpactSpeed >= g_config.physical_weapon_melee_speed &&
+                !PhysicalContactMeleeSpeedPlausible(meleeImpactSpeed))
             {
                 g_halo3ContactMeleeSpikeRejects.fetch_add(
                     1, std::memory_order_relaxed);
@@ -13449,21 +13457,16 @@ namespace
                 weaponSpeed, std::memory_order_relaxed);
             g_halo3ContactRelativeSpeed.store(
                 relativeSpeed, std::memory_order_relaxed);
-            if (weaponSpeed < g_config.physical_weapon_melee_speed * 0.5f)
-            {
-                if (!contact->belowHalfSinceMs)
-                    contact->belowHalfSinceMs = nowMs;
-                else if (nowMs - contact->belowHalfSinceMs >= 100)
-                    contact->meleeArmed = true;
-            }
-            else
-                contact->belowHalfSinceMs = 0;
+            g_halo3ContactMeleeImpactSpeed.store(
+                meleeImpactSpeed, std::memory_order_relaxed);
+            g_halo3ContactFirstContact.store(
+                firstContact ? 1u : 0u, std::memory_order_relaxed);
             if (action == PhysicalContactAction::None)
             {
                 g_halo3ContactStage.store(
                     static_cast<uint32_t>(Halo3PhysicalContactStage::BelowNoise),
                     std::memory_order_relaxed);
-                g_halo3ContactDebounce.EndSample();
+                g_halo3ContactDebounce.EndSample(nowMs);
                 return;
             }
 
@@ -13640,7 +13643,7 @@ namespace
                 g_halo3ContactCommandSerial.store(
                     serial ? serial : 1, std::memory_order_release);
             }
-            g_halo3ContactDebounce.EndSample();
+            g_halo3ContactDebounce.EndSample(nowMs);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -13677,6 +13680,7 @@ namespace
             ? kStageNames[stage] : "invalid";
         LOG("H3 physical contact status: stage=%s eligible=%u "
             "weaponSpeed=%.2fm/s relativeSpeed=%.2fm/s "
+            "meleeImpactSpeed=%.2fm/s firstContact=%u "
             "sweeps=%llu hits=%llu impulses=%llu releases=%llu melees=%llu "
             "command=%llu applied=%llu commandStatus=%u meleeStatus=%u "
             "damage=0x%08X response=0x%08X rawMaterial=%u material=%u "
@@ -13702,6 +13706,9 @@ namespace
             g_halo3ContactEligibleObjects.load(std::memory_order_relaxed),
             g_halo3ContactWeaponSpeed.load(std::memory_order_relaxed),
             g_halo3ContactRelativeSpeed.load(std::memory_order_relaxed),
+            g_halo3ContactMeleeImpactSpeed.load(
+                std::memory_order_relaxed),
+            g_halo3ContactFirstContact.load(std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactSweeps.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactHits.load(
