@@ -10807,7 +10807,12 @@ namespace
             g_halo3ContactDebugWall.load(std::memory_order_acquire);
         const bool debugVisibleReplay =
             g_halo3ContactDebugVisibleReplay.load(std::memory_order_acquire);
+        // Candidate 77011f0 proved the palette is still local to Halo's
+        // first-person root. Keep its exact-placement probe dormant until the
+        // world-space publication fix is applied as a separate candidate.
+        constexpr bool kEnableHalo3ExactVisibleReplayPlacement = false;
         const bool debugExactVisibleReplay =
+            kEnableHalo3ExactVisibleReplayPlacement &&
             g_halo3ContactDebugVisibleExactReplay.load(
                 std::memory_order_acquire);
         // Candidate 51a3e6a did not produce an exact kind-10 hit in Construct.
