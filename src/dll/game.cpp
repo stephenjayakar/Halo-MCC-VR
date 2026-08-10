@@ -6354,6 +6354,7 @@ namespace
     std::atomic<bool> g_halo3ContactDebugTargetValidated{false};
     std::atomic<int32_t> g_halo3ContactDebugAimTarget{-1};
     std::atomic<uint32_t> g_halo3ContactDebugAimKind{0xFFFFFFFFu};
+    std::atomic<uint32_t> g_halo3ContactDebugRequestedKind{0xFFFFFFFFu};
     std::atomic<int32_t> g_halo3ContactDebugTarget{-1};
     std::atomic<uint32_t> g_halo3ContactDebugGameOptions{0};
     std::atomic<uint64_t> g_halo3ContactDebugObjectCensus{0};
@@ -10647,7 +10648,12 @@ namespace
                         (uint32_t{identifier} << 16) | index);
                     const uint8_t kind = *(entry +
                         kHalo3ObjectEntryKindOffset);
+                    const uint32_t requestedKind =
+                        g_halo3ContactDebugRequestedKind.load(
+                            std::memory_order_relaxed);
                     if (handle == unitHandle || handle == weaponHandle ||
+                        (requestedKind != 0xFFFFFFFFu &&
+                         kind != requestedKind) ||
                         (anchoredHandle != -1 &&
                          handle != anchoredHandle))
                         continue;
@@ -16979,6 +16985,29 @@ namespace
         const bool contactDebugWallEnabled = contactDebugWallLength > 0 &&
             contactDebugWallLength < std::size(contactDebugWallValue) &&
             contactDebugWallValue[0] != L'0';
+        wchar_t contactDebugKindValue[8]{};
+        const DWORD contactDebugKindLength = GetEnvironmentVariableW(
+            L"HALOMCCVR_H3_CONTACT_DEBUG_KIND", contactDebugKindValue,
+            static_cast<DWORD>(std::size(contactDebugKindValue)));
+        uint32_t contactDebugRequestedKind = 0xFFFFFFFFu;
+        if (contactDebugKindLength > 0 && contactDebugKindLength <= 2 &&
+            contactDebugKindLength < std::size(contactDebugKindValue))
+        {
+            uint32_t parsed = 0;
+            bool valid = true;
+            for (DWORD index = 0; index < contactDebugKindLength; ++index)
+            {
+                const wchar_t digit = contactDebugKindValue[index];
+                if (digit < L'0' || digit > L'9')
+                {
+                    valid = false;
+                    break;
+                }
+                parsed = parsed * 10u + static_cast<uint32_t>(digit - L'0');
+            }
+            if (valid && parsed <= 13u)
+                contactDebugRequestedKind = parsed;
+        }
         const bool contactDebugRigEnabled =
             contactDebugEnabled || contactDebugMeleeEnabled ||
             contactDebugScoopEnabled || contactDebugWallEnabled;
@@ -17013,6 +17042,8 @@ namespace
         g_halo3ContactDebugAimTarget.store(-1, std::memory_order_release);
         g_halo3ContactDebugAimKind.store(
             0xFFFFFFFFu, std::memory_order_release);
+        g_halo3ContactDebugRequestedKind.store(
+            contactDebugRequestedKind, std::memory_order_release);
         g_halo3ContactDebugTarget.store(-1, std::memory_order_release);
         g_halo3ContactDebugAnchorValid = false;
         g_halo3ContactDebugAnchorGeneration = 0;
@@ -17050,7 +17081,10 @@ namespace
         }
         if (contactDebugRigEnabled)
             LOG("H3 physical contact DEBUG RIG enabled by environment; "
-                "synthetic center-ray motion and object-state readback active");
+                "synthetic center-ray motion and object-state readback active "
+                "(requested kind %d; -1 means any)",
+                contactDebugRequestedKind == 0xFFFFFFFFu
+                    ? -1 : static_cast<int>(contactDebugRequestedKind));
         if (contactDebugMeleeEnabled)
             LOG("H3 physical contact DEBUG MELEE enabled by environment; "
                 "synthetic controller speed can cross the authored melee threshold");
