@@ -947,6 +947,53 @@ namespace
         std::atomic<float> nodes[kMaximumNodes][13]{};
     };
     Halo3VisibleWeaponPosePublication g_halo3VisibleWeaponPose;
+    // Debug-only replay publication. Unlike the older contact rig, this moves
+    // the palette Halo actually submits for the visible held weapon. The
+    // contact solver then consumes that same final palette on the next sample.
+    // Environment-gated, bounded, lock-free, and never enabled in normal play.
+    struct Halo3ContactVisibleReplayPublication
+    {
+        std::atomic<uint32_t> sequence{0};
+        std::atomic<uint64_t> sampleMs{0};
+        std::atomic<float> root[13]{};
+    };
+    Halo3ContactVisibleReplayPublication g_halo3ContactVisibleReplayRoot;
+    std::atomic<bool> g_halo3ContactDebugVisibleReplay{false};
+    std::atomic<uint64_t> g_halo3ContactDebugVisiblePalettes{0};
+
+    void Halo3PublishContactVisibleReplayRoot(
+        const BoneMatrix& root, uint64_t sampleMs)
+    {
+        auto& published = g_halo3ContactVisibleReplayRoot;
+        published.sequence.fetch_add(1, std::memory_order_acq_rel);
+        published.sampleMs.store(sampleMs, std::memory_order_relaxed);
+        const float* values = reinterpret_cast<const float*>(&root);
+        for (int value = 0; value < 13; ++value)
+            published.root[value].store(values[value],
+                                        std::memory_order_relaxed);
+        published.sequence.fetch_add(1, std::memory_order_release);
+    }
+
+    bool Halo3ReadContactVisibleReplayRoot(
+        BoneMatrix& root, uint64_t& sampleMs)
+    {
+        auto& published = g_halo3ContactVisibleReplayRoot;
+        for (int attempt = 0; attempt < 2; ++attempt)
+        {
+            const uint32_t before =
+                published.sequence.load(std::memory_order_acquire);
+            if (!before || (before & 1u))
+                continue;
+            sampleMs = published.sampleMs.load(std::memory_order_relaxed);
+            float* values = reinterpret_cast<float*>(&root);
+            for (int value = 0; value < 13; ++value)
+                values[value] = published.root[value].load(
+                    std::memory_order_relaxed);
+            if (published.sequence.load(std::memory_order_acquire) == before)
+                return sampleMs != 0;
+        }
+        return false;
+    }
     struct Halo3WeaponWallPublication
     {
         std::atomic<uint32_t> sequence{0};
@@ -5232,6 +5279,40 @@ namespace
                  (uint64_t{1} << mappedRoot)) &&
                 finite)
             {
+                if (g_halo3ContactDebugVisibleReplay.load(
+                        std::memory_order_acquire))
+                {
+                    BoneMatrix desiredRoot{};
+                    uint64_t desiredMs = 0;
+                    const uint64_t nowMs = GetTickCount64();
+                    if (Halo3ReadContactVisibleReplayRoot(
+                            desiredRoot, desiredMs) &&
+                        nowMs >= desiredMs && nowMs - desiredMs <= 100)
+                    {
+                        BoneMatrix inverseRoot{}, delta{};
+                        std::array<BoneMatrix,
+                                   Halo3VisibleWeaponPosePublication::
+                                       kMaximumNodes> moved{};
+                        bool movedFinite =
+                            InvertBoneMatrix(visibleRoot, inverseRoot) &&
+                            ComposeBoneMatrices(
+                                desiredRoot, inverseRoot, delta);
+                        for (int node = 0;
+                             movedFinite && node < renderNodeCount; ++node)
+                        {
+                            movedFinite = ComposeBoneMatrices(
+                                delta, destination[node], moved[node]);
+                        }
+                        if (movedFinite)
+                        {
+                            memcpy(destination, moved.data(),
+                                   static_cast<size_t>(renderNodeCount) *
+                                       sizeof(BoneMatrix));
+                            g_halo3ContactDebugVisiblePalettes.fetch_add(
+                                1, std::memory_order_relaxed);
+                        }
+                    }
+                }
                 auto& published = g_halo3VisibleWeaponPose;
                 published.sequence.fetch_add(1, std::memory_order_acq_rel);
                 published.sampleMs.store(
@@ -10690,6 +10771,8 @@ namespace
             g_halo3ContactDebugScoop.load(std::memory_order_acquire);
         const bool debugWall =
             g_halo3ContactDebugWall.load(std::memory_order_acquire);
+        const bool debugVisibleReplay =
+            g_halo3ContactDebugVisibleReplay.load(std::memory_order_acquire);
         // Candidate 51a3e6a did not produce an exact kind-10 hit in Construct.
         // Keep its bounded placement helper for evidence, but do not run the
         // failed diagnostic behavior while the proven scoop selector can
@@ -10768,7 +10851,8 @@ namespace
             paletteBasis, palettePosition, paletteScale, palettePoseMs,
             visibleNodes.data(), &visibleNodeCount);
         bool haveVisiblePose = false;
-        if (debugRig && g_baseCamValid.load(std::memory_order_acquire))
+        if (debugRig && !debugVisibleReplay &&
+            g_baseCamValid.load(std::memory_order_acquire))
         {
             for (int axis = 0; axis < 3; ++axis)
             {
@@ -11348,7 +11432,52 @@ namespace
                     aimTarget, std::memory_order_relaxed);
                 g_halo3ContactDebugAimKind.store(
                     aimKind, std::memory_order_relaxed);
-                if (aimTarget != -1)
+                if (debugVisibleReplay && aimTarget != -1 &&
+                    haveVisiblePalette)
+                {
+                    const PhysicalContactVec3 replayForward =
+                        g_halo3ContactDebugAnchorValid
+                        ? g_halo3ContactDebugAnchorForward
+                        : PhysicalContactNormalize(target - camera, forward);
+                    const PhysicalContactVec3 replayUp =
+                        std::fabs(replayForward.z) < 0.95f
+                        ? PhysicalContactVec3{0.0f, 0.0f, 1.0f}
+                        : PhysicalContactVec3{0.0f, 1.0f, 0.0f};
+                    const PhysicalContactVec3 replayLeft =
+                        PhysicalContactNormalize(
+                            PhysicalContactCross(
+                                replayUp, replayForward),
+                            {0.0f, 1.0f, 0.0f});
+                    const PhysicalContactVec3 orthogonalUp =
+                        PhysicalContactNormalize(
+                            PhysicalContactCross(
+                                replayForward, replayLeft), replayUp);
+                    const float amplitude =
+                        worldScale * debugMaxSpeed / kDebugAngularRate;
+                    const float displacement =
+                        amplitude * std::sin(debugPhase) -
+                        worldScale * 0.02f;
+                    BoneMatrix replayRoot = visibleNodes[0];
+                    replayRoot.scale = visibleScale;
+                    const PhysicalContactVec3 replayPosition =
+                        target + replayForward * displacement;
+                    const PhysicalContactVec3 replayBasis[3] = {
+                        replayForward, replayLeft, orthogonalUp};
+                    for (int column = 0; column < 3; ++column)
+                    {
+                        replayRoot.rotation[column * 3 + 0] =
+                            replayBasis[column].x;
+                        replayRoot.rotation[column * 3 + 1] =
+                            replayBasis[column].y;
+                        replayRoot.rotation[column * 3 + 2] =
+                            replayBasis[column].z;
+                    }
+                    replayRoot.translation[0] = replayPosition.x;
+                    replayRoot.translation[1] = replayPosition.y;
+                    replayRoot.translation[2] = replayPosition.z;
+                    Halo3PublishContactVisibleReplayRoot(replayRoot, nowMs);
+                }
+                else if (aimTarget != -1)
                 {
                     forward = g_halo3ContactDebugAnchorValid
                         ? g_halo3ContactDebugAnchorForward
@@ -11430,7 +11559,7 @@ namespace
                 Halo3ResetPhysicalContact();
                 return;
             }
-            if (debugRig && debugAimData)
+            if (debugRig && !debugVisibleReplay && debugAimData)
             {
                 PhysicalContactCompoundShape debugTargetShape{};
                 PhysicalContactTransform debugTargetTransform{};
@@ -13062,6 +13191,14 @@ namespace
                         std::memory_order_relaxed),
                     g_halo3ContactDebugGeometryVertices.load(
                         std::memory_order_relaxed));
+            }
+            if (g_halo3ContactDebugVisibleReplay.load(
+                    std::memory_order_acquire))
+            {
+                LOG("H3 physical contact DEBUG VISIBLE REPLAY: palettes=%llu",
+                    (unsigned long long)
+                        g_halo3ContactDebugVisiblePalettes.load(
+                            std::memory_order_relaxed));
             }
             const uint64_t census =
                 g_halo3ContactDebugObjectCensus.load(
@@ -17774,6 +17911,14 @@ namespace
         const bool contactDebugWallEnabled = contactDebugWallLength > 0 &&
             contactDebugWallLength < std::size(contactDebugWallValue) &&
             contactDebugWallValue[0] != L'0';
+        wchar_t contactDebugVisibleValue[8]{};
+        const DWORD contactDebugVisibleLength = GetEnvironmentVariableW(
+            L"HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE", contactDebugVisibleValue,
+            static_cast<DWORD>(std::size(contactDebugVisibleValue)));
+        const bool contactDebugVisibleEnabled =
+            contactDebugVisibleLength > 0 &&
+            contactDebugVisibleLength < std::size(contactDebugVisibleValue) &&
+            contactDebugVisibleValue[0] != L'0';
         wchar_t contactDebugKindValue[8]{};
         const DWORD contactDebugKindLength = GetEnvironmentVariableW(
             L"HALOMCCVR_H3_CONTACT_DEBUG_KIND", contactDebugKindValue,
@@ -17799,7 +17944,8 @@ namespace
         }
         const bool contactDebugRigEnabled =
             contactDebugEnabled || contactDebugMeleeEnabled ||
-            contactDebugScoopEnabled || contactDebugWallEnabled;
+            contactDebugScoopEnabled || contactDebugWallEnabled ||
+            contactDebugVisibleEnabled;
         g_halo3ContactDebugRig.store(
             contactDebugRigEnabled, std::memory_order_release);
         g_halo3ContactDebugMelee.store(
@@ -17808,6 +17954,10 @@ namespace
             contactDebugScoopEnabled, std::memory_order_release);
         g_halo3ContactDebugWall.store(
             contactDebugWallEnabled, std::memory_order_release);
+        g_halo3ContactDebugVisibleReplay.store(
+            contactDebugVisibleEnabled, std::memory_order_release);
+        g_halo3ContactDebugVisiblePalettes.store(
+            0, std::memory_order_release);
         g_halo3ContactDebugWallType.store(-1, std::memory_order_release);
         g_halo3ContactDebugWallHandle.store(-1, std::memory_order_release);
         g_halo3ContactDebugStructureWallValidated.store(

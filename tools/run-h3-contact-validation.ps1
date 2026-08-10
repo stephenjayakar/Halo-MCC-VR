@@ -5,6 +5,7 @@ param(
         'equipment-scoop',
         'crate-nudge',
         'vehicle-nudge',
+        'visible-weapon-nudge',
         'wall',
         'melee')]
     [string]$Test = 'equipment-scoop',
@@ -220,6 +221,12 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
         'vehicle-nudge' {
             return Test-VehicleReleaseResult $Text
         }
+        'visible-weapon-nudge' {
+            return (Test-DetailedTargetGeometrySeen $Text) -and
+                (Test-SlowResult $Text 2 $false) -and
+                $Text -match
+                    'H3 physical contact DEBUG VISIBLE REPLAY: palettes=([1-9][0-9]*)'
+        }
         'wall' {
             return $Text -match
                 'H3 physical contact DEBUG WALL:.*structureValidated=1.*objectValidated=1'
@@ -263,6 +270,7 @@ $backupPath = Join-Path $outputRoot "steamvr-before-null-$stamp.json"
 $savedLogPath = Join-Path $outputRoot "$stamp-$Test.log"
 $resultPath = Join-Path $outputRoot "$stamp-$Test-result.json"
 $failureScreenshot = Join-Path $outputRoot "$stamp-$Test-failure.png"
+$successScreenshot = Join-Path $outputRoot "$stamp-$Test-success.png"
 $backupHash = $null
 $startedUtc = $null
 $passed = $false
@@ -273,7 +281,8 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_SCOOP',
     'HALOMCCVR_H3_CONTACT_DEBUG_KIND',
     'HALOMCCVR_H3_CONTACT_DEBUG_MELEE',
-    'HALOMCCVR_H3_CONTACT_DEBUG_WALL'
+    'HALOMCCVR_H3_CONTACT_DEBUG_WALL',
+    'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE'
 )
 $savedEnvironment = @{}
 foreach ($name in $debugVariables) {
@@ -327,6 +336,10 @@ try {
         'vehicle-nudge' {
             $env:HALOMCCVR_H3_CONTACT_DEBUG_SCOOP = '1'
             $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '1'
+        }
+        'visible-weapon-nudge' {
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE = '1'
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '2'
         }
         'wall' {
             $env:HALOMCCVR_H3_CONTACT_DEBUG_WALL = '1'
@@ -495,6 +508,9 @@ public static class HaloMccVrContactInput {
 
     $text = Get-NewLogText $runtimeLog $startedUtc
     [IO.File]::WriteAllText($savedLogPath, $text)
+    if ($Test -eq 'visible-weapon-nudge') {
+        Save-DesktopScreenshot $successScreenshot
+    }
     $passed = $true
 }
 catch {
@@ -579,6 +595,9 @@ $result = [ordered]@{
     } else { $null })
     failure_screenshot = $(if (Test-Path -LiteralPath $failureScreenshot) {
         $failureScreenshot
+    } else { $null })
+    success_screenshot = $(if (Test-Path -LiteralPath $successScreenshot) {
+        $successScreenshot
     } else { $null })
     failure = $failure
 }
