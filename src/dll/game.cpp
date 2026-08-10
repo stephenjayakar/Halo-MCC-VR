@@ -11728,14 +11728,6 @@ namespace
                         paletteRoot.forward, paletteRoot.left),
                     paletteRoot.up);
                 paletteRoot.scale = paletteScale;
-                if (debugRig && debugExactVisibleReplay)
-                {
-                    // The exact replay moves the final palette after normal
-                    // controller placement. Measure that moved render pose,
-                    // not the synthetic controller-space pose used by the
-                    // ordinary validation rig.
-                    weaponTransform = paletteRoot;
-                }
             }
             if (haveVisiblePalette &&
                 PhysicalContactTransformFinite(weaponTransform) &&
@@ -11747,6 +11739,18 @@ namespace
                 weaponShape.childCount >
                     kHalo3ContactMaximumHeldWeaponChildren)
                 collisionShape = false;
+            if (collisionShape && (!debugRig || debugVisibleReplay))
+            {
+                // The visible collision vertices were prepared relative to
+                // this exact final palette root. Sweep them from that same
+                // rendered pose in normal play. The controller target is an
+                // IK input and can differ from the matrix Halo actually skins,
+                // which made contact and haptics appear beside the pixels.
+                // Non-visible synthetic rigs retain their authored placement.
+                weaponTransform = paletteRoot;
+                grip = weaponTransform.position;
+                forward = weaponTransform.forward;
+            }
             bool physicsFallback = !collisionShape &&
                 PhysicalContactTransformFinite(weaponTransform) &&
                 Halo3ContactShapeForObject(weaponData, weaponShape);
