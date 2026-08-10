@@ -1099,6 +1099,56 @@ inline PhysicalContactDebugTargetRank PhysicalContactRankDebugTarget(
     return result;
 }
 
+struct PhysicalContactDebugBoundsPlacement
+{
+    bool valid = false;
+    PhysicalContactVec3 translation{};
+};
+
+// Debug-only placement for objects whose authored contact shape is resolved
+// from node-bound bodies instead of one root compound. The bounds do not decide
+// contact. They only move the synthetic weapon across the near side so the
+// production exact-shape sweep remains the sole hit authority.
+inline PhysicalContactDebugBoundsPlacement
+PhysicalContactDebugBoundsSweepPlacement(
+    PhysicalContactVec3 weaponCentroidWorld,
+    PhysicalContactVec3 targetCenterWorld,
+    PhysicalContactVec3 forwardWorld,
+    float weaponRadiusWorld, float targetRadiusWorld,
+    float worldUnitsPerMeter, float maximumSpeedMetersPerSecond,
+    float angularRateRadiansPerSecond, float phaseRadians)
+{
+    PhysicalContactDebugBoundsPlacement result{};
+    if (!PhysicalContactFinite(weaponCentroidWorld) ||
+        !PhysicalContactFinite(targetCenterWorld) ||
+        !PhysicalContactFinite(forwardWorld) ||
+        !std::isfinite(weaponRadiusWorld) || weaponRadiusWorld <= 0.0f ||
+        !std::isfinite(targetRadiusWorld) || targetRadiusWorld <= 0.0f ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f ||
+        !std::isfinite(maximumSpeedMetersPerSecond) ||
+        maximumSpeedMetersPerSecond <= 0.0f ||
+        !std::isfinite(angularRateRadiansPerSecond) ||
+        angularRateRadiansPerSecond <= 0.0f ||
+        !std::isfinite(phaseRadians))
+        return result;
+    const PhysicalContactVec3 forward = PhysicalContactNormalize(
+        forwardWorld, {});
+    if (PhysicalContactLengthSquared(forward) <= 1.0e-12f)
+        return result;
+    const float amplitudeWorld = worldUnitsPerMeter *
+        maximumSpeedMetersPerSecond / angularRateRadiansPerSecond;
+    const float displacementWorld = amplitudeWorld * std::sin(phaseRadians) -
+        worldUnitsPerMeter * 0.02f;
+    const PhysicalContactVec3 targetNear =
+        targetCenterWorld - forward * targetRadiusWorld;
+    const PhysicalContactVec3 weaponFront =
+        weaponCentroidWorld + forward * weaponRadiusWorld;
+    result.translation =
+        targetNear + forward * displacementWorld - weaponFront;
+    result.valid = PhysicalContactFinite(result.translation);
+    return result;
+}
+
 struct PhysicalContactDebugScoopPose
 {
     float liftMeters = 0.0f;

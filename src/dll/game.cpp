@@ -10976,6 +10976,34 @@ namespace
                     }
                     grip = weaponTransform.position;
                 }
+                else if (!debugScoop)
+                {
+                    const auto* targetBoundsCenter =
+                        reinterpret_cast<const float*>(
+                            debugAimData +
+                            kHalo3ObjectBoundingCenterOffset);
+                    const PhysicalContactVec3 targetCenter{
+                        targetBoundsCenter[0], targetBoundsCenter[1],
+                        targetBoundsCenter[2]};
+                    const float targetRadius =
+                        *reinterpret_cast<const float*>(debugAimData + 0x28);
+                    const float weaponRadius =
+                        PhysicalContactCompoundBoundRadius(weaponShape) *
+                        weaponTransform.scale;
+                    const PhysicalContactDebugBoundsPlacement placement =
+                        PhysicalContactDebugBoundsSweepPlacement(
+                            PhysicalContactCompoundWorldCentroid(
+                                weaponShape, weaponTransform),
+                            targetCenter, forward, weaponRadius, targetRadius,
+                            worldScale, debugMaxSpeed, kDebugAngularRate,
+                            debugPhase);
+                    if (placement.valid)
+                    {
+                        weaponTransform.position =
+                            weaponTransform.position + placement.translation;
+                        grip = weaponTransform.position;
+                    }
+                }
             }
             const PhysicalContactVec3 tip = grip + forward * capsuleLength;
             // The collision query packs low collision flags and high object

@@ -9138,6 +9138,32 @@ int main()
             "over constrained lighter map weapons, keeps an existing anchor, "
             "and rejects invalid motion data");
 
+        const PhysicalContactDebugBoundsPlacement boundsOutside =
+            PhysicalContactDebugBoundsSweepPlacement(
+                {0, 0, 0}, {2, 0, 0}, {1, 0, 0}, 0.25f, 0.50f,
+                0.50f, 0.90f, 6.28318530718f, 0.0f);
+        const PhysicalContactDebugBoundsPlacement boundsInside =
+            PhysicalContactDebugBoundsSweepPlacement(
+                {0, 0, 0}, {2, 0, 0}, {1, 0, 0}, 0.25f, 0.50f,
+                0.50f, 0.90f, 6.28318530718f, 1.57079632679f);
+        const PhysicalContactDebugBoundsPlacement boundsInvalid =
+            PhysicalContactDebugBoundsSweepPlacement(
+                {0, 0, 0}, {2, 0, 0}, {}, 0.25f, 0.50f,
+                0.50f, 0.90f, 6.28318530718f, 0.0f);
+        const float outsideWeaponFront =
+            boundsOutside.translation.x + 0.25f;
+        const float insideWeaponFront =
+            boundsInside.translation.x + 0.25f;
+        const float targetNear = 1.50f;
+        Check(boundsOutside.valid && boundsInside.valid &&
+              std::fabs(outsideWeaponFront - (targetNear - 0.01f)) <
+                  1.0e-5f &&
+              insideWeaponFront > targetNear + 0.06f &&
+              !boundsInvalid.valid,
+            "The debug bounds fallback starts the weapon 2 cm outside a "
+            "node-bound target, crosses its near surface at the requested "
+            "speed, and never acts as the contact decision");
+
         float maximumScoopSpeed = 0.0f;
         float maximumScoopDerivativeError = 0.0f;
         PhysicalContactDebugScoopPose priorScoop =
