@@ -1847,45 +1847,25 @@ enum class PhysicalContactAction : uint8_t
 // bounded physics path without turning them into native damage events.
 inline constexpr float kPhysicalContactMaximumMeleeSpeedMetersPerSecond = 8.0f;
 
-inline bool PhysicalContactMeleeSpeedPlausible(float impactSpeedMetersPerSecond)
+inline bool PhysicalContactMeleeSpeedPlausible(float weaponSpeedMetersPerSecond)
 {
-    return std::isfinite(impactSpeedMetersPerSecond) &&
-        impactSpeedMetersPerSecond >= 0.0f &&
-        impactSpeedMetersPerSecond <=
+    return std::isfinite(weaponSpeedMetersPerSecond) &&
+        weaponSpeedMetersPerSecond >= 0.0f &&
+        weaponSpeedMetersPerSecond <=
             kPhysicalContactMaximumMeleeSpeedMetersPerSecond;
 }
 
-// Melee is an impact, not general hand motion. Only the first exact contact
-// may damage, and only velocity closing into the target-facing normal counts.
-// Tangential sliding, pulling away, and sustained pressure remain physics-only.
-inline float PhysicalContactMeleeImpactSpeed(
-    bool firstContact, PhysicalContactVec3 relativeVelocityMetersPerSecond,
-    PhysicalContactVec3 targetToWeaponNormal)
-{
-    if (!firstContact ||
-        !PhysicalContactFinite(relativeVelocityMetersPerSecond) ||
-        !PhysicalContactFinite(targetToWeaponNormal))
-        return 0.0f;
-    const PhysicalContactVec3 outward = PhysicalContactNormalize(
-        targetToWeaponNormal, {});
-    if (PhysicalContactLengthSquared(outward) <= 1.0e-12f)
-        return 0.0f;
-    const float closing = -PhysicalContactDot(
-        relativeVelocityMetersPerSecond, outward);
-    return std::isfinite(closing) ? std::max(0.0f, closing) : 0.0f;
-}
-
 inline PhysicalContactAction PhysicalContactClassify(
-    float relativeSpeedMetersPerSecond, float meleeImpactSpeedMetersPerSecond,
+    float relativeSpeedMetersPerSecond, float weaponSpeedMetersPerSecond,
     float meleeThresholdMetersPerSecond)
 {
     if (!std::isfinite(relativeSpeedMetersPerSecond) ||
-        !std::isfinite(meleeImpactSpeedMetersPerSecond) ||
+        !std::isfinite(weaponSpeedMetersPerSecond) ||
         !std::isfinite(meleeThresholdMetersPerSecond) ||
         relativeSpeedMetersPerSecond < 0.05f)
         return PhysicalContactAction::None;
-    return meleeImpactSpeedMetersPerSecond >= meleeThresholdMetersPerSecond &&
-        PhysicalContactMeleeSpeedPlausible(meleeImpactSpeedMetersPerSecond)
+    return weaponSpeedMetersPerSecond >= meleeThresholdMetersPerSecond &&
+        PhysicalContactMeleeSpeedPlausible(weaponSpeedMetersPerSecond)
         ? PhysicalContactAction::ImpulseAndMelee
         : PhysicalContactAction::ImpulseOnly;
 }
