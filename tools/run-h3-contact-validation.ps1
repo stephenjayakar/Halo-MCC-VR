@@ -153,7 +153,10 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
             return Test-SlowResult $Text 10 $false
         }
         'vehicle-nudge' {
-            return Test-SlowResult $Text 1 $false
+            if (-not (Test-SlowResult $Text 1 $false)) { return $false }
+            return $Text -match
+                'H3 physical contact status:.*releases=[1-9][0-9]*.*' +
+                'melees=0.*commandStatus=2.*target=0x(?!FFFFFFFF).*kind=1'
         }
         'wall' {
             return $Text -match
