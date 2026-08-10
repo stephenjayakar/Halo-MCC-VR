@@ -161,7 +161,7 @@ try {
         halo3_physical_weapon_contact_modes =
             'solo-campaign-or-offline-local-forge'
         halo3_physical_weapon_collision_shape =
-            'authored-bounds-derived-capsule'
+            'authored-collision-bsp-convex-with-physics-shape-fallback'
         halo3_physical_weapon_melee_speed_default_mps = 1.50
         halo3_physical_weapon_slow_contact_damage = $false
         halo3_physical_weapon_native_authored_melee = $true
