@@ -10959,10 +10959,10 @@ namespace
             g_halo3ContactDebugVisibleReplay.load(std::memory_order_acquire);
         // Candidate f59a8da proved the warmed measurement still compared the
         // moved render palette against the controller-space collision pose:
-        // every clean sample remained overlapped near +0.89 m. Keep the
-        // bounded diagnostic code for evidence, but disable that failed
-        // behavior before trying a render-pose measurement.
-        constexpr bool kEnableHalo3ExactVisibleReplayPlacement = false;
+        // every clean sample remained overlapped near +0.89 m. This retry uses
+        // the exact published render root for the diagnostic collision pose;
+        // production contact never enables this environment-gated behavior.
+        constexpr bool kEnableHalo3ExactVisibleReplayPlacement = true;
         const bool debugExactVisibleReplay =
             kEnableHalo3ExactVisibleReplayPlacement &&
             g_halo3ContactDebugVisibleExactReplay.load(
@@ -11728,6 +11728,14 @@ namespace
                         paletteRoot.forward, paletteRoot.left),
                     paletteRoot.up);
                 paletteRoot.scale = paletteScale;
+                if (debugRig && debugExactVisibleReplay)
+                {
+                    // The exact replay moves the final palette after normal
+                    // controller placement. Measure that moved render pose,
+                    // not the synthetic controller-space pose used by the
+                    // ordinary validation rig.
+                    weaponTransform = paletteRoot;
+                }
             }
             if (haveVisiblePalette &&
                 PhysicalContactTransformFinite(weaponTransform) &&
