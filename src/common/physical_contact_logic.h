@@ -1631,3 +1631,65 @@ private:
     std::array<PhysicalContactTargetState, kCapacity> slots_{};
     size_t replacement_ = 0;
 };
+
+struct PhysicalContactReleaseCommand
+{
+    int32_t handle = -1;
+    PhysicalContactVec3 worldVelocity{};
+    bool apply = false;
+};
+
+// A sustained contact command can be consumed while Halo's floor solver still
+// owns the target. Keep only the newest bounded absolute velocity and publish
+// it once after the exact shapes separate. A different current target never
+// receives the stored velocity, and stale contact cannot create a delayed kick.
+class PhysicalContactReleaseLatch
+{
+public:
+    void Arm(int32_t handle, PhysicalContactVec3 worldVelocity,
+             uint64_t sampleMs)
+    {
+        if (handle == -1 || !sampleMs ||
+            !PhysicalContactFinite(worldVelocity))
+        {
+            Reset();
+            return;
+        }
+        handle_ = handle;
+        worldVelocity_ = worldVelocity;
+        sampleMs_ = sampleMs;
+    }
+
+    PhysicalContactReleaseCommand TakeIfSeparated(
+        int32_t currentContactHandle, uint64_t nowMs)
+    {
+        PhysicalContactReleaseCommand result{};
+        if (handle_ == -1)
+            return result;
+        if (currentContactHandle == handle_)
+            return result;
+        if (currentContactHandle != -1 || !nowMs || nowMs < sampleMs_ ||
+            nowMs - sampleMs_ > 100)
+        {
+            Reset();
+            return result;
+        }
+        result.handle = handle_;
+        result.worldVelocity = worldVelocity_;
+        result.apply = true;
+        Reset();
+        return result;
+    }
+
+    void Reset()
+    {
+        handle_ = -1;
+        worldVelocity_ = {};
+        sampleMs_ = 0;
+    }
+
+private:
+    int32_t handle_ = -1;
+    PhysicalContactVec3 worldVelocity_{};
+    uint64_t sampleMs_ = 0;
+};

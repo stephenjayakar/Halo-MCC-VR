@@ -9478,6 +9478,35 @@ int main()
             "supports upward contact, resists heavy vehicles, and releases "
             "without a separating kick");
 
+        PhysicalContactReleaseLatch releaseLatch;
+        releaseLatch.Arm(0x12340005, {0.1f, 0.2f, 0.3f}, 1000);
+        const PhysicalContactReleaseCommand stillTouching =
+            releaseLatch.TakeIfSeparated(0x12340005, 1010);
+        const PhysicalContactReleaseCommand released =
+            releaseLatch.TakeIfSeparated(-1, 1016);
+        const PhysicalContactReleaseCommand repeated =
+            releaseLatch.TakeIfSeparated(-1, 1017);
+        releaseLatch.Arm(0x12340006, {0.1f, 0.0f, 0.0f}, 2000);
+        const PhysicalContactReleaseCommand changedTarget =
+            releaseLatch.TakeIfSeparated(0x12340007, 2010);
+        releaseLatch.Arm(0x12340008, {0.1f, 0.0f, 0.0f}, 3000);
+        const PhysicalContactReleaseCommand staleRelease =
+            releaseLatch.TakeIfSeparated(-1, 3101);
+        releaseLatch.Arm(
+            0x12340009,
+            {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f}, 4000);
+        const PhysicalContactReleaseCommand invalidRelease =
+            releaseLatch.TakeIfSeparated(-1, 4001);
+        Check(!stillTouching.apply && released.apply &&
+              released.handle == 0x12340005 &&
+              released.worldVelocity.x == 0.1f &&
+              released.worldVelocity.y == 0.2f &&
+              released.worldVelocity.z == 0.3f && !repeated.apply &&
+              !changedTarget.apply && !staleRelease.apply &&
+              !invalidRelease.apply,
+            "Slow contact publishes one finite bounded release velocity only "
+            "after exact separation and rejects stale or changed targets");
+
         const PhysicalContactWallConstraint wallTip =
             PhysicalContactWallOffsetForRay(
                 {}, {2.0f, 0, 0}, 0.75f, 0.10f);
