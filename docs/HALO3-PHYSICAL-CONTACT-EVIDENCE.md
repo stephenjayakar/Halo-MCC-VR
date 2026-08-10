@@ -634,6 +634,41 @@ the false damage event. Runtime telemetry counts these decisions as
 `rejectMeleeSpike`; pure tests cover the exact limit, the first rejected value,
 the preserved `25.03 m/s` case, and non-finite input.
 
+Installed candidate `a7ddb49` then passed the complete guarded slow-contact
+transaction. The exact visible Assault Rifle shape selected a loose authored
+`2.008 kg` weapon, lifted it `0.287 m`, carried it `0.205 m`, and left it moving
+at `0.441 m/s` after separation. It applied 130 post-update mass-correct
+responses and published zero melee events. The independent fast transaction
+still invoked Halo 3's native melee near `1.99 m/s`; synthetic samples above
+`8.00 m/s` stayed physics-only. This proves the spike guard removes the
+headset-observed accidental-damage path without removing normal physical melee.
+
+The installed `575c868` build also ran a kind-10-only Construct Forge sweep.
+It produced more than 2,378 exact authored-shape hits and more than 1,081
+successful sub-threshold responses with zero melee events. Dynamic crate-class
+bodies from `6.354 kg` through `300 kg` moved under contact. Handle
+`0xE3AB013C`, with authored mass `6.354 kg`, moved `0.096` world units; heavier
+`247.787 kg` and `300 kg` bodies retained only small bounded velocities. Several
+map-constrained crates failed the rig's stronger scoop-and-toss acceptance, but
+the measured displacement proves that gentle nudging is no longer erased by
+Halo's next object update. The preserved log is
+`out/debug-openxr/575c868-construct-kind10-slow-response-success.log` (SHA-256
+`7C2059FC51EF7BFE6B1ADBE1896CCDBEFB1AC9C42612BEC525D0BDE66B57CB3D`).
+
+The same installed build ran a kind-1-only High Ground Forge sweep against
+Halo 3 vehicle bodies. The exact Assault Rifle solid (`shapeSource=1`, 20
+authored vertices) produced 459 exact hits and 292 applied slow responses
+against several dynamic `464.835 kg` targets. The observed bodies moved only
+`0.017-0.083` world units per test pass and the largest logged final target
+velocity change remained below the fixed `0.08 m/s` per-sample cap. The entire
+run published zero melee and damage events. The `normalImpulse` status value is
+the mass-aware contact load used for response and haptics; the native write is
+the divided, bounded target-velocity change, so it does not reproduce the old
+mass-amplified point impulse. The preserved log is
+`out/debug-openxr/575c868-high-ground-kind1-vehicle-slow-response-success.log`
+(SHA-256
+`85C9349834AE8304AFD7EEAF81FD0DE384F0358A32BC1DA44853D3BD3D59037A`).
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure
