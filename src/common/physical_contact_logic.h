@@ -1015,6 +1015,20 @@ enum class PhysicalContactAction : uint8_t
     ImpulseAndMelee,
 };
 
+// A real hand swing can comfortably cross the configured 1.50 m/s melee
+// threshold, but the preserved 120 Hz headset trace also contains isolated
+// 25.03 m/s controller samples. Keep those implausible tracking spikes in the
+// bounded physics path without turning them into native damage events.
+inline constexpr float kPhysicalContactMaximumMeleeSpeedMetersPerSecond = 8.0f;
+
+inline bool PhysicalContactMeleeSpeedPlausible(float weaponSpeedMetersPerSecond)
+{
+    return std::isfinite(weaponSpeedMetersPerSecond) &&
+        weaponSpeedMetersPerSecond >= 0.0f &&
+        weaponSpeedMetersPerSecond <=
+            kPhysicalContactMaximumMeleeSpeedMetersPerSecond;
+}
+
 inline PhysicalContactAction PhysicalContactClassify(
     float relativeSpeedMetersPerSecond, float weaponSpeedMetersPerSecond,
     float meleeThresholdMetersPerSecond)
@@ -1024,7 +1038,8 @@ inline PhysicalContactAction PhysicalContactClassify(
         !std::isfinite(meleeThresholdMetersPerSecond) ||
         relativeSpeedMetersPerSecond < 0.05f)
         return PhysicalContactAction::None;
-    return weaponSpeedMetersPerSecond >= meleeThresholdMetersPerSecond
+    return weaponSpeedMetersPerSecond >= meleeThresholdMetersPerSecond &&
+        PhysicalContactMeleeSpeedPlausible(weaponSpeedMetersPerSecond)
         ? PhysicalContactAction::ImpulseAndMelee
         : PhysicalContactAction::ImpulseOnly;
 }

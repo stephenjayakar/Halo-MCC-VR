@@ -606,6 +606,34 @@ Pure tests require at least `0.10 m/s` lateral correction for the representative
 `2 kg` carried body while retaining more than a tenfold light-to-`500 kg`
 vehicle response ratio.
 
+Installed candidate `c994570` passed the complete automated slow-contact
+transaction in Halo 3 Forge. It selected a loose authored `2.008 kg` weapon,
+lifted it `0.229 m`, carried it `0.202 m`, and retained `0.541 m/s` lateral
+speed after separation. All 120 accepted responses stayed below the configured
+`1.50 m/s` melee threshold and produced zero melee events. The preserved log is
+`out/debug-openxr/c994570-forge-scoop-toss-success.log` (SHA-256
+`4161F4219A9A31C79953783275777152E40C95E349AD06967CB4B12810B6A7FC`).
+
+The same installed candidate passed the independent fast-contact transaction.
+The automated authored-shape sweep produced 360 exact hits, 289 mass-correct
+physics responses, and 14 successful native melee events through damage tag
+`0xEBF10A7B` and response tag `0xEAEA0974`. The melee count advanced while the
+weapon crossed the threshold near `2.25 m/s`, then remained fixed after the
+rig settled to `0.45 m/s`. All 326 published commands were applied and the
+title stayed running. The preserved log is
+`out/debug-openxr/c994570-forge-native-melee-success.log` (SHA-256
+`F3C540B07721B3907CA91F1713A5375E53FFE564E5BE04F4043946AA62102124`).
+
+The headset trace for `f830ce6` recorded isolated weapon-speed samples up to
+`25.03 m/s`. These are not plausible hand swings and can falsely turn ordinary
+contact with a vehicle into destructive native melee. Physical contact now
+keeps samples through `8.00 m/s` eligible for melee, but classifies faster
+samples as impulse-only. The normal mass-aware response and its existing
+`0.08 m/s` per-sample target-velocity cap still run, so the guard removes only
+the false damage event. Runtime telemetry counts these decisions as
+`rejectMeleeSpike`; pure tests cover the exact limit, the first rejected value,
+the preserved `25.03 m/s` case, and non-finite input.
+
 The earlier wall candidate traced only the grip and a bounds-derived tip. That
 did not represent the visible authored solid. The exact wall candidate traces
 every authored convex vertex from the camera through Halo 3's native structure

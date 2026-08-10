@@ -6305,6 +6305,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactUnreliableNormalRejects{0};
     std::atomic<uint64_t> g_halo3ContactPoseDeltaRejects{0};
     std::atomic<uint64_t> g_halo3ContactPointVelocityRejects{0};
+    std::atomic<uint64_t> g_halo3ContactMeleeSpikeRejects{0};
     std::atomic<int32_t> g_halo3ContactCandidateHandle{-1};
     std::atomic<uint32_t> g_halo3ContactCandidateNormalReliable{0};
     std::atomic<uint32_t> g_halo3ContactNativeSamples{0};
@@ -11679,6 +11680,12 @@ namespace
             const PhysicalContactAction action = PhysicalContactClassify(
                 relativeSpeed, weaponSpeed,
                 g_config.physical_weapon_melee_speed);
+            if (weaponSpeed >= g_config.physical_weapon_melee_speed &&
+                !PhysicalContactMeleeSpeedPlausible(weaponSpeed))
+            {
+                g_halo3ContactMeleeSpikeRejects.fetch_add(
+                    1, std::memory_order_relaxed);
+            }
             g_halo3ContactWeaponSpeed.store(
                 weaponSpeed, std::memory_order_relaxed);
             g_halo3ContactRelativeSpeed.store(
@@ -11913,7 +11920,8 @@ namespace
             "lastNormal=(%.4f %.4f %.4f) "
             "authoredShapeHits=%llu animatedBodyHits=%llu "
             "unsupportedShapes=%llu rejectNormal=%llu rejectPose=%llu "
-            "rejectVelocity=%llu candidate=0x%08X candidateNormal=%u "
+            "rejectVelocity=%llu rejectMeleeSpike=%llu "
+            "candidate=0x%08X candidateNormal=%u "
             "shapeSource=%u nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
@@ -11977,6 +11985,8 @@ namespace
             (unsigned long long)g_halo3ContactPoseDeltaRejects.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactPointVelocityRejects.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactMeleeSpikeRejects.load(
                 std::memory_order_relaxed),
             static_cast<uint32_t>(g_halo3ContactCandidateHandle.load(
                 std::memory_order_relaxed)),

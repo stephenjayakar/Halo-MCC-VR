@@ -9034,6 +9034,12 @@ int main()
                   PhysicalContactAction::ImpulseOnly &&
               PhysicalContactClassify(0.50f, 1.50f, 1.50f) ==
                   PhysicalContactAction::ImpulseAndMelee &&
+              PhysicalContactClassify(0.50f, 7.99f, 1.50f) ==
+                  PhysicalContactAction::ImpulseAndMelee &&
+              PhysicalContactClassify(25.03f, 8.01f, 1.50f) ==
+                  PhysicalContactAction::ImpulseOnly &&
+              PhysicalContactMeleeSpeedPlausible(8.0f) &&
+              !PhysicalContactMeleeSpeedPlausible(8.01f) &&
               PhysicalContactClassify(
                   std::numeric_limits<float>::quiet_NaN(), 2.00f, 1.50f) ==
                   PhysicalContactAction::None &&
@@ -9041,8 +9047,9 @@ int main()
                   2.00f, std::numeric_limits<float>::quiet_NaN(), 1.50f) ==
                   PhysicalContactAction::None,
             "Relative tracking noise and non-finite velocity do nothing, "
-            "target motion can push but cannot cause melee, and melee begins "
-            "exactly when the weapon reaches the configured threshold");
+            "target motion can push but cannot cause melee, melee begins "
+            "exactly at the configured threshold, and implausible headset "
+            "spikes remain impulse-only");
 
         PhysicalContactDebounce debounce;
         bool first = false;
