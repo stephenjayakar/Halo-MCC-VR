@@ -221,22 +221,10 @@ struct PhysicalContactConvexShape
 
 struct PhysicalContactCompoundShape
 {
-    // The official Mongoose collision tag has ten simultaneous BSP children:
-    // bumper, hull, four root fender pieces, and four animated wheels. Sixteen
-    // keeps that complete visible shape bounded while the held-weapon census
-    // still limits the other side of a sweep to four children.
-    static constexpr size_t kMaximumChildren = 16;
+    static constexpr size_t kMaximumChildren = 8;
     std::array<PhysicalContactConvexShape, kMaximumChildren> children{};
     uint16_t childCount = 0;
 };
-
-inline int32_t PhysicalContactCollisionPermutationIndex(
-    int32_t permutationCount, bool allowFirstOfMany)
-{
-    if (permutationCount == 1)
-        return 0;
-    return allowFirstOfMany && permutationCount > 1 ? 0 : -1;
-}
 
 inline bool PhysicalContactConvexValid(const PhysicalContactConvexShape& shape)
 {

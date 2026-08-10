@@ -8858,61 +8858,6 @@ int main()
             "publish bounded native-query samples and a transformed authored "
             "centroid, and report the exact child that touched");
 
-        PhysicalContactCompoundShape tenPartTarget{};
-        tenPartTarget.childCount = 10;
-        for (uint16_t child = 0; child < tenPartTarget.childCount; ++child)
-        {
-            tenPartTarget.children[child] =
-                makeBox({0.04f, 0.04f, 0.04f}, 0.0f);
-            for (uint16_t vertex = 0;
-                 vertex < tenPartTarget.children[child].vertexCount;
-                 ++vertex)
-                tenPartTarget.children[child].vertices[vertex].x +=
-                    0.25f * static_cast<float>(child);
-        }
-        PhysicalContactCompoundShape smallWeapon{};
-        smallWeapon.childCount = 1;
-        smallWeapon.children[0] =
-            makeBox({0.02f, 0.02f, 0.02f}, 0.0f);
-        PhysicalContactTransform tenPartTargetTransform{};
-        PhysicalContactTransform childSweepFrom{};
-        childSweepFrom.position = {1.25f, -0.40f, 0.0f};
-        PhysicalContactTransform childSweepTo{};
-        childSweepTo.position = {1.25f, 0.40f, 0.0f};
-        const PhysicalContactCompoundHit exactTenthShapeChild =
-            PhysicalContactSweepCompound(
-                smallWeapon, childSweepFrom, childSweepTo,
-                tenPartTarget, tenPartTargetTransform);
-        PhysicalContactTransform betweenChildren{};
-        betweenChildren.position = {0.125f, 0.0f, 0.0f};
-        const PhysicalContactCompoundHit compoundSpaceStaysEmpty =
-            PhysicalContactSweepCompound(
-                smallWeapon, betweenChildren, betweenChildren,
-                tenPartTarget, tenPartTargetTransform);
-        PhysicalContactCompoundShape sixteenPartTarget{};
-        sixteenPartTarget.childCount = 16;
-        for (uint16_t child = 0; child < sixteenPartTarget.childCount; ++child)
-            sixteenPartTarget.children[child] =
-                makeBox({0.01f, 0.01f, 0.01f}, 0.0f);
-        PhysicalContactCompoundShape tooManyChildren = sixteenPartTarget;
-        tooManyChildren.childCount = 17;
-        Check(PhysicalContactCollisionPermutationIndex(1, false) == 0 &&
-              PhysicalContactCollisionPermutationIndex(1, true) == 0 &&
-              PhysicalContactCollisionPermutationIndex(4, false) == -1 &&
-              PhysicalContactCollisionPermutationIndex(4, true) == 0 &&
-              PhysicalContactCollisionPermutationIndex(0, true) == -1 &&
-              PhysicalContactCollisionPermutationIndex(-1, true) == -1 &&
-              PhysicalContactCompoundValid(tenPartTarget) &&
-              PhysicalContactCompoundValid(sixteenPartTarget) &&
-              !PhysicalContactCompoundValid(tooManyChildren) &&
-              exactTenthShapeChild.hit &&
-              exactTenthShapeChild.targetChild == 5 &&
-              !compoundSpaceStaysEmpty.hit,
-            "Detailed target collision accepts the ten-part vehicle shape, "
-            "keeps space between parts empty, selects the exact child, caps "
-            "storage at sixteen, and only opts into the first damage "
-            "permutation when native confirmation is available");
-
         bool gjkGridExact = true;
         const PhysicalContactConvexShape gridBox =
             makeBox({0.10f, 0.15f, 0.20f}, 0.0f);

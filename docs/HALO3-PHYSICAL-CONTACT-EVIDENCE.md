@@ -775,7 +775,7 @@ for the physics model and
 `6CE1F148706335F6A5581D9E7E1DF10F515F25869F43DBE78FD186D0F5B83689`
 for the collision model.
 
-The detailed-target candidate raises the fixed compound limit from eight to
+The failed `d71955d` detailed-target experiment raised the fixed compound limit from eight to
 sixteen children. This holds the complete ten-part Mongoose while keeping the
 worst supported held-weapon/target pair at 4 x 16 = 64 convex tests, the same
 pair-count ceiling as the former 8 x 8 limit. The proven 44-tag held-weapon
@@ -797,8 +797,17 @@ the default shape. Status telemetry reports `targetShapeSource=1` for detailed
 collision, `2` for the physics fallback, and `3` for animated physics bodies.
 It also reports the current detailed/fallback candidate counts and native
 confirmation rejects, so a missed contact can be separated from unavailable
-geometry without hot-path logging. This candidate still requires Forge runtime
-and headset validation.
+geometry without hot-path logging.
+
+The Forge result disproved the vehicle part of that implementation. A loose
+kind-2 weapon used `targetShapeSource=1` and passed its detailed scoop test. On
+High Ground, kind-1 Mongoose candidates instead reported
+`targetShapeSource=2`, `targetDetailed=0`, and `targetFallback=1`. Halo reported
+the expected `464.835 kg` vehicle mass, but the authored collision-model reader
+did not produce a usable detailed shape. The failed run is preserved at
+`out/debug-openxr/20260810-063345019Z-vehicle-nudge.log` (SHA-256
+`11A0EF28EF602DA2827BE29A5621D95C78A583C2DD4EBFE752FF3EF185E6E3BA`).
+The behavior was disabled before the next experiment.
 
 The bounded synthetic Release benchmark uses 70 vertices per target child,
 matching the largest official Mongoose child. Four held-weapon children against
@@ -807,7 +816,7 @@ storage bound measured `0.1044 ms` p95. Both remain below the fixed `0.25 ms`
 contact budget. The Forge validator now rejects weapon and vehicle results
 unless the runtime log proves `targetShapeSource=1` and at least one detailed
 target candidate. Physics-fallback movement cannot pass as precision-contact
-evidence.
+evidence in a future candidate.
 
 ### Post-separation velocity restoration
 
