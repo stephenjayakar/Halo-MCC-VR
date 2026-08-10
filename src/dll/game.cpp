@@ -12166,6 +12166,7 @@ namespace
             "target=0x%08X kind=%u weaponMass=%.3f targetMass=%.3f "
             "targetMotion=%u "
             "depth=%.4fm normalImpulse=%.5f tangentImpulse=%.5f "
+            "contactPoint=(%.4f %.4f %.4f) contactHaptic=%.3f "
             "lastImpulse=(%.5f %.5f %.5f) "
             "lastNormal=(%.4f %.4f %.4f) "
             "authoredShapeHits=%llu animatedBodyHits=%llu "
@@ -12212,6 +12213,13 @@ namespace
                 std::memory_order_relaxed),
             g_halo3ContactNormalImpulse.load(std::memory_order_relaxed),
             g_halo3ContactTangentImpulse.load(std::memory_order_relaxed),
+            g_halo3ContactCommandPoint[0].load(
+                std::memory_order_relaxed),
+            g_halo3ContactCommandPoint[1].load(
+                std::memory_order_relaxed),
+            g_halo3ContactCommandPoint[2].load(
+                std::memory_order_relaxed),
+            g_halo3ContactCommandHaptic.load(std::memory_order_relaxed),
             g_halo3ContactCommandVelocity[0].load(
                 std::memory_order_relaxed),
             g_halo3ContactCommandVelocity[1].load(
