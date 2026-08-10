@@ -10956,13 +10956,11 @@ namespace
             g_halo3ContactDebugWall.load(std::memory_order_acquire);
         const bool debugVisibleReplay =
             g_halo3ContactDebugVisibleReplay.load(std::memory_order_acquire);
-        // Candidates 77011f0/e9975ee ran before the final-palette selector
-        // could distinguish the exact held-weapon tag from small wrist-bound
-        // attachments. The +0x44 prepared-slot identity now admits only the
-        // actual gun palette, so retry the existing bounded gap replay against
-        // that one proven consumer. This remains environment-gated diagnostic
-        // behavior and does not alter production contact placement.
-        constexpr bool kEnableHalo3ExactVisibleReplayPlacement = true;
+        // Candidate 16b5569 retried the old composition after the exact +0x44
+        // held-weapon selector removed attachment palettes. That reduced the
+        // false range from -88 m to -16 m but still did not place contact in
+        // rendered pixel space. Keep the disproven diagnostic behavior inert.
+        constexpr bool kEnableHalo3ExactVisibleReplayPlacement = false;
         const bool debugExactVisibleReplay =
             kEnableHalo3ExactVisibleReplayPlacement &&
             g_halo3ContactDebugVisibleExactReplay.load(
