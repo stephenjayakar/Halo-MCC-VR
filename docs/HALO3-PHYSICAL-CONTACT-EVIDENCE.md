@@ -750,6 +750,44 @@ vertices. Until that data path is proven and uniquely bound in retail, native
 BSP, instanced structure, and object walls remain exact while render-only
 decorators remain a stated gap.
 
+The 2026-08-10 read-only retail probe then verified that the ordinary loaded-tag
+path is not a substitute for the resource path. Visible menu capture confirmed
+Halo 3 Forge, Valhalla, and the built-in Forge game type before launch. The
+probe matched the already shipped unique vehicle type accessor at retail RVA
+`0x396D84`, decoded the same tag-instance-table and tag-data-base globals, and
+walked every bounded readable loaded-tag root without writing process memory.
+It found no root whose block data satisfied the official BSP-cluster bounds,
+stride, and runtime-decorator record invariants. The tag-group table exposed
+the `sbsp` definition entry only as its invalid-address sentinel. This negative
+result is consistent with the official pageable BSP/decorator resource layout:
+an exact fix must bind the streamed resource or the renderer's prepared
+instance data, not guess an inline `sbsp` offset. The preserved probe report is
+`out/h3ek-valhalla/retail-valhalla-decorator-probe.json` (SHA-256
+`9FCDFC49B1366F5F3BAF345BE0FF30325A94449D02652DCD660AF6CA27FA3AF7`).
+
+The same visible-state Valhalla run passed the existing exact native wall
+transaction under the SteamVR null driver. It remained Halo 3 Forge throughout
+and never entered Escalation Slayer. The preserved log is
+`out/debug-openxr/20260810-222821041Z-wall.log` (SHA-256
+`A4635F95D94C1C04785B7342AC7BA2186D79CC0250C103B0F81EDFB80EED1CA8`).
+This is binding and regression evidence only, not headset acceptance.
+
+### Dynamic-body query-gap hold
+
+The headset report also identified a separate failure after a successful
+nudge: the visible weapon could briefly clip through the moved body. The exact
+body solver previously began its `1.5 m/s` visual-offset release on the first
+clear camera sample. Halo advances a dynamic body in the physics update after
+the camera query, so a single clear sample does not prove separation. The next
+candidate keeps the last exact dynamic-body correction for at most `50 ms`
+after the last validated hit, then uses the unchanged bounded release. Exact
+hits still replace the correction immediately. Tracking loss, weapon changes,
+title teardown, invalid clocks, and all normal contact resets clear the hold.
+The unit transaction covers 49 ms, the inclusive 50 ms edge, release at 51 ms,
+immediate re-contact, and invalid time. Runtime telemetry reports
+`bodyGapHolds`; no mass, impulse, geometry, or melee rule changes in this
+candidate.
+
 Installed diagnostic candidate `cba2427` closed the automated wall-evidence
 gap in Halo 3 Construct Forge. The null-runtime transaction forced the exact
 visible Assault Rifle collision solid `0.12-0.16 m` through discovered native

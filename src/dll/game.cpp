@@ -6525,6 +6525,7 @@ namespace
     PhysicalContactVec3 g_halo3ContactBodyOffset{};
     uint64_t g_halo3ContactWallUpdateMs = 0;
     uint64_t g_halo3ContactBodyUpdateMs = 0;
+    uint64_t g_halo3ContactBodyLastContactMs = 0;
     PhysicalContactTransform g_halo3ContactPreviousWallTransform{};
     int32_t g_halo3ContactWallWeaponHandle = -1;
     bool g_halo3ContactPreviousWallPoseValid = false;
@@ -6559,6 +6560,7 @@ namespace
     std::atomic<float> g_halo3ContactWallSetbackMeters{0.0f};
     std::atomic<float> g_halo3ContactBodySetbackMeters{0.0f};
     std::atomic<uint64_t> g_halo3ContactBodyConstraints{0};
+    std::atomic<uint64_t> g_halo3ContactBodyGapHolds{0};
     std::atomic<float> g_halo3ContactBodyPeakSetbackMeters{0.0f};
     std::atomic<uint64_t> g_halo3ContactWallRays{0};
     std::atomic<uint64_t> g_halo3ContactWallMotionRays{0};
@@ -10499,6 +10501,7 @@ namespace
         g_halo3ContactBodyOffset = {};
         g_halo3ContactWallUpdateMs = 0;
         g_halo3ContactBodyUpdateMs = 0;
+        g_halo3ContactBodyLastContactMs = 0;
         g_halo3ContactPreviousWallTransform = {};
         g_halo3ContactWallWeaponHandle = -1;
         g_halo3ContactPreviousWallPoseValid = false;
@@ -10532,6 +10535,7 @@ namespace
         g_halo3ContactBodySetbackMeters.store(0.0f,
                                                std::memory_order_relaxed);
         g_halo3ContactBodyConstraints.store(0, std::memory_order_relaxed);
+        g_halo3ContactBodyGapHolds.store(0, std::memory_order_relaxed);
         g_halo3ContactBodyPeakSetbackMeters.store(
             0.0f, std::memory_order_relaxed);
         g_halo3ContactWallVertices.store(0, std::memory_order_relaxed);
@@ -12779,9 +12783,24 @@ namespace
                               nowMs - g_halo3ContactBodyUpdateMs) * 0.001f,
                           0.1f)
                     : 0.0f;
-                g_halo3ContactBodyOffset = PhysicalContactUpdateWallOffset(
-                    g_halo3ContactBodyOffset, requestedOffset,
-                    constrained, bodyDt, worldScale);
+                if (constrained)
+                    g_halo3ContactBodyLastContactMs = nowMs;
+                const bool gapHeld = !constrained &&
+                    g_halo3ContactBodyLastContactMs &&
+                    nowMs >= g_halo3ContactBodyLastContactMs &&
+                    nowMs - g_halo3ContactBodyLastContactMs <=
+                        kPhysicalContactDynamicBodyGapHoldMs &&
+                    PhysicalContactLengthSquared(
+                        g_halo3ContactBodyOffset) > 1.0e-10f;
+                g_halo3ContactBodyOffset =
+                    PhysicalContactUpdateDynamicBodyOffset(
+                        g_halo3ContactBodyOffset, requestedOffset,
+                        constrained, nowMs,
+                        g_halo3ContactBodyLastContactMs,
+                        bodyDt, worldScale);
+                if (gapHeld)
+                    g_halo3ContactBodyGapHolds.fetch_add(
+                        1, std::memory_order_relaxed);
                 g_halo3ContactBodyUpdateMs = nowMs;
                 const float setbackMeters = PhysicalContactLength(
                     g_halo3ContactBodyOffset) / worldScale;
@@ -12812,6 +12831,7 @@ namespace
                 g_halo3ContactPreviousPoseValid = false;
                 g_halo3ContactBodyOffset = {};
                 g_halo3ContactBodyUpdateMs = nowMs;
+                g_halo3ContactBodyLastContactMs = 0;
                 g_halo3ContactBodySetbackMeters.store(
                     0.0f, std::memory_order_relaxed);
                 Halo3PublishWeaponWallOffset(g_halo3ContactWallOffset, nowMs);
@@ -13698,7 +13718,7 @@ namespace
             "targetTriangles=%u targetDetailed=%u "
             "targetFallback=%u targetConfirmRejects=%u nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm bodySetback=%.3fm "
-            "bodyConstraints=%llu bodyPeak=%.3fm "
+            "bodyConstraints=%llu bodyGapHolds=%llu bodyPeak=%.3fm "
             "wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
             "wallVertices=%u wallPlanes=%u",
@@ -13802,6 +13822,8 @@ namespace
             g_halo3ContactBodySetbackMeters.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactBodyConstraints.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactBodyGapHolds.load(
                 std::memory_order_relaxed),
             g_halo3ContactBodyPeakSetbackMeters.load(
                 std::memory_order_relaxed),

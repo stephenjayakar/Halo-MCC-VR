@@ -1653,6 +1653,34 @@ inline PhysicalContactVec3 PhysicalContactUpdateWallOffset(
     return currentOffset * ((currentLength - release) / currentLength);
 }
 
+// A moving rigid body can advance between Halo's camera query and physics
+// update. That produces an isolated clear sample even though the visible
+// weapon and body are still in continuous contact. Keep the last exact body
+// correction through a short two-to-six-frame query gap, then use the normal
+// bounded release. Tracking loss and feature teardown reset the caller's
+// timestamp, so this cannot preserve an offset across invalid gameplay state.
+inline constexpr uint64_t kPhysicalContactDynamicBodyGapHoldMs = 50;
+
+inline PhysicalContactVec3 PhysicalContactUpdateDynamicBodyOffset(
+    PhysicalContactVec3 currentOffset, PhysicalContactVec3 requestedOffset,
+    bool bodyBlocked, uint64_t nowMs, uint64_t lastBodyContactMs,
+    float elapsedSeconds, float worldUnitsPerMeter)
+{
+    if (!PhysicalContactFinite(currentOffset) ||
+        !PhysicalContactFinite(requestedOffset) || nowMs < lastBodyContactMs ||
+        !std::isfinite(elapsedSeconds) || elapsedSeconds < 0.0f ||
+        elapsedSeconds > 0.1f || !std::isfinite(worldUnitsPerMeter) ||
+        worldUnitsPerMeter <= 0.0f)
+        return {};
+    if (bodyBlocked)
+        return requestedOffset;
+    if (lastBodyContactMs &&
+        nowMs - lastBodyContactMs <= kPhysicalContactDynamicBodyGapHoldMs)
+        return currentOffset;
+    return PhysicalContactUpdateWallOffset(
+        currentOffset, {}, false, elapsedSeconds, worldUnitsPerMeter);
+}
+
 // Keep the rendered kinematic weapon on the target-facing side of an exact
 // dynamic-body hit. Only normal travel is rejected, so the controller may still
 // slide along a surface to scoop or carry it. The current pose is the

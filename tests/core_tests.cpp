@@ -9887,6 +9887,26 @@ int main()
         const PhysicalContactVec3 wallBadTiming =
             PhysicalContactUpdateWallOffset(
                 {-0.40f, 0, 0}, {}, false, 0.20f, 0.5f);
+        const PhysicalContactVec3 bodyGapHeld =
+            PhysicalContactUpdateDynamicBodyOffset(
+                {-0.20f, 0, 0}, {}, false, 1049, 1000,
+                1.0f / 120.0f, 0.5f);
+        const PhysicalContactVec3 bodyGapEdgeHeld =
+            PhysicalContactUpdateDynamicBodyOffset(
+                {-0.20f, 0, 0}, {}, false, 1050, 1000,
+                1.0f / 120.0f, 0.5f);
+        const PhysicalContactVec3 bodyGapReleased =
+            PhysicalContactUpdateDynamicBodyOffset(
+                {-0.20f, 0, 0}, {}, false, 1051, 1000,
+                1.0f / 120.0f, 0.5f);
+        const PhysicalContactVec3 bodyGapReblocked =
+            PhysicalContactUpdateDynamicBodyOffset(
+                {-0.20f, 0, 0}, {-0.35f, 0, 0}, true, 1051, 1000,
+                1.0f / 120.0f, 0.5f);
+        const PhysicalContactVec3 bodyGapInvalidClock =
+            PhysicalContactUpdateDynamicBodyOffset(
+                {-0.20f, 0, 0}, {}, false, 999, 1000,
+                1.0f / 120.0f, 0.5f);
         PhysicalContactTransform bodyPrevious{};
         PhysicalContactTransform bodyIntended{};
         bodyIntended.position = {1.0f, 0.0f, 0.0f};
@@ -9933,6 +9953,12 @@ int main()
               std::fabs(wallRelease.x + 0.325f) < 1.0e-6f &&
               PhysicalContactLengthSquared(wallReleased) < 1.0e-10f &&
               PhysicalContactLengthSquared(wallBadTiming) < 1.0e-10f &&
+              std::fabs(bodyGapHeld.x + 0.20f) < 1.0e-6f &&
+              std::fabs(bodyGapEdgeHeld.x + 0.20f) < 1.0e-6f &&
+              bodyGapReleased.x > -0.20f &&
+              bodyGapReleased.x < -0.18f &&
+              std::fabs(bodyGapReblocked.x + 0.35f) < 1.0e-6f &&
+              PhysicalContactLengthSquared(bodyGapInvalidClock) < 1.0e-10f &&
               bodyTunnel.constrained &&
               std::fabs(bodyTunnel.offset.x + 0.51f) < 1.0e-6f &&
               std::fabs(bodyTunnel.offset.y) < 1.0e-6f &&
@@ -9947,7 +9973,8 @@ int main()
             "Wall contact solves exact rigid surface planes, sideways "
             "tunnelling, and corners, includes clearance, engages immediately, "
             "releases smoothly, clamps travel, and rejects invalid data; "
-            "dynamic bodies reject only inward travel while preserving slides");
+            "dynamic bodies reject only inward travel while preserving slides, "
+            "hold exact correction across a 50 ms query gap, then release");
 
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&
