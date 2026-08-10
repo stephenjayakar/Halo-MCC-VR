@@ -10787,12 +10787,21 @@ namespace
         // failed diagnostic behavior while the proven scoop selector can
         // reject unsuitable map objects and continue.
         constexpr bool kEnableHalo3DebugBoundsSweepPlacement = false;
+        // Candidate 9d8fe23 applied the exact-support placement to the drawn
+        // palette, but the contact solver still reported 35-40 cm of overlap
+        // instead of the commanded <=2 cm. Keep the bounded probe dormant
+        // until the intervening transform is measured independently.
+        constexpr bool kEnableHalo3ExactVisibleReplayPlacement = false;
         constexpr float kDebugCycleMs = 1000.0f;
         constexpr float kDebugAngularRate = 6.28318530718f;
         const float debugPhase = static_cast<float>(nowMs % 1000u) *
             (kDebugAngularRate / kDebugCycleMs);
         const float debugMaxSpeed = debugMelee
-            ? 2.25f : (debugVisibleReplay ? 0.25f : 0.90f);
+            ? 2.25f
+            : (debugVisibleReplay &&
+                       kEnableHalo3ExactVisibleReplayPlacement
+                   ? 0.25f
+                   : 0.90f);
         bool paused = true;
         int32_t scene = -1, shot = -1;
         const bool gate = kEnableHalo3PhysicalContactCandidate &&
@@ -11572,7 +11581,8 @@ namespace
                 Halo3ResetPhysicalContact();
                 return;
             }
-            if (debugRig && debugVisibleReplay && debugAimData)
+            if (debugRig && debugVisibleReplay && debugAimData &&
+                kEnableHalo3ExactVisibleReplayPlacement)
             {
                 PhysicalContactCompoundShape debugTargetShape{};
                 PhysicalContactTransform debugTargetTransform{};

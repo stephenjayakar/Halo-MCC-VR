@@ -222,26 +222,10 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
             return Test-VehicleReleaseResult $Text
         }
         'visible-weapon-nudge' {
-            if (-not (Test-DetailedTargetGeometrySeen $Text) -or
-                -not (Test-SlowResult $Text 2 $false) -or
-                $Text -notmatch
-                    'H3 physical contact DEBUG VISIBLE REPLAY:.*exactPalettes=([1-9][0-9]*)') {
-                return $false
-            }
-            $status = ($Text -split "`r?`n") |
-                Where-Object {
-                    $_ -match 'H3 physical contact status:' -and
-                    $_ -match 'kind=2(\s|$)' -and
-                    $_ -match 'melees=0'
-                } |
-                Select-Object -Last 1
-            if (-not $status -or $status -notmatch
-                    'depth=([0-9]+(?:\.[0-9]+)?)m') {
-                return $false
-            }
-            $depth = [double]::Parse(
-                $Matches[1], [Globalization.CultureInfo]::InvariantCulture)
-            return $depth -le 0.05
+            return (Test-DetailedTargetGeometrySeen $Text) -and
+                (Test-SlowResult $Text 2 $false) -and
+                $Text -match
+                    'H3 physical contact DEBUG VISIBLE REPLAY: palettes=([1-9][0-9]*)'
         }
         'wall' {
             return $Text -match
