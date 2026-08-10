@@ -1137,6 +1137,31 @@ Pure tests cover tunnelling, tangential sliding, rotational penetration,
 clamping, and invalid normals. Headless Forge and headset acceptance remain
 pending.
 
+Source `53a9c6a` adds cumulative constraint-count and peak-setback telemetry to
+that same behavior; it does not change the constraint or impulse calculations.
+Its installed DLL is
+`541A52B48043DB57681EC1CF551783679489F978D313D40BE84E00044587BC1D`.
+The first vehicle validation incorrectly reused the loose-prop scoop path and
+crossed the vehicle deeply, so its one-metre clamped peak is rejected as a
+validation-rig result. Validator source `6f4aab2` instead keeps one vehicle and
+uses the bounded slow nudge path.
+
+That corrected High Ground Forge run is preserved at
+`out/debug-openxr/20260810-210910821Z-vehicle-nudge.log` (SHA-256
+`F9F3F86FD8E7B10CA310F2CABED99107FE88C21A89BEBBE68AA2947A0E8F845D`).
+It selected one live Mongoose, used its 502-triangle authored mesh and
+`464.835 kg` native mass, applied 164 impulses and 21 releases with zero melee,
+and recorded 170 constrained frames with a `0.317 m` peak. The exact target had
+moved `0.006 m` at validation. The same installed DLL then passed the loose
+weapon scoop at
+`out/debug-openxr/20260810-211200237Z-weapon-scoop.log` (SHA-256
+`0A08905A1AF3C380CF226D1E10BEC9EF6DECAD30402BA6FE1BC61E4FB085CCD2`):
+the `2.008 kg` target reached `0.738 m` lift and `0.389 m` carry with a
+`1.195 m/s` release, 116 constrained frames, and zero melee. Both runs used
+the SteamVR null driver; they prove the installed bindings, exact geometry,
+native mass, bounded impulses, and constraint transaction, but not headset
+alignment or feel. Real-headset acceptance remains pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
