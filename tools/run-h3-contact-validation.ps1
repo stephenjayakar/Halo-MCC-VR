@@ -181,11 +181,11 @@ function Test-VehicleReleaseResult([string]$Text) {
     }
     $lines = $Text -split "`r?`n" | Where-Object {
         $_ -match 'H3 physical contact status:' -and
-        $_ -match 'shapeSource=1' -and
         $_ -match 'impulses=([1-9][0-9]*) releases=([1-9][0-9]*) melees=0 ' -and
         $_ -match 'command=([1-9][0-9]*) applied=([1-9][0-9]*) commandStatus=2' -and
         $_ -match 'target=0x(?!FFFFFFFF)[0-9A-F]+ kind=1 ' -and
         $_ -match 'targetMass=([0-9]+(?:\.[0-9]+)?) targetMotion=4 ' -and
+        $_ -match 'targetDetailed=([1-9][0-9]*) targetFallback=0' -and
         $_ -match 'lastImpulse=\((-?[0-9]+(?:\.[0-9]+)?) (-?[0-9]+(?:\.[0-9]+)?) (-?[0-9]+(?:\.[0-9]+)?)\)'
     }
     foreach ($line in $lines) {
