@@ -1186,6 +1186,42 @@ the SteamVR null driver; they prove the installed bindings, exact geometry,
 native mass, bounded impulses, and constraint transaction, but not headset
 alignment or feel. Real-headset acceptance remains pending.
 
+### Stable melee separation
+
+Candidate `ef64b38` first changed melee classification from total weapon speed
+to the inward normal speed of a fresh exact contact. It correctly made
+tangential sliding, separating motion, and continued pressure physics-only,
+but its one-frame overlap debounce rearmed whenever triangle contact flickered.
+The deliberate-hit rig consequently produced repeated native melee events
+during one apparent interaction. The failed behavior was reverted by
+`c48527e` before its replacement.
+
+Installed product source `d435237` keeps the fresh inward-impact rule and
+retains each target's contact state through gaps shorter than `100 ms`. Only a
+real separation rearms that target; weapon/title/tracking resets still clear it
+immediately, and the independent `250 ms` native-melee cooldown remains. Its
+Steam DLL is
+`470E8C78907E864EE4BE955ADA070F34B3166CEB6AA791EC16758E4F398FC626`.
+The corrected slow Mongoose transaction is preserved at
+`out/debug-openxr/20260810-214106637Z-vehicle-nudge.log` (SHA-256
+`EF731D2BBBA928FF466EA03858107D79F9B9EFB89B2EB39BDF2A9233A5B24547`).
+It applied 166 impulses and 32 releases against the `464.835 kg`, 502-triangle
+target with zero melee, including samples where target motion raised relative
+speed above the melee threshold. The independent one-second sinusoidal rig
+then continued to produce native melee on fresh inward impacts; its preserved
+log is `out/debug-openxr/20260810-214328397Z-melee.log` (SHA-256
+`F3C16DE207E008FDC954CD7CC6EA06A7E434F3232756439C03BD8967A374DF86`).
+
+The same installed DLL passed exact static walls, loose-weapon scoop, and
+visible-palette alignment. Those logs are respectively
+`20260810-215254860Z-wall.log` (SHA-256
+`582AE4DB1783583EE77DB08D07DDE6CF990810AACB2A70D67A43C816491219FE`),
+`20260810-215448515Z-weapon-scoop.log` (SHA-256
+`F50E5BBBA6108A34EA467C6088F23D1782D4C8EEEDB9425730143655EC328C7F`),
+and `20260810-215644102Z-visible-weapon-gap.log` (SHA-256
+`0092139F3FB2F01D459495FD840B2BC4583CE33A52B59F5CC017F052DCE6FAB9`).
+All are null-driver evidence, not headset acceptance.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
