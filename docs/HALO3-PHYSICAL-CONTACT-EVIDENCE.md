@@ -857,6 +857,18 @@ while the compound centroid lies in empty space between vehicle parts. The
 next validator must align one concrete convex child to one weapon child, not
 mix extrema from the whole compound.
 
+Installed `810eb00` passed the High Ground vehicle transaction after the rig
+aligned its largest weapon child to the largest Mongoose child. Runtime contact
+reported `targetShapeSource=1`, `targetDetailed=1`, `targetFallback=0`, all ten
+collision children, the authored `464.835 kg` vehicle mass, and zero melee
+events. The exact contact moved the vehicle `0.922 m`; the rig measured
+`0.383 m` peak lift, `2.770 m` peak carry, and `1.666 m/s` release speed. The
+preserved log is
+`out/debug-openxr/20260810-095653341Z-vehicle-nudge.log` (SHA-256
+`814990296F3E3EF717DF64471CEE59BAAD3B1D88130FFDA8CC5658B67ABBB041`).
+This null-driver result proves the automated geometry/physics transaction. It
+is not headset acceptance.
+
 The bounded synthetic Release benchmark uses 70 vertices per target child,
 matching the largest official Mongoose child. Four held-weapon children against
 all ten Mongoose children measured `0.0655 ms` p95. The full four-by-sixteen
