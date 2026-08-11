@@ -250,6 +250,64 @@ static void __fastcall H3ResourceFixupHook(void* context)
                         static_cast<unsigned long long>(head[13]),
                         static_cast<unsigned long long>(head[14]),
                         static_cast<unsigned long long>(head[15]));
+
+                    // The resolved handles are spaced 0x28 bytes apart.  The
+                    // first three qwords in each entry look like a packed
+                    // placement-count value followed by two source pointers.
+                    // Snapshot both pointed records here so the H3EK placement
+                    // layout can prove their meaning before production code
+                    // relies on either one.  This remains environment-only.
+                    const uintptr_t authoredPlacements =
+                        static_cast<uintptr_t>(head[1]);
+                    const uintptr_t packedPlacements =
+                        static_cast<uintptr_t>(head[2]);
+                    if (authoredPlacements && packedPlacements)
+                    {
+                        uint32_t authoredWords[16]{};
+                        uint32_t packedWords[16]{};
+                        std::memcpy(
+                            authoredWords,
+                            reinterpret_cast<const void*>(authoredPlacements),
+                            sizeof(authoredWords));
+                        std::memcpy(
+                            packedWords,
+                            reinterpret_cast<const void*>(packedPlacements),
+                            sizeof(packedWords));
+                        float authoredPosition[3]{};
+                        std::memcpy(authoredPosition, authoredWords,
+                                    sizeof(authoredPosition));
+                        LOG("H3DECOROWNERDATA[%u]: descriptor=%016llX "
+                            "authored=%p firstPosition=%.6f,%.6f,%.6f "
+                            "authoredWords="
+                            "%08X,%08X,%08X,%08X|"
+                            "%08X,%08X,%08X,%08X|"
+                            "%08X,%08X,%08X,%08X|"
+                            "%08X,%08X,%08X,%08X "
+                            "packed=%p packedWords="
+                            "%08X,%08X,%08X,%08X|"
+                            "%08X,%08X,%08X,%08X|"
+                            "%08X,%08X,%08X,%08X|"
+                            "%08X,%08X,%08X,%08X",
+                            i, static_cast<unsigned long long>(head[0]),
+                            reinterpret_cast<const void*>(authoredPlacements),
+                            authoredPosition[0], authoredPosition[1],
+                            authoredPosition[2],
+                            authoredWords[0], authoredWords[1],
+                            authoredWords[2], authoredWords[3],
+                            authoredWords[4], authoredWords[5],
+                            authoredWords[6], authoredWords[7],
+                            authoredWords[8], authoredWords[9],
+                            authoredWords[10], authoredWords[11],
+                            authoredWords[12], authoredWords[13],
+                            authoredWords[14], authoredWords[15],
+                            reinterpret_cast<const void*>(packedPlacements),
+                            packedWords[0], packedWords[1], packedWords[2],
+                            packedWords[3], packedWords[4], packedWords[5],
+                            packedWords[6], packedWords[7], packedWords[8],
+                            packedWords[9], packedWords[10], packedWords[11],
+                            packedWords[12], packedWords[13], packedWords[14],
+                            packedWords[15]);
+                    }
                 }
             }
         }
