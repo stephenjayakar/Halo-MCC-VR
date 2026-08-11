@@ -108,6 +108,10 @@ static std::atomic<unsigned> g_h3DecoratorBlockProbeSamples{0};
 static std::atomic<bool> g_h3DecoratorLiveBlockScanStarted{false};
 static std::atomic<bool> g_h3DecoratorDrawProbeEnabled{false};
 constexpr bool kEnableH3DecoratorDrawFamilyProbe = true;
+// Candidate b223294 proved that copying each bound vertex constant buffer in
+// decorator draw callbacks can make the null-driver wall transaction miss its
+// deadline. The captured evidence is preserved, but this behavior stays inert.
+constexpr bool kEnableH3DecoratorShaderConstantProbe = false;
 #if HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE
 static DrawIndexedFn g_origDrawIndexed = nullptr;
 // The July 26 HUD-discovery detour performed synchronous GPU readback and
@@ -678,12 +682,15 @@ static void H3ProbeCaptureDraw(
             record.indirectArgsOffset = indirectArgsOffset;
             record.inputLayout = g_h3ProbeBoundInputLayout;
             record.topology = g_h3ProbeBoundTopology;
-            for (unsigned constantSlot = 0;
-                 constantSlot < kH3ProbeConstantSlots; ++constantSlot)
+            if constexpr (kEnableH3DecoratorShaderConstantProbe)
             {
-                H3ProbeCaptureConstantSnapshot(
-                    g_h3ProbeBoundVertexConstants[constantSlot],
-                    record.vertexConstants[constantSlot]);
+                for (unsigned constantSlot = 0;
+                     constantSlot < kH3ProbeConstantSlots; ++constantSlot)
+                {
+                    H3ProbeCaptureConstantSnapshot(
+                        g_h3ProbeBoundVertexConstants[constantSlot],
+                        record.vertexConstants[constantSlot]);
+                }
             }
             g_h3ProbeDraws[sample].ready.store(
                 true, std::memory_order_release);
@@ -2834,19 +2841,23 @@ bool InstallD3D11Hooks()
                           (void*)&H3ProbeCreateInputLayoutHook,
                           (void**)&g_origCreateInputLayout) == MH_OK;
         const bool vertexConstantBindingOk = createInputLayoutOk &&
-            MH_CreateHook(contextVtbl[7],
+            (!kEnableH3DecoratorShaderConstantProbe ||
+             MH_CreateHook(contextVtbl[7],
                           (void*)&H3ProbeVSSetConstantBuffersHook,
-                          (void**)&g_origH3ProbeVSSetConstantBuffers) == MH_OK;
+                          (void**)&g_origH3ProbeVSSetConstantBuffers) == MH_OK);
         const bool mapBindingOk = vertexConstantBindingOk &&
-            MH_CreateHook(contextVtbl[14], (void*)&H3ProbeMapHook,
-                          (void**)&g_origH3ProbeMap) == MH_OK;
+            (!kEnableH3DecoratorShaderConstantProbe ||
+             MH_CreateHook(contextVtbl[14], (void*)&H3ProbeMapHook,
+                          (void**)&g_origH3ProbeMap) == MH_OK);
         const bool unmapBindingOk = mapBindingOk &&
-            MH_CreateHook(contextVtbl[15], (void*)&H3ProbeUnmapHook,
-                          (void**)&g_origH3ProbeUnmap) == MH_OK;
+            (!kEnableH3DecoratorShaderConstantProbe ||
+             MH_CreateHook(contextVtbl[15], (void*)&H3ProbeUnmapHook,
+                          (void**)&g_origH3ProbeUnmap) == MH_OK);
         const bool updateBindingOk = unmapBindingOk &&
-            MH_CreateHook(contextVtbl[48],
+            (!kEnableH3DecoratorShaderConstantProbe ||
+             MH_CreateHook(contextVtbl[48],
                           (void*)&H3ProbeUpdateSubresourceHook,
-                          (void**)&g_origH3ProbeUpdateSubresource) == MH_OK;
+                          (void**)&g_origH3ProbeUpdateSubresource) == MH_OK);
         const bool inputLayoutBindingOk = updateBindingOk &&
             MH_CreateHook(contextVtbl[17],
                           (void*)&H3ProbeIASetInputLayoutHook,
