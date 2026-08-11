@@ -10039,10 +10039,26 @@ int main()
               std::fabs(bodyRotation.offset.z - 0.31f) < 1.0e-6f &&
               bodyClamped.constrained &&
               std::fabs(bodyClamped.setbackWorldUnits - 0.5f) < 1.0e-6f &&
-              !bodyInvalid.constrained,
+              !bodyInvalid.constrained &&
+              PhysicalContactWallTriangleCentroidBudget(20, 222, 64) ==
+                  44 &&
+              PhysicalContactWallTriangleCentroidBudget(20, 36, 64) ==
+                  36 &&
+              PhysicalContactWallTriangleCentroidBudget(64, 768, 64) ==
+                  0 &&
+              PhysicalContactWallTriangleSampleIndex(0, 44, 222, 0) == 0 &&
+              PhysicalContactWallTriangleSampleIndex(1, 44, 222, 0) == 5 &&
+              PhysicalContactWallTriangleSampleIndex(43, 44, 222, 0) ==
+                  216 &&
+              PhysicalContactWallTriangleSampleIndex(43, 44, 222, 7) == 1 &&
+              PhysicalContactWallTriangleSampleIndex(44, 44, 222, 0) ==
+                  222,
             "Wall contact solves exact rigid surface planes, sideways "
             "tunnelling, and corners, includes clearance, engages immediately, "
             "releases smoothly, clamps travel, and rejects invalid data; "
+            "all 36 Assault Rifle triangles fit beside its 20 authored convex "
+            "vertices, while larger meshes rotate an evenly spread bounded "
+            "face-centre sample set; "
             "dynamic bodies reject only inward travel while preserving slides, "
             "hold exact correction across a 50 ms query gap, then release");
 

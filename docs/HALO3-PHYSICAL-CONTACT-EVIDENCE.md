@@ -849,6 +849,32 @@ This proves the production solver covers authored BSP/instanced structure and
 fixed/keyframed Forge scenery with the same visible weapon geometry. Headset
 feel and pixel alignment remain acceptance items.
 
+### Authored weapon-face wall coverage
+
+Review of the exact wall transaction found a geometry gap independent of map
+content. It traced every collision-convex vertex, but a narrow static surface
+can cross the middle of a broad weapon triangle while every outer vertex ray
+passes beside it. The target wall can be exact and native yet still never reach
+the rigid plane solver.
+
+The replacement keeps every authored convex vertex and adds exact triangle
+centres from the already prepared held-weapon collision mesh. The current and
+previous-transform native queries use the same local point, so both present
+overlap and sideways tunnelling remain continuous. The Assault Rifle's 20
+vertices plus all 36 triangle centres fit in a fixed 64-sample budget. Larger
+held meshes keep every outer vertex and rotate an evenly distributed subset of
+triangle centres across fresh controller samples; no allocation or new target
+proxy is introduced. Invalid or absent triangle data leaves the existing
+vertex-only path unchanged.
+
+This improves narrow BSP, instanced-structure, and fixed-object coverage
+without naming a map or wall. It does not pretend that Valhalla's render-only
+decorator rocks have native collision; those still require the separately
+documented streamed decorator-resource or renderer-instance binding. Pure
+tests cover the fixed budget, complete Assault Rifle sample set, even large-
+mesh sampling, phase rotation, and invalid indices. Runtime performance and
+headset acceptance remain pending.
+
 Installed candidate `01f9401` extended only the environment-gated validation
 selector so a run can require one Halo object kind. With kind `3` required, the
 Construct Forge scoop transaction rejected 11 map-constrained equipment

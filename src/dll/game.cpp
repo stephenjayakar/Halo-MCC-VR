@@ -12772,18 +12772,139 @@ namespace
                     PhysicalContactTransformFinite(
                         g_halo3ContactPreviousWallTransform);
                 std::array<PhysicalContactWallPlane, 256> wallPlanes{};
+                constexpr size_t kWallAuthoredSampleBudget = 64;
                 size_t wallPlaneCount = 0;
                 size_t wallVertexCount = 0;
                 for (uint16_t childIndex = 0;
                      childIndex < weaponShape.childCount; ++childIndex)
                     wallVertexCount +=
                         weaponShape.children[childIndex].vertexCount;
+                const size_t wallTriangleCentroidCount =
+                    collisionShape &&
+                        PhysicalContactTriangleMeshValid(weaponTriangleMesh)
+                    ? PhysicalContactWallTriangleCentroidBudget(
+                          wallVertexCount,
+                          weaponTriangleMesh.triangleCount,
+                          kWallAuthoredSampleBudget)
+                    : 0;
+                const size_t wallSampleCount =
+                    wallVertexCount + wallTriangleCentroidCount;
                 g_halo3ContactWallVertices.store(
-                    static_cast<uint32_t>(wallVertexCount),
+                    static_cast<uint32_t>(wallSampleCount),
                     std::memory_order_relaxed);
                 if (PhysicalContactFinite(camera) &&
-                    wallVertexCount <= wallPlanes.size())
+                    wallSampleCount <= wallPlanes.size())
                 {
+                    const auto processWallLocalPoint = [&]
+                        (PhysicalContactVec3 localPoint,
+                         float clearance)
+                    {
+                        if (wallPlaneCount >= wallPlanes.size() ||
+                            !PhysicalContactFinite(localPoint) ||
+                            !std::isfinite(clearance) || clearance < 0.0f)
+                            return;
+                        const PhysicalContactVec3 wallPoint =
+                            PhysicalContactTransformPoint(
+                                unconstrainedWeaponTransform, localPoint);
+                        const PhysicalContactVec3 ray = wallPoint - camera;
+                        if (!PhysicalContactFinite(ray) ||
+                            PhysicalContactLengthSquared(ray) <= 1.0e-10f)
+                            return;
+                        const float point[3] = {
+                            camera.x, camera.y, camera.z};
+                        const float delta[3] = {ray.x, ray.y, ray.z};
+                        Halo3CollisionResult native{};
+                        native.type = -1;
+                        native.fraction = 1.0f;
+                        g_halo3ContactWallRays.fetch_add(
+                            1, std::memory_order_relaxed);
+                        const bool cameraBlocked =
+                            g_halo3CollisionTestVector(
+                                kWallCollisionFlags, false, point, delta,
+                                unitHandle, weaponHandle, -1, &native) &&
+                            nativeHitBlocksWall(native) &&
+                            std::isfinite(native.fraction) &&
+                            native.fraction >= 0.0f &&
+                            native.fraction <= 1.0f;
+                        if (cameraBlocked)
+                        {
+                            const PhysicalContactVec3 surfacePoint =
+                                camera + ray * native.fraction;
+                            PhysicalContactVec3 normal =
+                                PhysicalContactNormalize(
+                                    {native.normal[0], native.normal[1],
+                                     native.normal[2]},
+                                    camera - surfacePoint);
+                            if (!PhysicalContactFinite(surfacePoint) ||
+                                !PhysicalContactFinite(normal))
+                                return;
+                            if (PhysicalContactDot(
+                                    camera - surfacePoint, normal) < 0.0f)
+                                normal = normal * -1.0f;
+                            wallPlanes[wallPlaneCount++] = {
+                                wallPoint, surfacePoint, normal, clearance};
+                            if (native.type == 4)
+                                g_halo3ContactWallObjectPlanes.fetch_add(
+                                    1, std::memory_order_relaxed);
+                            return;
+                        }
+
+                        // Current visibility cannot detect a thin wall crossed
+                        // sideways. Sweep this same authored surface sample
+                        // from the previous unconstrained weapon transform.
+                        if (!previousWallPoseValid)
+                            return;
+                        const PhysicalContactVec3 previousWallPoint =
+                            PhysicalContactTransformPoint(
+                                g_halo3ContactPreviousWallTransform,
+                                localPoint);
+                        const PhysicalContactVec3 motionDelta =
+                            wallPoint - previousWallPoint;
+                        const float minimumMotion = 0.005f * worldScale;
+                        if (!PhysicalContactFinite(previousWallPoint) ||
+                            !PhysicalContactFinite(motionDelta) ||
+                            PhysicalContactLengthSquared(motionDelta) <=
+                                minimumMotion * minimumMotion)
+                            return;
+                        const float motionPoint[3] = {
+                            previousWallPoint.x, previousWallPoint.y,
+                            previousWallPoint.z};
+                        const float motionVector[3] = {
+                            motionDelta.x, motionDelta.y, motionDelta.z};
+                        native = {};
+                        native.type = -1;
+                        native.fraction = 1.0f;
+                        g_halo3ContactWallMotionRays.fetch_add(
+                            1, std::memory_order_relaxed);
+                        if (!g_halo3CollisionTestVector(
+                                kWallCollisionFlags, false, motionPoint,
+                                motionVector, unitHandle, weaponHandle, -1,
+                                &native) ||
+                            !nativeHitBlocksWall(native) ||
+                            !std::isfinite(native.fraction) ||
+                            native.fraction < 0.0f ||
+                            native.fraction > 1.0f)
+                            return;
+                        const PhysicalContactVec3 surfacePoint =
+                            previousWallPoint +
+                            motionDelta * native.fraction;
+                        PhysicalContactVec3 normal =
+                            PhysicalContactNormalize(
+                                {native.normal[0], native.normal[1],
+                                 native.normal[2]},
+                                camera - surfacePoint);
+                        if (!PhysicalContactFinite(surfacePoint) ||
+                            !PhysicalContactFinite(normal))
+                            return;
+                        if (PhysicalContactDot(
+                                camera - surfacePoint, normal) < 0.0f)
+                            normal = normal * -1.0f;
+                        wallPlanes[wallPlaneCount++] = {
+                            wallPoint, surfacePoint, normal, clearance};
+                        if (native.type == 4)
+                            g_halo3ContactWallObjectPlanes.fetch_add(
+                                1, std::memory_order_relaxed);
+                    };
                     for (uint16_t childIndex = 0;
                          childIndex < weaponShape.childCount; ++childIndex)
                     {
@@ -12794,113 +12915,29 @@ namespace
                             0.005f * worldScale;
                         for (uint16_t vertexIndex = 0;
                              vertexIndex < child.vertexCount; ++vertexIndex)
-                        {
-                            const PhysicalContactVec3 wallPoint =
-                                PhysicalContactTransformPoint(
-                                    unconstrainedWeaponTransform,
-                                    child.vertices[vertexIndex]);
-                            const PhysicalContactVec3 ray = wallPoint - camera;
-                            if (!PhysicalContactFinite(ray) ||
-                                PhysicalContactLengthSquared(ray) <= 1.0e-10f)
-                                continue;
-                            const float point[3] = {
-                                camera.x, camera.y, camera.z};
-                            const float delta[3] = {ray.x, ray.y, ray.z};
-                            Halo3CollisionResult native{};
-                            native.type = -1;
-                            native.fraction = 1.0f;
-                            g_halo3ContactWallRays.fetch_add(
-                                1, std::memory_order_relaxed);
-                            const bool cameraBlocked =
-                                g_halo3CollisionTestVector(
-                                    kWallCollisionFlags, false, point, delta,
-                                    unitHandle,
-                                    weaponHandle, -1, &native) &&
-                                nativeHitBlocksWall(native) &&
-                                std::isfinite(native.fraction) &&
-                                native.fraction >= 0.0f &&
-                                native.fraction <= 1.0f;
-                            if (cameraBlocked)
-                            {
-                                const PhysicalContactVec3 surfacePoint =
-                                    camera + ray * native.fraction;
-                                PhysicalContactVec3 normal =
-                                    PhysicalContactNormalize(
-                                        {native.normal[0], native.normal[1],
-                                         native.normal[2]},
-                                        camera - surfacePoint);
-                                if (!PhysicalContactFinite(surfacePoint) ||
-                                    !PhysicalContactFinite(normal))
-                                    continue;
-                                if (PhysicalContactDot(
-                                        camera - surfacePoint, normal) < 0.0f)
-                                    normal = normal * -1.0f;
-                                wallPlanes[wallPlaneCount++] = {
-                                    wallPoint, surfacePoint, normal,
-                                    clearance};
-                                if (native.type == 4)
-                                    g_halo3ContactWallObjectPlanes.fetch_add(
-                                        1, std::memory_order_relaxed);
-                                continue;
-                            }
-
-                            // A current camera ray cannot detect a thin wall
-                            // crossed sideways when the final point is visible
-                            // again. Sweep this exact authored vertex from its
-                            // prior unconstrained pose to close that tunnel.
-                            if (!previousWallPoseValid)
-                                continue;
-                            const PhysicalContactVec3 previousWallPoint =
-                                PhysicalContactTransformPoint(
-                                    g_halo3ContactPreviousWallTransform,
-                                    child.vertices[vertexIndex]);
-                            const PhysicalContactVec3 motionDelta =
-                                wallPoint - previousWallPoint;
-                            const float minimumMotion = 0.005f * worldScale;
-                            if (!PhysicalContactFinite(previousWallPoint) ||
-                                !PhysicalContactFinite(motionDelta) ||
-                                PhysicalContactLengthSquared(motionDelta) <=
-                                    minimumMotion * minimumMotion)
-                                continue;
-                            const float motionPoint[3] = {
-                                previousWallPoint.x, previousWallPoint.y,
-                                previousWallPoint.z};
-                            const float motionVector[3] = {
-                                motionDelta.x, motionDelta.y, motionDelta.z};
-                            native = {};
-                            native.type = -1;
-                            native.fraction = 1.0f;
-                            g_halo3ContactWallMotionRays.fetch_add(
-                                1, std::memory_order_relaxed);
-                            if (!g_halo3CollisionTestVector(
-                                    kWallCollisionFlags, false, motionPoint,
-                                    motionVector, unitHandle, weaponHandle, -1,
-                                    &native) ||
-                                !nativeHitBlocksWall(native) ||
-                                !std::isfinite(native.fraction) ||
-                                native.fraction < 0.0f ||
-                                native.fraction > 1.0f)
-                                continue;
-                            const PhysicalContactVec3 surfacePoint =
-                                previousWallPoint +
-                                motionDelta * native.fraction;
-                            PhysicalContactVec3 normal =
-                                PhysicalContactNormalize(
-                                    {native.normal[0], native.normal[1],
-                                     native.normal[2]},
-                                    camera - surfacePoint);
-                            if (!PhysicalContactFinite(surfacePoint) ||
-                                !PhysicalContactFinite(normal))
-                                continue;
-                            if (PhysicalContactDot(
-                                    camera - surfacePoint, normal) < 0.0f)
-                                normal = normal * -1.0f;
-                            wallPlanes[wallPlaneCount++] = {
-                                wallPoint, surfacePoint, normal, clearance};
-                            if (native.type == 4)
-                                g_halo3ContactWallObjectPlanes.fetch_add(
-                                    1, std::memory_order_relaxed);
-                        }
+                            processWallLocalPoint(
+                                child.vertices[vertexIndex], clearance);
+                    }
+                    const float triangleClearance =
+                        (kHalo3ContactTriangleSurfaceRadiusMeters + 0.005f) *
+                        worldScale;
+                    for (size_t triangleIndex = 0;
+                         triangleIndex < wallTriangleCentroidCount;
+                         ++triangleIndex)
+                    {
+                        const size_t sampledTriangle =
+                            PhysicalContactWallTriangleSampleIndex(
+                                triangleIndex,
+                                wallTriangleCentroidCount,
+                                weaponTriangleMesh.triangleCount,
+                                motion.serial);
+                        if (sampledTriangle >=
+                            weaponTriangleMesh.triangleCount)
+                            continue;
+                        processWallLocalPoint(
+                            weaponTriangleMesh.triangles[
+                                sampledTriangle].centre,
+                            triangleClearance);
                     }
                 }
                 g_halo3ContactWallPlanes.store(

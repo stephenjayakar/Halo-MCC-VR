@@ -1537,6 +1537,27 @@ struct PhysicalContactWallPlane
     float clearanceWorldUnits = 0.0f;
 };
 
+inline size_t PhysicalContactWallTriangleCentroidBudget(
+    size_t authoredConvexVertices, size_t authoredTriangles,
+    size_t fixedCapacity)
+{
+    if (authoredConvexVertices >= fixedCapacity)
+        return 0;
+    return std::min(
+        authoredTriangles, fixedCapacity - authoredConvexVertices);
+}
+
+inline size_t PhysicalContactWallTriangleSampleIndex(
+    size_t sampleIndex, size_t sampleCount, size_t triangleCount,
+    size_t phase)
+{
+    if (!sampleCount || sampleIndex >= sampleCount || !triangleCount ||
+        sampleCount > triangleCount)
+        return triangleCount;
+    return ((sampleIndex * triangleCount) / sampleCount +
+            phase % triangleCount) % triangleCount;
+}
+
 // Project one rigid translation against every exact static surface plane.
 // All normals face the camera-side free space. Four bounded passes resolve
 // corners without moving separate weapon vertices by different amounts.
