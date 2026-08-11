@@ -46,6 +46,15 @@ typedef void(STDMETHODCALLTYPE* IASetIndexBufferFn)(ID3D11DeviceContext*,
     ID3D11Buffer*, DXGI_FORMAT, UINT);
 typedef void(STDMETHODCALLTYPE* IASetPrimitiveTopologyFn)(ID3D11DeviceContext*,
     D3D11_PRIMITIVE_TOPOLOGY);
+typedef void(STDMETHODCALLTYPE* VSSetConstantBuffersFn)(ID3D11DeviceContext*,
+    UINT, UINT, ID3D11Buffer* const*);
+typedef HRESULT(STDMETHODCALLTYPE* H3ProbeMapFn)(ID3D11DeviceContext*,
+    ID3D11Resource*, UINT, D3D11_MAP, UINT, D3D11_MAPPED_SUBRESOURCE*);
+typedef void(STDMETHODCALLTYPE* H3ProbeUnmapFn)(ID3D11DeviceContext*,
+    ID3D11Resource*, UINT);
+typedef void(STDMETHODCALLTYPE* H3ProbeUpdateSubresourceFn)(
+    ID3D11DeviceContext*, ID3D11Resource*, UINT, const D3D11_BOX*,
+    const void*, UINT, UINT);
 typedef void(STDMETHODCALLTYPE* DrawIndexedInstancedFn)(ID3D11DeviceContext*,
     UINT, UINT, UINT, INT, UINT);
 typedef void(STDMETHODCALLTYPE* H3ProbeDrawIndexedFn)(ID3D11DeviceContext*,
@@ -77,6 +86,10 @@ static IASetInputLayoutFn g_origIASetInputLayout = nullptr;
 static IASetVertexBuffersFn g_origIASetVertexBuffers = nullptr;
 static IASetIndexBufferFn g_origIASetIndexBuffer = nullptr;
 static IASetPrimitiveTopologyFn g_origIASetPrimitiveTopology = nullptr;
+static VSSetConstantBuffersFn g_origH3ProbeVSSetConstantBuffers = nullptr;
+static H3ProbeMapFn g_origH3ProbeMap = nullptr;
+static H3ProbeUnmapFn g_origH3ProbeUnmap = nullptr;
+static H3ProbeUpdateSubresourceFn g_origH3ProbeUpdateSubresource = nullptr;
 static DrawIndexedInstancedFn g_origDrawIndexedInstanced = nullptr;
 static H3ProbeDrawIndexedFn g_origH3ProbeDrawIndexed = nullptr;
 static H3ProbeDrawFn g_origH3ProbeDraw = nullptr;
@@ -118,6 +131,10 @@ constexpr unsigned kH3ProbeBufferSlots = 1u << 15u;
 constexpr unsigned kH3ProbeDrawSlots = 512u;
 constexpr unsigned kH3ProbeInputLayoutSlots = 1u << 10u;
 constexpr unsigned kH3ProbeInputElements = 16u;
+constexpr unsigned kH3ProbeConstantSlots =
+    D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;
+constexpr unsigned kH3ProbeConstantBytes = 512u;
+constexpr unsigned kH3ProbeConstantBufferSlots = 1u << 11u;
 
 struct H3ProbeBufferMetadata
 {
@@ -130,6 +147,24 @@ struct H3ProbeBufferMetadata
     uintptr_t halo3CreatorRva = UINTPTR_MAX;
     uintptr_t mccCreatorRva = UINTPTR_MAX;
     bool decoratorPlacement = false;
+};
+
+struct H3ProbeConstantBufferState
+{
+    std::atomic<ID3D11Buffer*> key{nullptr};
+    UINT byteWidth = 0;
+    std::atomic<unsigned> dataSequence{0};
+    std::atomic<unsigned> dataBytes{0};
+    uint8_t data[kH3ProbeConstantBytes]{};
+};
+
+struct H3ProbeConstantSnapshot
+{
+    ID3D11Buffer* buffer = nullptr;
+    UINT byteWidth = 0;
+    unsigned sequence = 0;
+    unsigned dataBytes = 0;
+    uint8_t data[kH3ProbeConstantBytes]{};
 };
 
 struct H3ProbeDrawRecord
@@ -151,6 +186,7 @@ struct H3ProbeDrawRecord
     UINT indirectArgsOffset = 0;
     ID3D11InputLayout* inputLayout = nullptr;
     D3D11_PRIMITIVE_TOPOLOGY topology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+    H3ProbeConstantSnapshot vertexConstants[kH3ProbeConstantSlots]{};
 };
 
 struct H3ProbeInputElement
@@ -178,6 +214,8 @@ struct H3ProbeDrawSlot
 };
 
 static H3ProbeBufferMetadata g_h3ProbeBuffers[kH3ProbeBufferSlots]{};
+static H3ProbeConstantBufferState
+    g_h3ProbeConstantBuffers[kH3ProbeConstantBufferSlots]{};
 static H3ProbeInputLayoutMetadata
     g_h3ProbeInputLayouts[kH3ProbeInputLayoutSlots]{};
 static H3ProbeDrawSlot g_h3ProbeDraws[kH3ProbeDrawSlots]{};
@@ -192,12 +230,78 @@ static thread_local UINT g_h3ProbeBoundIndexOffset = 0;
 static thread_local ID3D11InputLayout* g_h3ProbeBoundInputLayout = nullptr;
 static thread_local D3D11_PRIMITIVE_TOPOLOGY g_h3ProbeBoundTopology =
     D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+static thread_local ID3D11Buffer*
+    g_h3ProbeBoundVertexConstants[kH3ProbeConstantSlots]{};
+static thread_local ID3D11Resource* g_h3ProbeMappedResource = nullptr;
+static thread_local void* g_h3ProbeMappedData = nullptr;
+static thread_local unsigned g_h3ProbeMappedBytes = 0u;
 
 static unsigned H3ProbeBufferHash(ID3D11Buffer* buffer)
 {
     const uintptr_t value = reinterpret_cast<uintptr_t>(buffer);
     return static_cast<unsigned>((value >> 4u) ^ (value >> 21u)) &
         (kH3ProbeBufferSlots - 1u);
+}
+
+static unsigned H3ProbeConstantBufferHash(ID3D11Buffer* buffer)
+{
+    const uintptr_t value = reinterpret_cast<uintptr_t>(buffer);
+    return static_cast<unsigned>((value >> 4u) ^ (value >> 17u)) &
+        (kH3ProbeConstantBufferSlots - 1u);
+}
+
+static H3ProbeConstantBufferState* H3ProbeFindConstantBuffer(
+    ID3D11Buffer* buffer)
+{
+    if (!buffer)
+        return nullptr;
+    const unsigned first = H3ProbeConstantBufferHash(buffer);
+    for (unsigned probe = 0; probe < 16u; ++probe)
+    {
+        H3ProbeConstantBufferState& entry = g_h3ProbeConstantBuffers[
+            (first + probe) & (kH3ProbeConstantBufferSlots - 1u)];
+        ID3D11Buffer* key = entry.key.load(std::memory_order_acquire);
+        if (key == buffer)
+            return &entry;
+        if (!key || key == reinterpret_cast<ID3D11Buffer*>(1u))
+            return nullptr;
+    }
+    return nullptr;
+}
+
+static void H3ProbeRegisterConstantBuffer(
+    ID3D11Buffer* buffer, const D3D11_BUFFER_DESC* desc,
+    const D3D11_SUBRESOURCE_DATA* initialData)
+{
+    if (!buffer || !desc ||
+        (desc->BindFlags & D3D11_BIND_CONSTANT_BUFFER) == 0u)
+        return;
+    const unsigned first = H3ProbeConstantBufferHash(buffer);
+    ID3D11Buffer* const reserved = reinterpret_cast<ID3D11Buffer*>(1u);
+    for (unsigned probe = 0; probe < 16u; ++probe)
+    {
+        H3ProbeConstantBufferState& entry = g_h3ProbeConstantBuffers[
+            (first + probe) & (kH3ProbeConstantBufferSlots - 1u)];
+        ID3D11Buffer* expected = nullptr;
+        if (entry.key.compare_exchange_strong(
+                expected, reserved, std::memory_order_acq_rel,
+                std::memory_order_acquire))
+        {
+            entry.byteWidth = desc->ByteWidth;
+            if (initialData && initialData->pSysMem && desc->ByteWidth > 0u)
+            {
+                const unsigned bytes = std::min(
+                    desc->ByteWidth, kH3ProbeConstantBytes);
+                std::memcpy(entry.data, initialData->pSysMem, bytes);
+                entry.dataBytes.store(bytes, std::memory_order_relaxed);
+                entry.dataSequence.store(2u, std::memory_order_relaxed);
+            }
+            entry.key.store(buffer, std::memory_order_release);
+            return;
+        }
+        if (expected == buffer)
+            return;
+    }
 }
 
 static void H3ProbeRegisterBuffer(
@@ -252,6 +356,59 @@ static const H3ProbeBufferMetadata* H3ProbeFindBuffer(ID3D11Buffer* buffer)
             return nullptr;
     }
     return nullptr;
+}
+
+static void H3ProbePublishBufferData(
+    ID3D11Buffer* buffer, const void* source, unsigned sourceBytes)
+{
+    if (!buffer || !source || sourceBytes == 0u)
+        return;
+    H3ProbeConstantBufferState* state = H3ProbeFindConstantBuffer(buffer);
+    if (!state)
+        return;
+    const unsigned bytes = std::min(
+        std::min(sourceBytes, state->byteWidth), kH3ProbeConstantBytes);
+    if (bytes == 0u)
+        return;
+    state->dataSequence.fetch_add(1u, std::memory_order_acq_rel);
+    std::memcpy(state->data, source, bytes);
+    state->dataBytes.store(bytes, std::memory_order_relaxed);
+    state->dataSequence.fetch_add(1u, std::memory_order_release);
+}
+
+static void H3ProbeCaptureConstantSnapshot(
+    ID3D11Buffer* buffer, H3ProbeConstantSnapshot& destination)
+{
+    destination.buffer = buffer;
+    const H3ProbeBufferMetadata* metadata = H3ProbeFindBuffer(buffer);
+    if (!metadata || (metadata->bindFlags & D3D11_BIND_CONSTANT_BUFFER) == 0u)
+        return;
+    H3ProbeConstantBufferState* state = H3ProbeFindConstantBuffer(buffer);
+    if (!state)
+        return;
+    destination.byteWidth = state->byteWidth;
+    for (unsigned attempt = 0; attempt < 3u; ++attempt)
+    {
+        const unsigned before =
+            state->dataSequence.load(std::memory_order_acquire);
+        if ((before & 1u) != 0u)
+            continue;
+        const unsigned bytes = std::min(
+            state->dataBytes.load(std::memory_order_relaxed),
+            kH3ProbeConstantBytes);
+        if (bytes > 0u)
+            std::memcpy(destination.data, state->data, bytes);
+        const unsigned after =
+            state->dataSequence.load(std::memory_order_acquire);
+        if (before == after && (after & 1u) == 0u)
+        {
+            destination.sequence = after;
+            destination.dataBytes = bytes;
+            return;
+        }
+    }
+    destination.sequence = 0u;
+    destination.dataBytes = 0u;
 }
 
 static unsigned H3ProbeInputLayoutHash(ID3D11InputLayout* layout)
@@ -346,9 +503,12 @@ static HRESULT H3ProbeCreateBuffer(
     const HRESULT result =
         g_origCreateBuffer(device, desc, initialData, buffer);
     if (SUCCEEDED(result) && buffer && *buffer)
+    {
         H3ProbeRegisterBuffer(
             *buffer, desc, initialData, decoratorPlacement,
             halo3CreatorRva, mccCreatorRva);
+        H3ProbeRegisterConstantBuffer(*buffer, desc, initialData);
+    }
     return result;
 }
 
@@ -396,6 +556,85 @@ static void STDMETHODCALLTYPE H3ProbeIASetPrimitiveTopologyHook(
     g_origIASetPrimitiveTopology(context, topology);
 }
 
+static void STDMETHODCALLTYPE H3ProbeVSSetConstantBuffersHook(
+    ID3D11DeviceContext* context, UINT startSlot, UINT count,
+    ID3D11Buffer* const* buffers)
+{
+    if (startSlot < kH3ProbeConstantSlots)
+    {
+        const UINT bounded = std::min(
+            count, static_cast<UINT>(kH3ProbeConstantSlots - startSlot));
+        for (UINT i = 0; i < bounded; ++i)
+        {
+            g_h3ProbeBoundVertexConstants[startSlot + i] =
+                buffers ? buffers[i] : nullptr;
+        }
+    }
+    g_origH3ProbeVSSetConstantBuffers(context, startSlot, count, buffers);
+}
+
+static HRESULT STDMETHODCALLTYPE H3ProbeMapHook(
+    ID3D11DeviceContext* context, ID3D11Resource* resource,
+    UINT subresource, D3D11_MAP mapType, UINT mapFlags,
+    D3D11_MAPPED_SUBRESOURCE* mapped)
+{
+    const HRESULT result = g_origH3ProbeMap(
+        context, resource, subresource, mapType, mapFlags, mapped);
+    g_h3ProbeMappedResource = nullptr;
+    g_h3ProbeMappedData = nullptr;
+    g_h3ProbeMappedBytes = 0u;
+    if (SUCCEEDED(result) && subresource == 0u && mapped && mapped->pData)
+    {
+        ID3D11Buffer* buffer = reinterpret_cast<ID3D11Buffer*>(resource);
+        const H3ProbeBufferMetadata* metadata = H3ProbeFindBuffer(buffer);
+        if (metadata &&
+            (metadata->bindFlags & D3D11_BIND_CONSTANT_BUFFER) != 0u)
+        {
+            g_h3ProbeMappedResource = resource;
+            g_h3ProbeMappedData = mapped->pData;
+            g_h3ProbeMappedBytes = metadata->byteWidth;
+        }
+    }
+    return result;
+}
+
+static void STDMETHODCALLTYPE H3ProbeUnmapHook(
+    ID3D11DeviceContext* context, ID3D11Resource* resource,
+    UINT subresource)
+{
+    if (subresource == 0u && resource == g_h3ProbeMappedResource &&
+        g_h3ProbeMappedData && g_h3ProbeMappedBytes > 0u)
+    {
+        H3ProbePublishBufferData(
+            reinterpret_cast<ID3D11Buffer*>(resource),
+            g_h3ProbeMappedData, g_h3ProbeMappedBytes);
+    }
+    g_h3ProbeMappedResource = nullptr;
+    g_h3ProbeMappedData = nullptr;
+    g_h3ProbeMappedBytes = 0u;
+    g_origH3ProbeUnmap(context, resource, subresource);
+}
+
+static void STDMETHODCALLTYPE H3ProbeUpdateSubresourceHook(
+    ID3D11DeviceContext* context, ID3D11Resource* destination,
+    UINT subresource, const D3D11_BOX* box, const void* source,
+    UINT sourceRowPitch, UINT sourceDepthPitch)
+{
+    if (subresource == 0u && !box && source)
+    {
+        ID3D11Buffer* buffer = reinterpret_cast<ID3D11Buffer*>(destination);
+        const H3ProbeBufferMetadata* metadata = H3ProbeFindBuffer(buffer);
+        if (metadata &&
+            (metadata->bindFlags & D3D11_BIND_CONSTANT_BUFFER) != 0u)
+        {
+            H3ProbePublishBufferData(buffer, source, metadata->byteWidth);
+        }
+    }
+    g_origH3ProbeUpdateSubresource(
+        context, destination, subresource, box, source,
+        sourceRowPitch, sourceDepthPitch);
+}
+
 static void H3ProbeCaptureDraw(
     unsigned kind, UINT countPerInstance, UINT instanceCount,
     UINT startLocation, INT baseVertexLocation, UINT startInstanceLocation,
@@ -439,6 +678,13 @@ static void H3ProbeCaptureDraw(
             record.indirectArgsOffset = indirectArgsOffset;
             record.inputLayout = g_h3ProbeBoundInputLayout;
             record.topology = g_h3ProbeBoundTopology;
+            for (unsigned constantSlot = 0;
+                 constantSlot < kH3ProbeConstantSlots; ++constantSlot)
+            {
+                H3ProbeCaptureConstantSnapshot(
+                    g_h3ProbeBoundVertexConstants[constantSlot],
+                    record.vertexConstants[constantSlot]);
+            }
             g_h3ProbeDraws[sample].ready.store(
                 true, std::memory_order_release);
         }
@@ -550,9 +796,42 @@ static void H3ProbeLogBuffer(
         words[10], words[11], words[12], words[13], words[14], words[15]);
 }
 
+static void H3ProbeLogVertexConstants(
+    unsigned draw, const H3ProbeDrawRecord& record)
+{
+    for (unsigned slot = 0; slot < kH3ProbeConstantSlots; ++slot)
+    {
+        const H3ProbeConstantSnapshot& snapshot =
+            record.vertexConstants[slot];
+        if (!snapshot.buffer || snapshot.dataBytes == 0u)
+            continue;
+        LOG("H3DECORCB[%u]: vsSlot=%u buffer=%p bytes=%u captured=%u "
+            "sequence=%u",
+            draw, slot, snapshot.buffer, snapshot.byteWidth,
+            snapshot.dataBytes, snapshot.sequence);
+        for (unsigned offset = 0; offset < snapshot.dataBytes;
+             offset += 64u)
+        {
+            uint32_t words[16]{};
+            const unsigned bytes = std::min(
+                64u, snapshot.dataBytes - offset);
+            std::memcpy(words, snapshot.data + offset, bytes);
+            LOG("H3DECORCBDATA[%u]: vsSlot=%u offset=0x%03X words="
+                "%08X,%08X,%08X,%08X|%08X,%08X,%08X,%08X|"
+                "%08X,%08X,%08X,%08X|%08X,%08X,%08X,%08X",
+                draw, slot, offset, words[0], words[1], words[2], words[3],
+                words[4], words[5], words[6], words[7], words[8], words[9],
+                words[10], words[11], words[12], words[13], words[14],
+                words[15]);
+        }
+    }
+}
+
 static DWORD WINAPI H3ProbeDrawLoggerThread(void*)
 {
     unsigned next = 0;
+    ID3D11Buffer* loggedGeometry[64]{};
+    unsigned loggedGeometryCount = 0u;
     while (g_h3DecoratorDrawProbeEnabled.load(std::memory_order_acquire))
     {
         const unsigned published = std::min(
@@ -597,6 +876,19 @@ static DWORD WINAPI H3ProbeDrawLoggerThread(void*)
             {
                 LOG("H3DECORDRAWLAYOUT[%u]: layout=%p untracked",
                     next, record.inputLayout);
+            }
+            ID3D11Buffer* geometry = record.vertexBuffers[0];
+            bool newGeometry = geometry && loggedGeometryCount <
+                static_cast<unsigned>(_countof(loggedGeometry));
+            for (unsigned i = 0; newGeometry && i < loggedGeometryCount; ++i)
+            {
+                if (loggedGeometry[i] == geometry)
+                    newGeometry = false;
+            }
+            if (newGeometry)
+            {
+                loggedGeometry[loggedGeometryCount++] = geometry;
+                H3ProbeLogVertexConstants(next, record);
             }
             for (unsigned vertexSlot = 0;
                  vertexSlot < kH3ProbeVertexSlots; ++vertexSlot)
@@ -2541,7 +2833,21 @@ bool InstallD3D11Hooks()
             MH_CreateHook(deviceVtbl[11],
                           (void*)&H3ProbeCreateInputLayoutHook,
                           (void**)&g_origCreateInputLayout) == MH_OK;
-        const bool inputLayoutBindingOk = createInputLayoutOk &&
+        const bool vertexConstantBindingOk = createInputLayoutOk &&
+            MH_CreateHook(contextVtbl[7],
+                          (void*)&H3ProbeVSSetConstantBuffersHook,
+                          (void**)&g_origH3ProbeVSSetConstantBuffers) == MH_OK;
+        const bool mapBindingOk = vertexConstantBindingOk &&
+            MH_CreateHook(contextVtbl[14], (void*)&H3ProbeMapHook,
+                          (void**)&g_origH3ProbeMap) == MH_OK;
+        const bool unmapBindingOk = mapBindingOk &&
+            MH_CreateHook(contextVtbl[15], (void*)&H3ProbeUnmapHook,
+                          (void**)&g_origH3ProbeUnmap) == MH_OK;
+        const bool updateBindingOk = unmapBindingOk &&
+            MH_CreateHook(contextVtbl[48],
+                          (void*)&H3ProbeUpdateSubresourceHook,
+                          (void**)&g_origH3ProbeUpdateSubresource) == MH_OK;
+        const bool inputLayoutBindingOk = updateBindingOk &&
             MH_CreateHook(contextVtbl[17],
                           (void*)&H3ProbeIASetInputLayoutHook,
                           (void**)&g_origIASetInputLayout) == MH_OK;
