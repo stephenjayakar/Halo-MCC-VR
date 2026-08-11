@@ -237,6 +237,21 @@ authorize hooks.
 
 ## Create a test candidate
 
+From Windows Command Prompt or PowerShell, the same checked deployment flow is
+available as:
+
+```bat
+deploy.bat
+```
+
+Use `deploy.bat --clean` when a from-scratch rebuild is needed. The wrapper
+calls `tools/package-candidate.ps1`; it does not provide a second installer.
+Commit the intended changes first and close MCC. The command builds the
+cumulative Release configuration, runs the tests and Reach parity gate, creates
+a unique manifest-backed candidate, backs up the current installation, and
+installs/verifies the exact DLL and launcher for every detected MCC edition.
+It never launches MCC and never changes an existing `halomccvr.cfg`.
+
 Commit the intended source first, then run:
 
 ```powershell

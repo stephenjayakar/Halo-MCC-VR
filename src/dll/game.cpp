@@ -30,6 +30,7 @@
 #include "../common/log.h"
 #include "../common/config.h"
 #include "../common/cutscene_theater_logic.h"
+#include "../common/halo3_aim_assist_logic.h"
 #include "../common/halo3_theater_logic.h"
 #include "../common/halo3_vehicle_logic.h"
 #include "../common/hud_layout_logic.h"
@@ -39,6 +40,7 @@
 #include "../common/odst_vehicle_logic.h"
 #include "../common/physical_contact_logic.h"
 #include "../common/scope_logic.h"
+#include "../common/weapon_aim_logic.h"
 
 #ifndef HALOMCCVR_EXPERIMENTAL_ODST_BRINGUP
 #define HALOMCCVR_EXPERIMENTAL_ODST_BRINGUP 0
@@ -6368,6 +6370,9 @@ namespace
     using Halo3PlayerUnitGetterFn = int(__fastcall*)(int outputUser);
     using Halo3UnitInVehicleFn = unsigned char(__fastcall*)(int unitHandle);
     using Halo3VehicleTypeFn = int(__fastcall*)(unsigned short defIndex);
+    using Halo3AimAssistBuildQueryFn = bool(__fastcall*)(
+        int32_t unitHandle, const uint8_t* flags,
+        int16_t magnificationLevel, void* outputQuery);
     // Read-only render-node accessors used by Halo's own native camera-marker
     // path. The first returns the same interpolated 0x34-byte node bank the
     // visible-object renderer consumes; the second resolves an interpolated
@@ -6395,6 +6400,10 @@ namespace
     Halo3PlayerUnitGetterFn g_halo3PlayerUnitGetter = nullptr;
     Halo3UnitInVehicleFn g_halo3UnitInVehicle = nullptr;
     Halo3VehicleTypeFn g_halo3VehicleTypeAccessor = nullptr;
+    Halo3AimAssistBuildQueryFn g_origHalo3AimAssistBuildQuery = nullptr;
+    void** g_halo3AimAssistTagInstanceTable = nullptr;
+    void** g_halo3AimAssistTagDataBase = nullptr;
+    std::atomic<bool> g_halo3AimAssistBinding{false};
     Halo3InterpolatedNodesFn g_halo3InterpolatedNodes = nullptr;
     Halo3MarkersInternalFn g_halo3MarkersInternal = nullptr;
     using Halo3ObjectSetVelocityFn = void(__fastcall*)(
@@ -7737,6 +7746,85 @@ namespace
         if (objectKind)
             *objectKind = *(entry + kHalo3ObjectEntryKindOffset);
         return objectData != nullptr;
+    }
+
+    int16_t Halo3AimAssistLevelForUnit(
+        int32_t unitHandle, int16_t requestedLevel)
+    {
+        if (!g_halo3AimAssistBinding.load(std::memory_order_acquire) ||
+            !g_enabled.load(std::memory_order_relaxed) ||
+            !VR_IsStereoEnabled() ||
+            requestedLevel != kHalo3UnscopedMagnificationLevel)
+        {
+            return requestedLevel;
+        }
+
+        __try
+        {
+            unsigned char* unitData = nullptr;
+            if (!Halo3ContactObjectDataForHandle(unitHandle, unitData))
+                return requestedLevel;
+            const int weaponSlot =
+                *reinterpret_cast<const int8_t*>(unitData + 0x262);
+            if (weaponSlot < 0 || weaponSlot >= 4)
+                return requestedLevel;
+            const int32_t weaponHandle =
+                *reinterpret_cast<const int32_t*>(
+                    unitData + 0x268 + weaponSlot * 4);
+            unsigned char* weaponData = nullptr;
+            uint8_t weaponKind = 0xFF;
+            if (!Halo3ContactObjectDataForHandle(
+                    weaponHandle, weaponData, &weaponKind) ||
+                weaponKind != 2)
+            {
+                return requestedLevel;
+            }
+
+            // The retail query builder itself reads the weapon object's first
+            // word as its definition index before resolving the loaded tag.
+            const uint16_t definitionIndex =
+                *reinterpret_cast<const uint16_t*>(weaponData);
+            auto* instances = g_halo3AimAssistTagInstanceTable
+                ? static_cast<unsigned char*>(
+                      *g_halo3AimAssistTagInstanceTable)
+                : nullptr;
+            auto* tagBase = g_halo3AimAssistTagDataBase
+                ? static_cast<unsigned char*>(*g_halo3AimAssistTagDataBase)
+                : nullptr;
+            if (!instances || !tagBase || definitionIndex == 0xFFFFu)
+                return requestedLevel;
+            const uint32_t definitionAddress =
+                *reinterpret_cast<const uint32_t*>(
+                    instances + static_cast<size_t>(definitionIndex) * 8 + 4);
+            if (!definitionAddress)
+                return requestedLevel;
+            const auto* weaponDefinition =
+                tagBase + static_cast<size_t>(definitionAddress) * 4;
+            const int16_t authoredMagnificationLevels =
+                *reinterpret_cast<const int16_t*>(weaponDefinition + 0x31E);
+            return Halo3VrAimAssistMagnificationLevel(
+                true, requestedLevel, authoredMagnificationLevels);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            // Tags and object data belong to Halo and may disappear during a
+            // map/title transition. This optional feature alone falls back.
+            return requestedLevel;
+        }
+    }
+
+    bool __fastcall Halo3AimAssistBuildQueryHook(
+        int32_t unitHandle, const uint8_t* flags,
+        int16_t magnificationLevel, void* outputQuery)
+    {
+        const Halo3AimAssistBuildQueryFn original =
+            g_origHalo3AimAssistBuildQuery;
+        if (!original)
+            return false;
+        return original(
+            unitHandle, flags,
+            Halo3AimAssistLevelForUnit(unitHandle, magnificationLevel),
+            outputQuery);
     }
 
     bool Halo3ContactMassForObjectBodyData(
@@ -19276,6 +19364,25 @@ namespace
         "66 44 89 48 20 57 41 54 41 55 41 56 41 57 48 83 EC 70 "
         "45 33 F6 8B E9 49 8B F8 44 8B FA 8B D9 45 0F B7 DE";
 
+    // H3EK names this aim_assist_build_query_parameters and proves the ABI:
+    // unit handle, query flags pointer, signed magnification level, 0x40-byte
+    // output. Pinned retail reads the same official weapon-tag fields. The
+    // second signature proves this entry is the exact field consumer rather
+    // than merely another function with a similar prologue.
+    inline constexpr uintptr_t kHalo3AimAssistBuildQueryExpectedRva = 0x13C518;
+    inline constexpr uintptr_t kHalo3AimAssistFieldSequenceOffset = 0x176;
+    const char* kHalo3AimAssistBuildQuerySig =
+        "48 8B C4 48 89 58 08 48 89 68 10 48 89 70 20 "
+        "66 44 89 40 18 57 41 54 41 55 41 56 41 57 48 83 EC 40 "
+        "44 8B 15 ?? ?? ?? ?? 4C 8B E2 0F 29 70 C8 49 8B D9";
+    const char* kHalo3AimAssistFieldSequenceSig =
+        "F3 0F 59 8E 28 03 00 00 F3 0F 11 4B 04 0F 28 CC "
+        "F3 0F 59 96 2C 03 00 00 F3 0F 11 53 08 "
+        "F3 0F 59 86 30 03 00 00 F3 0F 11 43 0C 0F 28 C3 "
+        "F3 0F 59 8E 34 03 00 00 F3 0F 11 4B 10 0F 28 CB "
+        "F3 0F 59 86 38 03 00 00 F3 0F 11 43 14 "
+        "F3 0F 59 8E 3C 03 00 00 F3 0F 11 4B 18";
+
 #if HALOMCCVR_EXPERIMENTAL_ODST_BRINGUP
     const char* kOdstFpInterpolateSig =
         "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 "
@@ -20089,6 +20196,109 @@ namespace
                     (unsigned long long)(markerHit ? markerHit - base : 0),
                     (unsigned long long)
                         kHalo3MarkersInternalExpectedRva);
+            }
+        }
+
+        // Halo 3's native aim-assist query accepts -1 for unscoped and zero
+        // for the first authored zoom level. In VR the visible weapon is the
+        // sight, so a zoom-capable weapon always uses that scoped query policy.
+        // This is an independent optional feature: any identity, layout, hook,
+        // object, or tag failure leaves the native argument unchanged.
+        {
+            g_halo3AimAssistBinding.store(false, std::memory_order_release);
+            g_origHalo3AimAssistBuildQuery = nullptr;
+            g_halo3AimAssistTagInstanceTable = nullptr;
+            g_halo3AimAssistTagDataBase = nullptr;
+
+            const uintptr_t queryHit =
+                sig::Find(base, size, kHalo3AimAssistBuildQuerySig);
+            const uintptr_t fieldHit =
+                sig::Find(base, size, kHalo3AimAssistFieldSequenceSig);
+            const bool queryUnique = queryHit && !sig::Find(
+                queryHit + 1, base + size - queryHit - 1,
+                kHalo3AimAssistBuildQuerySig);
+            const bool fieldUnique = fieldHit && !sig::Find(
+                fieldHit + 1, base + size - fieldHit - 1,
+                kHalo3AimAssistFieldSequenceSig);
+            bool layoutConsistent = queryUnique && fieldUnique &&
+                fieldHit == queryHit + kHalo3AimAssistFieldSequenceOffset;
+            if (layoutConsistent)
+            {
+                layoutConsistent =
+                    memcmp(reinterpret_cast<const void*>(queryHit + 0x94),
+                           "\x48\x8B\x05", 3) == 0 &&
+                    memcmp(reinterpret_cast<const void*>(queryHit + 0x9F),
+                           "\x0F\xB7\x11", 3) == 0 &&
+                    memcmp(reinterpret_cast<const void*>(queryHit + 0xAC),
+                           "\x48\x8B\x05", 3) == 0;
+            }
+
+            void** instanceTableSlot = nullptr;
+            void** tagDataBaseSlot = nullptr;
+            if (layoutConsistent)
+            {
+                const uintptr_t instanceAddress = queryHit + 0x9B +
+                    *reinterpret_cast<const int32_t*>(queryHit + 0x97);
+                const uintptr_t tagBaseAddress = queryHit + 0xB3 +
+                    *reinterpret_cast<const int32_t*>(queryHit + 0xAF);
+                layoutConsistent = instanceAddress >= base &&
+                    instanceAddress + sizeof(void*) <= base + size &&
+                    tagBaseAddress >= base &&
+                    tagBaseAddress + sizeof(void*) <= base + size;
+                if (layoutConsistent)
+                {
+                    instanceTableSlot = reinterpret_cast<void**>(
+                        instanceAddress);
+                    tagDataBaseSlot = reinterpret_cast<void**>(tagBaseAddress);
+                }
+            }
+
+            MH_STATUS createStatus = MH_ERROR_NOT_CREATED;
+            MH_STATUS enableStatus = MH_ERROR_NOT_CREATED;
+            if (layoutConsistent)
+            {
+                g_halo3AimAssistTagInstanceTable = instanceTableSlot;
+                g_halo3AimAssistTagDataBase = tagDataBaseSlot;
+                createStatus = MH_CreateHook(
+                    reinterpret_cast<void*>(queryHit),
+                    reinterpret_cast<void*>(&Halo3AimAssistBuildQueryHook),
+                    reinterpret_cast<void**>(
+                        &g_origHalo3AimAssistBuildQuery));
+                if (createStatus == MH_OK)
+                    enableStatus = MH_EnableHook(
+                        reinterpret_cast<void*>(queryHit));
+            }
+            if (createStatus == MH_OK && enableStatus == MH_OK)
+            {
+                RememberInstalledGameHook(reinterpret_cast<void*>(queryHit));
+                g_halo3AimAssistBinding.store(
+                    true, std::memory_order_release);
+                LOG("H3 VR scoped auto-aim: installed query=+0x%llX "
+                    "fields=+0x%llX [unique; expected +0x%llX]; unscoped "
+                    "zoom-capable weapons use authored magnification level 0",
+                    (unsigned long long)(queryHit - base),
+                    (unsigned long long)(fieldHit - base),
+                    (unsigned long long)
+                        kHalo3AimAssistBuildQueryExpectedRva);
+            }
+            else
+            {
+                if (createStatus == MH_OK)
+                {
+                    MH_DisableHook(reinterpret_cast<void*>(queryHit));
+                    MH_RemoveHook(reinterpret_cast<void*>(queryHit));
+                }
+                g_origHalo3AimAssistBuildQuery = nullptr;
+                g_halo3AimAssistTagInstanceTable = nullptr;
+                g_halo3AimAssistTagDataBase = nullptr;
+                LOG("H3 VR scoped auto-aim: stock fallback "
+                    "(query=%d/%d fields=%d/%d layout=%d hook=%d/%d); "
+                    "camera, firing angle, and all other features unaffected",
+                    queryHit ? 1 : 0, queryUnique ? 1 : 0,
+                    fieldHit ? 1 : 0, fieldUnique ? 1 : 0,
+                    layoutConsistent ? 1 : 0,
+                    static_cast<int>(createStatus),
+                    static_cast<int>(enableStatus));
             }
         }
 
@@ -38160,23 +38370,26 @@ bool Game_ComputeAimStick(float& outRx, float& outRy)
     RotateByQuat(q, localDir, f3);
     const float fx = f3[0], fy = f3[1], fz = f3[2];
 
-    // Halo spawns first-person projectiles at the ENGINE's camera — on foot,
-    // the head — and no steering can move that origin. Aiming the bullet ray
-    // PARALLEL to the hand ray therefore leaves a permanent head-to-hand
-    // parallax miss (the 07-15 report "bullets shoot from my head"). Instead
-    // steer the head-origin ray through the point the hand ray reaches at the
-    // crosshair distance: every shot then passes exactly through the floating
-    // reticle, and beyond it the two rays are effectively identical.
-    //
-    // `hp` is the ROOM head, which maps onto the engine's camera only while the
-    // two are the same point. In a first-person vehicle seat they are not — see
-    // the seat re-origin below, which is the correction for that case.
-    const float d = Clamp(g_config.crosshair_distance_m, 2.0f, 50.0f);
-    float tx = p[0] + fx * d - hp[0];
-    float ty = p[1] + fy * d - hp[1];
-    float tz = p[2] + fz * d - hp[2];
-    const float tl = sqrtf(tx * tx + ty * ty + tz * tz);
-    if (tl > 1e-3f) { tx /= tl; ty /= tl; tz /= tl; }
+    // Halo 3's visible weapon and marker/muzzle subtree already use this exact
+    // mount-trimmed pose. The former convergence path bent the firing line from
+    // the engine camera toward a point on the hand ray. Moving the head beside
+    // a stationary weapon therefore changed the shot angle. Halo 3 now keeps
+    // the weapon's forward vector as the angle owner. ODST and Reach retain the
+    // prior convergence until their separate shot-origin paths are evaluated.
+    const bool weaponOwnsDirection =
+        TitleAdapter_GetActiveTitle() == GameTitle::Halo3;
+    const float weaponOrigin[3] = {p[0], p[1], p[2]};
+    const float weaponForward[3] = {fx, fy, fz};
+    const float engineCameraOrigin[3] = {hp[0], hp[1], hp[2]};
+    const VrWeaponAimRay selectedRay = ComputeVrWeaponAimRay(
+        weaponOwnsDirection, weaponOrigin, weaponForward,
+        engineCameraOrigin, g_config.crosshair_distance_m);
+    if (!selectedRay.valid)
+        return blocked(8, "weapon-relative aim ray invalid");
+    const float tx = selectedRay.direction[0];
+    const float ty = selectedRay.direction[1];
+    const float tz = selectedRay.direction[2];
+    const float tl = selectedRay.rangeMeters;
     const float cy = atan2f(tx, -tz);
     const float cp = asinf(Clamp(ty, -1.0f, 1.0f));
     float gameYawReference = 0.0f;

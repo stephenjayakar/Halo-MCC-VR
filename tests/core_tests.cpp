@@ -18,6 +18,7 @@
 #include "coop_probe_logic.h"
 #include "cutscene_theater_logic.h"
 #include "frame_pacing_logic.h"
+#include "halo3_aim_assist_logic.h"
 #include "halo3_theater_logic.h"
 #include "halo3_vehicle_logic.h"
 #include "hud_layout_logic.h"
@@ -39,6 +40,7 @@
 #include "scope_logic.h"
 #include "title_registry.h"
 #include "title_runtime_state.h"
+#include "weapon_aim_logic.h"
 
 #include <authored_reticle_logic.h>
 
@@ -1416,6 +1418,50 @@ int main()
               kReachTagGetRva == 0x00031AE8 &&
               kReachTagGetBodySize == 0x7B,
             "Reach native seat-camera, marker, carrier, type and tag bindings are pinned");
+        {
+            const float weaponOriginA[3] = {0.35f, -0.22f, -0.40f};
+            const float weaponOriginB[3] = {-1.0f, 2.0f, 3.0f};
+            const float weaponForward[3] = {0.6f, 0.8f, 0.0f};
+            const float headOriginA[3] = {0.0f, 0.0f, 0.0f};
+            const float headOriginB[3] = {1.5f, -3.0f, 0.75f};
+            const VrWeaponAimRay weaponOwnedA = ComputeVrWeaponAimRay(
+                true, weaponOriginA, weaponForward, headOriginA, 10.0f);
+            const VrWeaponAimRay weaponOwnedB = ComputeVrWeaponAimRay(
+                true, weaponOriginB, weaponForward, headOriginB, 10.0f);
+            const VrWeaponAimRay oldHeadConvergence = ComputeVrWeaponAimRay(
+                false, weaponOriginA, weaponForward, headOriginA, 10.0f);
+            const float invalidForward[3] = {
+                std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f};
+            const VrWeaponAimRay invalid = ComputeVrWeaponAimRay(
+                true, weaponOriginA, invalidForward, headOriginA, 10.0f);
+            Check(weaponOwnedA.valid && weaponOwnedB.valid &&
+                  std::fabs(weaponOwnedA.direction[0] - 0.6f) < 1.0e-6f &&
+                  std::fabs(weaponOwnedA.direction[1] - 0.8f) < 1.0e-6f &&
+                  std::fabs(weaponOwnedA.direction[2]) < 1.0e-6f &&
+                  std::fabs(weaponOwnedA.direction[0] -
+                            weaponOwnedB.direction[0]) < 1.0e-6f &&
+                  std::fabs(weaponOwnedA.direction[1] -
+                            weaponOwnedB.direction[1]) < 1.0e-6f &&
+                  std::fabs(weaponOwnedA.direction[2] -
+                            weaponOwnedB.direction[2]) < 1.0e-6f &&
+                  std::fabs(weaponOwnedA.rangeMeters - 10.0f) < 1.0e-6f &&
+                  oldHeadConvergence.valid &&
+                  std::fabs(oldHeadConvergence.direction[0] - 0.6f) >
+                      1.0e-3f &&
+                  !invalid.valid,
+                "Halo 3 weapon-owned aim keeps the firing angle on the visible "
+                "weapon regardless of head/torso offset and rejects invalid poses");
+        }
+        Check(Halo3VrAimAssistMagnificationLevel(true, -1, 1) == 0 &&
+              Halo3VrAimAssistMagnificationLevel(true, -1, 2) == 0 &&
+              Halo3VrAimAssistMagnificationLevel(true, -1, 0) == -1 &&
+              Halo3VrAimAssistMagnificationLevel(true, -1, -1) == -1 &&
+              Halo3VrAimAssistMagnificationLevel(true, 0, 2) == 0 &&
+              Halo3VrAimAssistMagnificationLevel(true, 1, 2) == 1 &&
+              Halo3VrAimAssistMagnificationLevel(false, -1, 2) == -1,
+            "Halo 3 VR uses the first authored scoped auto-aim level only for "
+            "an unscoped zoom-capable weapon");
+
         // R-V25: the trim bank carries one row MORE than the identity list -
         // the unmatched row every unresolved vehicle keys instead of the
         // shared universal trim.
