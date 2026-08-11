@@ -75,7 +75,13 @@ def main():
     _, text_rva, _, text_raw, text_size = text
     md = Cs(CS_ARCH_X86, CS_MODE_64)
     md.detail = True
+    # Halo's executables contain small data islands in executable sections.
+    # Keep scanning after undecodable bytes instead of silently abandoning the
+    # rest of .text at the first island.
+    md.skipdata = True
     for insn in md.disasm(data[text_raw:text_raw + text_size], image_base + text_rva):
+        if insn.id == 0:  # Capstone's synthetic skip-data instruction.
+            continue
         for operand in insn.operands:
             if operand.type != X86_OP_MEM or operand.mem.base != X86_REG_RIP:
                 continue

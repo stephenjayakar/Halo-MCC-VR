@@ -25,6 +25,9 @@ TH32CS_SNAPMODULE32 = 0x00000010
 PROCESS_VM_READ = 0x0010
 PROCESS_QUERY_INFORMATION = 0x0400
 INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+MEM_COMMIT = 0x00001000
+PAGE_NOACCESS = 0x01
+PAGE_GUARD = 0x100
 
 
 class PROCESSENTRY32W(ctypes.Structure):
@@ -57,10 +60,24 @@ class MODULEENTRY32W(ctypes.Structure):
     ]
 
 
+class MEMORY_BASIC_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("BaseAddress", ctypes.c_void_p),
+        ("AllocationBase", ctypes.c_void_p),
+        ("AllocationProtect", wintypes.DWORD),
+        ("PartitionId", wintypes.WORD),
+        ("RegionSize", ctypes.c_size_t),
+        ("State", wintypes.DWORD),
+        ("Protect", wintypes.DWORD),
+        ("Type", wintypes.DWORD),
+    ]
+
+
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
 kernel32.OpenProcess.restype = wintypes.HANDLE
 kernel32.ReadProcessMemory.restype = wintypes.BOOL
+kernel32.VirtualQueryEx.restype = ctypes.c_size_t
 
 
 def close(handle: int) -> None:
@@ -127,6 +144,61 @@ class Reader:
         return struct.unpack("<Q", self.read(address, 8))[0]
 
 
+def scan_readable_memory(
+    reader: Reader, pattern: bytes, mask: bytes | None = None,
+    max_hits: int = 64
+) -> tuple[list[int], int]:
+    """Find exact bytes in committed readable regions without writing memory."""
+    if not pattern:
+        raise ValueError("memory needle must not be empty")
+    if mask is None:
+        mask = bytes([0xFF]) * len(pattern)
+    if len(mask) != len(pattern) or not any(mask):
+        raise ValueError("memory pattern mask is invalid")
+    hits: list[int] = []
+    scanned = 0
+    address = 0
+    maximum_address = 0x0000800000000000
+    chunk_size = 4 * 1024 * 1024
+    while address < maximum_address and len(hits) < max_hits:
+        info = MEMORY_BASIC_INFORMATION()
+        queried = kernel32.VirtualQueryEx(
+            reader.handle, ctypes.c_void_p(address), ctypes.byref(info),
+            ctypes.sizeof(info))
+        if not queried:
+            break
+        base = int(info.BaseAddress or 0)
+        size = int(info.RegionSize)
+        next_address = base + size
+        if next_address <= address:
+            break
+        if (info.State == MEM_COMMIT and
+                not (info.Protect & (PAGE_NOACCESS | PAGE_GUARD))):
+            cursor = base
+            overlap = b""
+            while cursor < next_address and len(hits) < max_hits:
+                take = min(chunk_size, next_address - cursor)
+                try:
+                    block = reader.read(cursor, take)
+                except OSError:
+                    overlap = b""
+                    cursor += take
+                    continue
+                scanned += len(block)
+                combined = overlap + block
+                combined_base = cursor - len(overlap)
+                for found in find_pattern(combined, pattern, mask):
+                    hit = combined_base + found
+                    if not hits or hits[-1] != hit:
+                        hits.append(hit)
+                    if len(hits) >= max_hits:
+                        break
+                overlap = combined[-(len(pattern) - 1):] if len(pattern) > 1 else b""
+                cursor += take
+        address = next_address
+    return hits, scanned
+
+
 def parse_pattern(text: str) -> tuple[bytes, bytes]:
     values = bytearray()
     mask = bytearray()
@@ -141,11 +213,20 @@ def parse_pattern(text: str) -> tuple[bytes, bytes]:
 
 
 def find_pattern(data: bytes, pattern: bytes, mask: bytes) -> list[int]:
-    anchor = next(i for i, value in enumerate(mask) if value)
+    runs: list[tuple[int, int]] = []
+    run_start = None
+    for index, value in enumerate(mask + b"\0"):
+        if value and run_start is None:
+            run_start = index
+        elif not value and run_start is not None:
+            runs.append((run_start, index))
+            run_start = None
+    anchor, anchor_end = max(runs, key=lambda run: run[1] - run[0])
+    anchor_bytes = pattern[anchor:anchor_end]
     hits = []
     start = 0
     while True:
-        pos = data.find(pattern[anchor:anchor + 1], start)
+        pos = data.find(anchor_bytes, start)
         if pos < 0:
             break
         candidate = pos - anchor
@@ -355,6 +436,11 @@ def main() -> int:
     parser.add_argument("--wait-seconds", type=int, default=120)
     parser.add_argument("--output", type=pathlib.Path)
     parser.add_argument("--scenario-only", action="store_true")
+    parser.add_argument("--placement-sample", type=pathlib.Path)
+    parser.add_argument("--placement-offset", type=lambda value: int(value, 0))
+    parser.add_argument("--placement-length", type=lambda value: int(value, 0),
+                        default=0xF0)
+    parser.add_argument("--runtime-pattern")
     args = parser.parse_args()
     deadline = time.monotonic() + args.wait_seconds
     pid = None
@@ -394,6 +480,35 @@ def main() -> int:
             time.sleep(1)
         if not instances or not tag_base:
             raise RuntimeError("loaded-tag globals stayed null before the timeout")
+        placement_memory = None
+        if args.placement_sample:
+            sample = args.placement_sample.read_bytes()
+            if args.placement_offset is None:
+                raise RuntimeError("--placement-offset is required with --placement-sample")
+            end = args.placement_offset + args.placement_length
+            if (args.placement_offset < 0 or args.placement_length < 16 or
+                    end > len(sample)):
+                raise RuntimeError("placement sample range is outside the source file")
+            needle = sample[args.placement_offset:end]
+            memory_hits, memory_bytes = scan_readable_memory(reader, needle)
+            placement_memory = {
+                "sample": str(args.placement_sample),
+                "offset": f"0x{args.placement_offset:X}",
+                "length": len(needle),
+                "scanned_bytes": memory_bytes,
+                "hits": [f"0x{address:X}" for address in memory_hits],
+            }
+        runtime_pattern_memory = None
+        if args.runtime_pattern:
+            runtime_pattern, runtime_mask = parse_pattern(args.runtime_pattern)
+            runtime_hits, runtime_bytes = scan_readable_memory(
+                reader, runtime_pattern, runtime_mask)
+            runtime_pattern_memory = {
+                "pattern": args.runtime_pattern,
+                "length": len(runtime_pattern),
+                "scanned_bytes": runtime_bytes,
+                "hits": [f"0x{address:X}" for address in runtime_hits],
+            }
         entries = reader.read(instances, 0x10000 * 8)
         group_definitions = []
         sbsp_entries = []
@@ -459,6 +574,8 @@ def main() -> int:
             "tag_base_slot": f"0x{tag_base_slot:X}",
             "instances": f"0x{instances:X}",
             "tag_base": f"0x{tag_base:X}",
+            "placement_memory": placement_memory,
+            "runtime_pattern_memory": runtime_pattern_memory,
             "visited_root_addresses": len(visited_roots),
             "readable_root_addresses": readable_roots,
             "roots_with_candidate_block_counts": roots_with_candidate_block_counts,

@@ -2,10 +2,12 @@
 # Read-only. Never modifies the game file.
 #   py -3 pedis.py fn   <rva_hex> [maxbytes]     - disassemble a function
 #   py -3 pedis.py scan <off_hex> [off_hex ...]  - find [reg+off] memory operands
-import sys, struct
+import os, sys, struct
 from capstone import Cs, CS_ARCH_X86, CS_MODE_64
 
-PATH = r"N:\SteamLibrary\steamapps\common\Halo The Master Chief Collection\halo3\halo3.dll"
+PATH = os.environ.get(
+    "PEDIS_IMAGE",
+    r"N:\SteamLibrary\steamapps\common\Halo The Master Chief Collection\halo3\halo3.dll")
 
 def load():
     data = open(PATH, "rb").read()
