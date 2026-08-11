@@ -14,6 +14,7 @@
 #pragma intrinsic(_ReturnAddress)
 #include "d3d11_hook.h"
 #include "game.h"
+#include "sigscan.h"
 #include "vr.h"
 #include "title_adapter.h"
 #include "../common/config.h"
@@ -34,6 +35,7 @@ typedef void(STDMETHODCALLTYPE* OMSetRenderTargetsFn)(ID3D11DeviceContext*, UINT
     ID3D11RenderTargetView* const*, ID3D11DepthStencilView*);
 typedef HRESULT(STDMETHODCALLTYPE* CreateBufferFn)(ID3D11Device*,
     const D3D11_BUFFER_DESC*, const D3D11_SUBRESOURCE_DATA*, ID3D11Buffer**);
+typedef void(__fastcall* H3ResourceFixupFn)(void*);
 #if HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE
 typedef void(STDMETHODCALLTYPE* DrawIndexedFn)(ID3D11DeviceContext*, UINT, UINT, INT);
 #endif
@@ -47,6 +49,8 @@ static Present1Fn g_origPresent1 = nullptr;
 static ResizeBuffersFn g_origResizeBuffers = nullptr;
 static OMSetRenderTargetsFn g_origOMSetRenderTargets = nullptr;
 static CreateBufferFn g_origCreateBuffer = nullptr;
+static H3ResourceFixupFn g_origH3ResourceFixup = nullptr;
+static thread_local void* g_h3CurrentResourceContext = nullptr;
 static std::atomic<unsigned> g_h3DecoratorBufferProbeSamples{0};
 static std::atomic<unsigned> g_h3DecoratorExactProbeSamples{0};
 static std::atomic<unsigned> g_h3DecoratorBlockProbeSamples{0};
@@ -135,6 +139,68 @@ static void FormatProbeStack(char* output, size_t outputSize)
         if (wrote <= 0)
             break;
         used += static_cast<size_t>(wrote);
+    }
+}
+
+static void __fastcall H3ResourceFixupHook(void* context)
+{
+    void* previous = g_h3CurrentResourceContext;
+    g_h3CurrentResourceContext = context;
+    g_origH3ResourceFixup(context);
+    g_h3CurrentResourceContext = previous;
+}
+
+static void LogProbeResourceContext(const void* source, unsigned records)
+{
+    MEMORY_BASIC_INFORMATION sourceInfo{};
+    VirtualQuery(source, &sourceInfo, sizeof(sourceInfo));
+    const uint8_t* context = static_cast<const uint8_t*>(
+        g_h3CurrentResourceContext);
+    if (!context)
+    {
+        LOG("H3DECORCTX: records=%u source=%p allocation=%p region=%p+0x%llX "
+            "protect=0x%X context=null",
+            records, source, sourceInfo.AllocationBase, sourceInfo.BaseAddress,
+            static_cast<unsigned long long>(sourceInfo.RegionSize),
+            static_cast<unsigned>(sourceInfo.Protect));
+        return;
+    }
+
+    int32_t fixupCount = 0;
+    const uint8_t* fixups = nullptr;
+    std::memcpy(&fixupCount, context + 0x40u, sizeof(fixupCount));
+    std::memcpy(&fixups, context + 0x48u, sizeof(fixups));
+    char head[0x60u * 3u + 1u]{};
+    size_t used = 0;
+    for (unsigned i = 0; i < 0x60u && used + 4u < sizeof(head); ++i)
+    {
+        const int wrote = _snprintf_s(
+            head + used, sizeof(head) - used, _TRUNCATE,
+            "%02X%s", context[i], ((i + 1u) % 16u) ? " " : "|");
+        if (wrote <= 0)
+            break;
+        used += static_cast<size_t>(wrote);
+    }
+    LOG("H3DECORCTX: records=%u source=%p allocation=%p region=%p+0x%llX "
+        "protect=0x%X context=%p fixupCount=%d fixups=%p head=%s",
+        records, source, sourceInfo.AllocationBase, sourceInfo.BaseAddress,
+        static_cast<unsigned long long>(sourceInfo.RegionSize),
+        static_cast<unsigned>(sourceInfo.Protect), context, fixupCount, fixups,
+        head);
+
+    if (fixupCount <= 0 || fixupCount > 4096 || !fixups)
+        return;
+    const unsigned sampleCount = std::min(static_cast<unsigned>(fixupCount), 96u);
+    for (unsigned i = 0; i < sampleCount; ++i)
+    {
+        uint32_t encoded = 0;
+        int32_t kind = -1;
+        std::memcpy(&encoded, fixups + static_cast<size_t>(i) * 8u, sizeof(encoded));
+        std::memcpy(&kind, fixups + static_cast<size_t>(i) * 8u + 4u, sizeof(kind));
+        LOG("H3DECORFIXUP[%u/%u]: encoded=0x%08X addressKind=%u offset=0x%X "
+            "fixupKind=%d",
+            i, sampleCount, encoded, encoded >> 29u,
+            encoded & 0x1FFFFFFFu, kind);
     }
 }
 
@@ -242,6 +308,7 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
                     desc->CPUAccessFlags, desc->MiscFlags, desc->StructureByteStride,
                     static_cast<unsigned long long>(halo3Rva),
                     static_cast<unsigned long long>(mccRva), stack, head);
+                LogProbeResourceContext(initialData->pSysMem, records);
             }
         }
     }
@@ -1416,11 +1483,41 @@ bool InstallD3D11Hooks()
             L"HALOMCCVR_H3_DECORATOR_BUFFER_PROBE",
             decoratorProbeValue, 2) > 0)
     {
-        if (MH_CreateHook(deviceVtbl[3], (void*)&CreateBufferHook,
-                          (void**)&g_origCreateBuffer) == MH_OK)
-            LOG("H3DECORBUF: initial-data probe installed (environment-only)");
+        static constexpr char kH3ResourceFixupSignature[] =
+            "48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 "
+            "41 56 41 57 48 8D 68 A1 48 81 EC A0 00 00 00 0F 10 41 30 83 "
+            "65 FF 00";
+        uintptr_t moduleBase = 0;
+        size_t moduleSize = 0;
+        uintptr_t fixup = 0;
+        uintptr_t secondFixup = 0;
+        if (sig::ModuleRange(L"halo3.dll", moduleBase, moduleSize))
+        {
+            fixup = sig::Find(moduleBase, moduleSize, kH3ResourceFixupSignature);
+            if (fixup && fixup + 1u < moduleBase + moduleSize)
+                secondFixup = sig::Find(
+                    fixup + 1u, moduleBase + moduleSize - fixup - 1u,
+                    kH3ResourceFixupSignature);
+        }
+        const bool bufferHookOk =
+            MH_CreateHook(deviceVtbl[3], (void*)&CreateBufferHook,
+                          (void**)&g_origCreateBuffer) == MH_OK;
+        const bool resourceHookOk = fixup && !secondFixup &&
+            MH_CreateHook(reinterpret_cast<void*>(fixup),
+                          (void*)&H3ResourceFixupHook,
+                          (void**)&g_origH3ResourceFixup) == MH_OK;
+        if (bufferHookOk && resourceHookOk)
+            LOG("H3DECORBUF: initial-data/resource-owner probe installed "
+                "(environment-only; owner=+0x%llX)",
+                static_cast<unsigned long long>(fixup - moduleBase));
         else
+        {
+            if (bufferHookOk)
+                MH_RemoveHook(deviceVtbl[3]);
+            if (resourceHookOk)
+                MH_RemoveHook(reinterpret_cast<void*>(fixup));
             LOG("H3DECORBUF: CreateBuffer hook failed; probe disabled");
+        }
     }
 
     IDXGISwapChain1* sc1 = nullptr;
