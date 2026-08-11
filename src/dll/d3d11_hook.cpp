@@ -146,10 +146,79 @@ static void FormatProbeStack(char* output, size_t outputSize)
 
 static void __fastcall H3ResourceFixupHook(void* context)
 {
+    uint8_t before[11u][16u]{};
+    const uint8_t* resourceBase = nullptr;
+    const uint8_t* fixups = nullptr;
+    int32_t fixupCount = 0;
+    bool decoratorResource = false;
+    if (context)
+    {
+        __try
+        {
+            const uint8_t* bytes = static_cast<const uint8_t*>(context);
+            std::memcpy(&resourceBase, bytes, sizeof(resourceBase));
+            std::memcpy(&fixupCount, bytes + 0x40u, sizeof(fixupCount));
+            std::memcpy(&fixups, bytes + 0x48u, sizeof(fixups));
+            decoratorResource = resourceBase && fixups && fixupCount == 11;
+            for (unsigned i = 0; decoratorResource && i < 11u; ++i)
+            {
+                uint32_t encoded = 0;
+                int32_t kind = -1;
+                std::memcpy(&encoded, fixups + static_cast<size_t>(i) * 8u,
+                            sizeof(encoded));
+                std::memcpy(&kind,
+                            fixups + static_cast<size_t>(i) * 8u + 4u,
+                            sizeof(kind));
+                const uint32_t expectedOffset = 0x134u + i * 0x0Cu;
+                if ((encoded >> 29u) != 1u ||
+                    (encoded & 0x1FFFFFFFu) != expectedOffset || kind != 0)
+                {
+                    decoratorResource = false;
+                    break;
+                }
+                std::memcpy(before[i], resourceBase + expectedOffset,
+                            sizeof(before[i]));
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            decoratorResource = false;
+        }
+    }
+
     void* previous = g_h3CurrentResourceContext;
     g_h3CurrentResourceContext = context;
     g_origH3ResourceFixup(context);
     g_h3CurrentResourceContext = previous;
+
+    if (decoratorResource)
+    {
+        __try
+        {
+            LOG("H3DECOROWNER: context=%p base=%p fixups=%p count=%d",
+                context, resourceBase, fixups, fixupCount);
+            for (unsigned i = 0; i < 11u; ++i)
+            {
+                const uint32_t offset = 0x134u + i * 0x0Cu;
+                const uint8_t* after = resourceBase + offset;
+                uint32_t beforeWords[4]{};
+                uint32_t afterWords[4]{};
+                std::memcpy(beforeWords, before[i], sizeof(beforeWords));
+                std::memcpy(afterWords, after, sizeof(afterWords));
+                LOG("H3DECOROWNERSET[%u]: field=%p offset=0x%X "
+                    "before=%08X,%08X,%08X,%08X "
+                    "after=%08X,%08X,%08X,%08X",
+                    i, after, offset,
+                    beforeWords[0], beforeWords[1], beforeWords[2],
+                    beforeWords[3], afterWords[0], afterWords[1],
+                    afterWords[2], afterWords[3]);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LOG("H3DECOROWNER: post-fixup field read faulted");
+        }
+    }
 }
 
 static void TryInstallH3ResourceFixupProbe()
