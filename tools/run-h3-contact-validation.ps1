@@ -83,19 +83,30 @@ function Stop-SteamVr {
 }
 
 function Stop-Mcc {
-    $process = Get-Process $mccProcessName -ErrorAction SilentlyContinue
-    if (-not $process) { return }
-    $null = $process.CloseMainWindow()
+    $processes = @(Get-Process $mccProcessName -ErrorAction SilentlyContinue)
+    if ($processes.Count -eq 0) { return }
+    foreach ($process in $processes) {
+        $null = $process.CloseMainWindow()
+    }
     for ($attempt = 0; $attempt -lt 10; ++$attempt) {
         Start-Sleep -Seconds 1
-        $process = Get-Process $mccProcessName -ErrorAction SilentlyContinue
-        if (-not $process) { return }
+        $processes = @(
+            Get-Process $mccProcessName -ErrorAction SilentlyContinue)
+        if ($processes.Count -eq 0) { return }
     }
-    Stop-Process -Id $process.Id
+    $processes | Stop-Process
     Start-Sleep -Seconds 3
     if (Get-Process $mccProcessName -ErrorAction SilentlyContinue) {
         throw 'MCC did not close.'
     }
+}
+
+function Get-UniqueMccWindowProcess {
+    $processes = @(
+        Get-Process $mccProcessName -ErrorAction SilentlyContinue |
+            Where-Object { $_.MainWindowHandle -ne 0 })
+    if ($processes.Count -ne 1) { return $null }
+    return $processes[0]
 }
 
 function Save-DesktopScreenshot([string]$Path) {
@@ -140,6 +151,20 @@ function Get-NewLogText([string]$Path, [DateTime]$StartedUtc) {
         $reader.Dispose()
         $stream.Dispose()
     }
+}
+
+function Test-Halo3ContactRuntimeReady([string]$Text) {
+    return $Text -match
+        'H3 physical contact: optional native bindings installed' -or
+        $Text -match 'H3 physical contact status:'
+}
+
+function Test-Halo3LevelLoadGateStalled([string]$Text) {
+    if (Test-Halo3ContactRuntimeReady $Text) { return $false }
+    $matches = [regex]::Matches(
+        $Text, 'Halo 3 level-load gate: holding install after ([0-9]+) ms')
+    if ($matches.Count -eq 0) { return $false }
+    return [int]$matches[$matches.Count - 1].Groups[1].Value -ge 45000
 }
 
 function Get-LatestContactStatusLine([string]$Text, [int]$Kind = -1) {
@@ -430,15 +455,19 @@ try {
     }
 
     $startedUtc = [DateTime]::UtcNow
-    Start-Process -FilePath $launcher
-    Wait-Until {
-        $process = Get-Process $mccProcessName -ErrorAction SilentlyContinue
-        $process -and $process.MainWindowHandle -ne 0
-    } 45 'MCC did not open a controllable window.'
-    Start-Sleep -Seconds 15
+    $maxLaunchAttempts = if ($ExternalMenuControl) { 1 } else { 2 }
+    for ($launchAttempt = 1;
+         $launchAttempt -le $maxLaunchAttempts;
+         ++$launchAttempt) {
+        Start-Process -FilePath $launcher
+        Wait-Until {
+            [bool](Get-UniqueMccWindowProcess)
+        } 45 'MCC did not open one unique controllable window.'
+        Start-Sleep -Seconds 15
 
-    if (-not $ExternalMenuControl) {
-        Add-Type @'
+        if (-not $ExternalMenuControl) {
+            if (-not ([System.Management.Automation.PSTypeName]'HaloMccVrContactInput').Type) {
+                Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class HaloMccVrContactInput {
@@ -492,6 +521,7 @@ public static class HaloMccVrContactInput {
     }
 }
 '@
+            }
         function Send-ScanCode([uint16]$ScanCode, [bool]$Extended = $false) {
             $written = [HaloMccVrContactInput]::Key($ScanCode, $Extended)
             if ($written -ne 2) {
@@ -504,7 +534,10 @@ public static class HaloMccVrContactInput {
         function Send-Down { Send-ScanCode 0x50 $true }
         function Send-Right { Send-ScanCode 0x4D $true }
 
-        $mcc = Get-Process $mccProcessName -ErrorAction Stop
+        $mcc = Get-UniqueMccWindowProcess
+        if (-not $mcc) {
+            throw 'MCC did not expose one unique controllable window.'
+        }
         $null = [HaloMccVrContactInput]::SetForegroundWindow(
             $mcc.MainWindowHandle)
         # MCC remembers the last selected title and activity. This legacy path
@@ -579,7 +612,10 @@ public static class HaloMccVrContactInput {
             }
         }
         if (-not $halo3Started) {
-            $mcc = Get-Process $mccProcessName -ErrorAction Stop
+            $mcc = Get-UniqueMccWindowProcess
+            if (-not $mcc) {
+                throw 'MCC did not expose one unique recovery window.'
+            }
             $null = [HaloMccVrContactInput]::SetForegroundWindow(
                 $mcc.MainWindowHandle)
             Send-Enter
@@ -589,10 +625,43 @@ public static class HaloMccVrContactInput {
         Write-Host 'MCC is ready for visible external Forge menu control.'
     }
 
-    Wait-Until {
-        $text = Get-NewLogText $runtimeLog $startedUtc
-        $text -match 'Title adapter: detected supported title Halo 3'
-    } $MenuControlTimeoutSeconds 'Menu control did not start Halo 3.'
+        Wait-Until {
+            $text = Get-NewLogText $runtimeLog $startedUtc
+            $text -match 'Title adapter: detected supported title Halo 3'
+        } $MenuControlTimeoutSeconds 'Menu control did not start Halo 3.'
+
+        if ($ExternalMenuControl) { break }
+
+        $contactRuntimeReady = $false
+        $levelLoadGateStalled = $false
+        $runtimeDeadline = [DateTime]::UtcNow.AddSeconds(70)
+        do {
+            $text = Get-NewLogText $runtimeLog $startedUtc
+            if (Test-Halo3ContactRuntimeReady $text) {
+                $contactRuntimeReady = $true
+                break
+            }
+            if (Test-Halo3LevelLoadGateStalled $text) {
+                $levelLoadGateStalled = $true
+                break
+            }
+            Start-Sleep -Seconds 1
+        } while ([DateTime]::UtcNow -lt $runtimeDeadline)
+
+        if ($contactRuntimeReady) { break }
+        if ($launchAttempt -eq $maxLaunchAttempts) {
+            if ($levelLoadGateStalled) {
+                throw "Halo 3 remained in the level-load gate after $launchAttempt launch attempts."
+            }
+            throw "Halo 3 contact runtime did not become ready after $launchAttempt launch attempts."
+        }
+
+        Write-Host (
+            "Halo 3 did not leave its level-load gate; restarting MCC " +
+            "for launch attempt $($launchAttempt + 1) of $maxLaunchAttempts.")
+        Stop-Mcc
+        Start-Sleep -Seconds 5
+    }
 
     Wait-Until {
         $text = Get-NewLogText $runtimeLog $startedUtc
