@@ -9,7 +9,6 @@ param(
         'visible-weapon-nudge',
         'visible-weapon-gap',
         'wall',
-        'decorator-wall',
         'melee')]
     [string]$Test = 'equipment-scoop',
 
@@ -289,10 +288,6 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
             return $Text -match
                 'H3 physical contact DEBUG WALL:.*structureValidated=1.*objectValidated=1'
         }
-        'decorator-wall' {
-            return $Text -match
-                'H3 physical contact status:.*decoratorSelfTest=1'
-        }
         'melee' {
             $status = Get-LatestContactStatusLine $Text
             return $status -and $status -match 'melees=([1-9][0-9]*)' -and
@@ -346,8 +341,7 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_MELEE',
     'HALOMCCVR_H3_CONTACT_DEBUG_WALL',
     'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE',
-    'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT',
-    'HALOMCCVR_H3_DECORATOR_SELF_TEST'
+    'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT'
 )
 $savedEnvironment = @{}
 foreach ($name in $debugVariables) {
@@ -420,10 +414,6 @@ try {
         }
         'wall' {
             $env:HALOMCCVR_H3_CONTACT_DEBUG_WALL = '1'
-        }
-        'decorator-wall' {
-            $env:HALOMCCVR_H3_CONTACT_DEBUG_WALL = '1'
-            $env:HALOMCCVR_H3_DECORATOR_SELF_TEST = '1'
         }
         'melee' {
             $env:HALOMCCVR_H3_CONTACT_DEBUG_MELEE = '1'
