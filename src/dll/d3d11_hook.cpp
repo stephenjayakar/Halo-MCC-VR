@@ -31,6 +31,8 @@ typedef HRESULT(STDMETHODCALLTYPE* Present1Fn)(IDXGISwapChain1*, UINT, UINT, con
 typedef HRESULT(STDMETHODCALLTYPE* ResizeBuffersFn)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 typedef void(STDMETHODCALLTYPE* OMSetRenderTargetsFn)(ID3D11DeviceContext*, UINT,
     ID3D11RenderTargetView* const*, ID3D11DepthStencilView*);
+typedef HRESULT(STDMETHODCALLTYPE* CreateBufferFn)(ID3D11Device*,
+    const D3D11_BUFFER_DESC*, const D3D11_SUBRESOURCE_DATA*, ID3D11Buffer**);
 #if HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE
 typedef void(STDMETHODCALLTYPE* DrawIndexedFn)(ID3D11DeviceContext*, UINT, UINT, INT);
 #endif
@@ -43,6 +45,8 @@ static PresentFn g_origPresent = nullptr;
 static Present1Fn g_origPresent1 = nullptr;
 static ResizeBuffersFn g_origResizeBuffers = nullptr;
 static OMSetRenderTargetsFn g_origOMSetRenderTargets = nullptr;
+static CreateBufferFn g_origCreateBuffer = nullptr;
+static std::atomic<unsigned> g_h3DecoratorBufferProbeSamples{0};
 #if HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE
 static DrawIndexedFn g_origDrawIndexed = nullptr;
 // The July 26 HUD-discovery detour performed synchronous GPU readback and
@@ -55,6 +59,60 @@ constexpr bool kEnableReachDrawIndexedDiagnostic = false;
 #if HALOMCCVR_EXPERIMENTAL_ODST_BRINGUP
 static CopyResourceFn g_origCopyResource = nullptr;
 #endif
+
+// Environment-only discovery probe. Halo's decorator instance data is packed
+// into 16-byte records and uploaded while a map loads. Reading immutable
+// initial data here avoids the synchronous GPU readback that made the retired
+// draw-hook diagnostics unsafe. The hook is not installed in normal play.
+static HRESULT STDMETHODCALLTYPE CreateBufferHook(
+    ID3D11Device* device, const D3D11_BUFFER_DESC* desc,
+    const D3D11_SUBRESOURCE_DATA* initialData, ID3D11Buffer** buffer)
+{
+    if (desc && initialData && initialData->pSysMem &&
+        desc->ByteWidth >= 16u * 32u && (desc->ByteWidth % 16u) == 0 &&
+        (desc->BindFlags & D3D11_BIND_VERTEX_BUFFER) != 0)
+    {
+        const uint8_t* bytes = static_cast<const uint8_t*>(initialData->pSysMem);
+        const unsigned records = desc->ByteWidth / 16u;
+        const unsigned sampledRecords = std::min(records, 4096u);
+        unsigned smallPartIndices = 0;
+        for (unsigned i = 0; i < sampledRecords; ++i)
+        {
+            if (bytes[static_cast<size_t>(i) * 16u + 7u] < 64u)
+                ++smallPartIndices;
+        }
+        const bool placementLike = sampledRecords >= 32u &&
+            smallPartIndices * 100u >= sampledRecords * 95u;
+        if (placementLike)
+        {
+            const unsigned sample =
+                g_h3DecoratorBufferProbeSamples.fetch_add(
+                    1, std::memory_order_relaxed) + 1;
+            if (sample <= 256u)
+            {
+                char head[16u * 4u * 3u + 1u]{};
+                size_t used = 0;
+                const unsigned headBytes = std::min(desc->ByteWidth, 16u * 4u);
+                for (unsigned i = 0; i < headBytes && used + 4u < sizeof(head); ++i)
+                {
+                    const int wrote = _snprintf_s(
+                        head + used, sizeof(head) - used, _TRUNCATE,
+                        "%02X%s", bytes[i], ((i + 1u) % 16u) ? " " : "|");
+                    if (wrote <= 0)
+                        break;
+                    used += static_cast<size_t>(wrote);
+                }
+                LOG("H3DECORBUF[%u]: bytes=%u records=%u smallPart=%u/%u "
+                    "usage=%u bind=0x%X cpu=0x%X misc=0x%X stride=%u head=%s",
+                    sample, desc->ByteWidth, records, smallPartIndices,
+                    sampledRecords, static_cast<unsigned>(desc->Usage),
+                    desc->BindFlags, desc->CPUAccessFlags, desc->MiscFlags,
+                    desc->StructureByteStride, head);
+            }
+        }
+    }
+    return g_origCreateBuffer(device, desc, initialData, buffer);
+}
 
 // --- Desktop-window fit (config.fit_desktop_window) -----------------------
 // resolution_scale sizes the render the headset captures. On a monitor smaller
@@ -1119,6 +1177,7 @@ bool InstallD3D11Hooks()
     }
 
     void** vtbl = *(void***)sc;
+    void** deviceVtbl = *(void***)dev;
     void** contextVtbl = *(void***)ctx;
     bool ok = MH_CreateHook(vtbl[8], (void*)&PresentHook, (void**)&g_origPresent) == MH_OK &&
               MH_CreateHook(vtbl[13], (void*)&ResizeBuffersHook, (void**)&g_origResizeBuffers) == MH_OK &&
@@ -1145,6 +1204,18 @@ bool InstallD3D11Hooks()
             "no draw calls are intercepted");
     }
 #endif
+
+    wchar_t decoratorProbeValue[2]{};
+    if (GetEnvironmentVariableW(
+            L"HALOMCCVR_H3_DECORATOR_BUFFER_PROBE",
+            decoratorProbeValue, 2) > 0)
+    {
+        if (MH_CreateHook(deviceVtbl[3], (void*)&CreateBufferHook,
+                          (void**)&g_origCreateBuffer) == MH_OK)
+            LOG("H3DECORBUF: initial-data probe installed (environment-only)");
+        else
+            LOG("H3DECORBUF: CreateBuffer hook failed; probe disabled");
+    }
 
     IDXGISwapChain1* sc1 = nullptr;
     if (SUCCEEDED(sc->QueryInterface(__uuidof(IDXGISwapChain1), (void**)&sc1)))
