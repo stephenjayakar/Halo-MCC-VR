@@ -6664,6 +6664,7 @@ namespace
     std::atomic<bool> g_halo3ContactDebugRig{false};
     std::atomic<bool> g_halo3ContactDebugMelee{false};
     std::atomic<bool> g_halo3ContactDebugScoop{false};
+    std::atomic<bool> g_halo3ContactDebugLeftGrab{false};
     std::atomic<bool> g_halo3ContactDebugWall{false};
     std::atomic<int32_t> g_halo3ContactDebugWallType{-1};
     std::atomic<int32_t> g_halo3ContactDebugWallHandle{-1};
@@ -11397,6 +11398,8 @@ namespace
             g_halo3ContactDebugMelee.load(std::memory_order_acquire);
         const bool debugScoop =
             g_halo3ContactDebugScoop.load(std::memory_order_acquire);
+        const bool debugLeftGrab =
+            g_halo3ContactDebugLeftGrab.load(std::memory_order_acquire);
         const bool debugWall =
             g_halo3ContactDebugWall.load(std::memory_order_acquire);
         const bool debugVisibleReplay =
@@ -12074,6 +12077,40 @@ namespace
                     aimTarget, std::memory_order_relaxed);
                 g_halo3ContactDebugAimKind.store(
                     aimKind, std::memory_order_relaxed);
+                // The left-grab diagnostic needs the proven object selector
+                // and exact authored target, but it must not also hit that
+                // object with the right-hand weapon.  Publish the selected
+                // target for semantic readback and stop before any contact
+                // sweep or simulation command.
+                if (debugLeftGrab)
+                {
+                    if (aimTarget != -1 &&
+                        g_halo3ContactDebugAnchorValid)
+                    {
+                        const int32_t previousTarget =
+                            g_halo3ContactDebugTarget.exchange(
+                                aimTarget, std::memory_order_relaxed);
+                        if (previousTarget != aimTarget)
+                        {
+                            const float initial[3] = {
+                                g_halo3ContactDebugAnchorTransform.position.x,
+                                g_halo3ContactDebugAnchorTransform.position.y,
+                                g_halo3ContactDebugAnchorTransform.position.z};
+                            for (int axis = 0; axis < 3; ++axis)
+                            {
+                                g_halo3ContactDebugInitialPosition[axis].store(
+                                    initial[axis], std::memory_order_relaxed);
+                                g_halo3ContactDebugCurrentPosition[axis].store(
+                                    initial[axis], std::memory_order_relaxed);
+                            }
+                        }
+                    }
+                    g_halo3ContactStage.store(
+                        static_cast<uint32_t>(
+                            Halo3PhysicalContactStage::Motion),
+                        std::memory_order_relaxed);
+                    return;
+                }
                 if (debugVisibleReplay && aimTarget != -1 &&
                     haveVisiblePalette &&
                     g_halo3ContactDebugVisibleExactPublishes.load(
@@ -14122,6 +14159,8 @@ namespace
     {
         const uint32_t generation =
             g_halo3RuntimeGeneration.load(std::memory_order_acquire);
+        const bool debugLeftGrab =
+            g_halo3ContactDebugLeftGrab.load(std::memory_order_acquire);
         bool paused = true;
         int32_t scene = -1;
         int32_t shot = -1;
@@ -14129,9 +14168,11 @@ namespace
             g_halo3LeftGrabBindings.load(std::memory_order_acquire) &&
             g_halo3VehicleBinding.load(std::memory_order_acquire) ==
                 static_cast<uint8_t>(Halo3VehicleBindingState::Installed) &&
-            g_engineTlsIndex && g_enabled.load(std::memory_order_relaxed) &&
-            g_vrAim.load(std::memory_order_relaxed) &&
-            TitleAdapter_GetRuntimeMode() == RuntimeMode::Gameplay &&
+            g_engineTlsIndex &&
+            (debugLeftGrab || g_enabled.load(std::memory_order_relaxed)) &&
+            (debugLeftGrab || g_vrAim.load(std::memory_order_relaxed)) &&
+            (debugLeftGrab ||
+             TitleAdapter_GetRuntimeMode() == RuntimeMode::Gameplay) &&
             Halo3VehicleSnapshotState(
                 g_halo3VehicleSnapshot.load(std::memory_order_acquire),
                 generation) == Halo3VehicleState::OnFoot &&
@@ -14150,36 +14191,87 @@ namespace
             return;
         }
 
-        VrControllerMotionSnapshot motion{};
-        if (!VR_GetLeftControllerMotion(motion) || !motion.poseValid ||
-            !motion.linearVelocityValid || !motion.gripValid ||
-            !motion.sampleMs || nowMs < motion.sampleMs ||
-            nowMs - motion.sampleMs > 100)
-        {
-            g_halo3LeftGrabStage.store(
-                static_cast<uint32_t>(Halo3LeftGrabStage::Motion),
-                std::memory_order_relaxed);
-            Halo3ResetLeftGrab();
-            return;
-        }
-        if (motion.serial == g_halo3LeftGrabCamera.lastMotionSerial)
-            return;
-        g_halo3LeftGrabCamera.lastMotionSerial = motion.serial;
-
         PhysicalContactTransform palmTransform{};
         PhysicalContactVec3 palmVelocity{};
         PhysicalContactVec3 palmAngular{};
-        if (!Halo3LeftPalmWorldPose(
-                motion, palmTransform, palmVelocity, palmAngular))
+        bool gripHeld = false;
+        if (debugLeftGrab)
         {
-            g_halo3LeftGrabStage.store(
-                static_cast<uint32_t>(Halo3LeftGrabStage::Motion),
-                std::memory_order_relaxed);
-            Halo3ResetLeftGrab();
-            return;
+            if (!g_halo3ContactDebugAnchorValid ||
+                g_halo3ContactDebugAnchorGeneration != generation ||
+                g_halo3ContactDebugScoopStartMs == 0 ||
+                nowMs < g_halo3ContactDebugScoopStartMs)
+            {
+                g_halo3LeftGrabStage.store(
+                    static_cast<uint32_t>(Halo3LeftGrabStage::Searching),
+                    std::memory_order_relaxed);
+                return;
+            }
+            const float worldScale =
+                g_worldScale.load(std::memory_order_relaxed);
+            if (!std::isfinite(worldScale) || worldScale < 0.05f ||
+                worldScale > 2.0f)
+                return;
+            const auto scoop = PhysicalContactDebugScoopTrajectory(
+                static_cast<float>(
+                    nowMs - g_halo3ContactDebugScoopStartMs));
+            const PhysicalContactVec3 worldUp{0.0f, 0.0f, 1.0f};
+            const PhysicalContactVec3 forward = PhysicalContactNormalize(
+                g_halo3ContactDebugAnchorForward,
+                {1.0f, 0.0f, 0.0f});
+            const PhysicalContactVec3 carryDirection =
+                PhysicalContactNormalize(
+                    PhysicalContactCross(worldUp, forward),
+                    {0.0f, 1.0f, 0.0f});
+            palmTransform.position =
+                g_halo3ContactDebugAnchorTransform.position +
+                worldUp * (scoop.liftMeters * worldScale) +
+                carryDirection * (scoop.carryMeters * worldScale);
+            palmTransform.forward = forward;
+            palmTransform.left = carryDirection;
+            palmTransform.up = PhysicalContactNormalize(
+                PhysicalContactCross(forward, carryDirection), worldUp);
+            palmTransform.scale = 1.0f;
+            palmVelocity =
+                worldUp * scoop.liftMetersPerSecond +
+                carryDirection * scoop.carryMetersPerSecond;
+            palmAngular = {};
+            gripHeld =
+                nowMs - g_halo3ContactDebugScoopStartMs < 4500;
+            g_halo3LeftGrabCamera.lastMotionSerial = nowMs;
+            if (!PhysicalContactTransformFinite(palmTransform) ||
+                !PhysicalContactFinite(palmVelocity))
+                return;
         }
-        const bool gripHeld = PhysicalContactGripHeld(
-            motion.grip, g_halo3LeftGrabCamera.gripHeld);
+        else
+        {
+            VrControllerMotionSnapshot motion{};
+            if (!VR_GetLeftControllerMotion(motion) || !motion.poseValid ||
+                !motion.linearVelocityValid || !motion.gripValid ||
+                !motion.sampleMs || nowMs < motion.sampleMs ||
+                nowMs - motion.sampleMs > 100)
+            {
+                g_halo3LeftGrabStage.store(
+                    static_cast<uint32_t>(Halo3LeftGrabStage::Motion),
+                    std::memory_order_relaxed);
+                Halo3ResetLeftGrab();
+                return;
+            }
+            if (motion.serial == g_halo3LeftGrabCamera.lastMotionSerial)
+                return;
+            g_halo3LeftGrabCamera.lastMotionSerial = motion.serial;
+            if (!Halo3LeftPalmWorldPose(
+                    motion, palmTransform, palmVelocity, palmAngular))
+            {
+                g_halo3LeftGrabStage.store(
+                    static_cast<uint32_t>(Halo3LeftGrabStage::Motion),
+                    std::memory_order_relaxed);
+                Halo3ResetLeftGrab();
+                return;
+            }
+            gripHeld = PhysicalContactGripHeld(
+                motion.grip, g_halo3LeftGrabCamera.gripHeld);
+        }
         g_halo3LeftGrabCamera.gripHeld = gripHeld;
         const float worldScale =
             g_worldScale.load(std::memory_order_relaxed);
@@ -19485,6 +19577,16 @@ namespace
         const bool contactDebugScoopEnabled = contactDebugScoopLength > 0 &&
             contactDebugScoopLength < std::size(contactDebugScoopValue) &&
             contactDebugScoopValue[0] != L'0';
+        wchar_t contactDebugLeftGrabValue[8]{};
+        const DWORD contactDebugLeftGrabLength = GetEnvironmentVariableW(
+            L"HALOMCCVR_H3_CONTACT_DEBUG_LEFT_GRAB",
+            contactDebugLeftGrabValue,
+            static_cast<DWORD>(std::size(contactDebugLeftGrabValue)));
+        const bool contactDebugLeftGrabEnabled =
+            contactDebugLeftGrabLength > 0 &&
+            contactDebugLeftGrabLength <
+                std::size(contactDebugLeftGrabValue) &&
+            contactDebugLeftGrabValue[0] != L'0';
         wchar_t contactDebugWallValue[8]{};
         const DWORD contactDebugWallLength = GetEnvironmentVariableW(
             L"HALOMCCVR_H3_CONTACT_DEBUG_WALL", contactDebugWallValue,
@@ -19535,7 +19637,8 @@ namespace
         }
         const bool contactDebugRigEnabled =
             contactDebugEnabled || contactDebugMeleeEnabled ||
-            contactDebugScoopEnabled || contactDebugWallEnabled ||
+            contactDebugScoopEnabled || contactDebugLeftGrabEnabled ||
+            contactDebugWallEnabled ||
             contactDebugVisibleEnabled || contactDebugVisibleExactEnabled;
         g_halo3ContactDebugRig.store(
             contactDebugRigEnabled, std::memory_order_release);
@@ -19543,6 +19646,8 @@ namespace
             contactDebugMeleeEnabled, std::memory_order_release);
         g_halo3ContactDebugScoop.store(
             contactDebugScoopEnabled, std::memory_order_release);
+        g_halo3ContactDebugLeftGrab.store(
+            contactDebugLeftGrabEnabled, std::memory_order_release);
         g_halo3ContactDebugWall.store(
             contactDebugWallEnabled, std::memory_order_release);
         g_halo3ContactDebugVisibleReplay.store(
@@ -19659,6 +19764,9 @@ namespace
             LOG("H3 physical contact DEBUG SCOOP enabled by environment; "
                 "one-shot sub-melee lift, carry, separation, and object-state "
                 "readback active");
+        if (contactDebugLeftGrabEnabled)
+            LOG("H3 physical contact DEBUG LEFT GRAB enabled by environment; "
+                "scripted exact-palm acquire, carry, and release active");
         if (contactDebugWallEnabled)
             LOG("H3 physical contact DEBUG WALL enabled by environment; exact "
                 "visible collision geometry will test native structure and "

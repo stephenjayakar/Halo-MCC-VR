@@ -3,6 +3,7 @@ param(
     [ValidateSet(
         'weapon-scoop',
         'equipment-scoop',
+        'left-grab',
         'crate-nudge',
         'vehicle-nudge',
         'visible-weapon-nudge',
@@ -223,6 +224,25 @@ function Test-VehicleReleaseResult([string]$Text) {
     return $false
 }
 
+function Test-LeftGrabResult([string]$Text) {
+    if ($Text -notmatch 'H3 physical contact DEBUG LEFT GRAB enabled') {
+        return $false
+    }
+    $status = ($Text -split "`r?`n") | Where-Object {
+        $_ -match 'H3 left grab status:' -and
+        $_ -match 'bindings=1' -and
+        $_ -match 'mass=(?!0\.000)([0-9]+\.[0-9]{3})' -and
+        $_ -match 'acquisitions=([1-9][0-9]*)' -and
+        $_ -match 'commands=([1-9][0-9]*)' -and
+        $_ -match 'applied=([1-9][0-9]*)' -and
+        $_ -match 'releases=([1-9][0-9]*)' -and
+        $_ -match 'serial=([1-9][0-9]*) appliedSerial=([1-9][0-9]*)'
+    } | Select-Object -Last 1
+    if (-not $status) { return $false }
+    return $Text -match
+        'H3 physical contact DEBUG RIG:.*kind=3.*validated=1.*peakLift=(?!0\.000m)([0-9]+\.[0-9]{3})m.*peakCarry=(?!0\.000m)([0-9]+\.[0-9]{3})m.*releaseSpeed=(?!0\.000m/s)([0-9]+\.[0-9]{3})m/s'
+}
+
 function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
         'weapon-scoop' {
@@ -232,6 +252,9 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
         }
         'equipment-scoop' {
             return Test-SlowResult $Text 3 $true
+        }
+        'left-grab' {
+            return Test-LeftGrabResult $Text
         }
         'crate-nudge' {
             return Test-SlowResult $Text 10 $false
@@ -304,6 +327,7 @@ $failure = $null
 $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_RIG',
     'HALOMCCVR_H3_CONTACT_DEBUG_SCOOP',
+    'HALOMCCVR_H3_CONTACT_DEBUG_LEFT_GRAB',
     'HALOMCCVR_H3_CONTACT_DEBUG_KIND',
     'HALOMCCVR_H3_CONTACT_DEBUG_MELEE',
     'HALOMCCVR_H3_CONTACT_DEBUG_WALL',
@@ -353,6 +377,11 @@ try {
         }
         'equipment-scoop' {
             $env:HALOMCCVR_H3_CONTACT_DEBUG_SCOOP = '1'
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '3'
+        }
+        'left-grab' {
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_SCOOP = '1'
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_LEFT_GRAB = '1'
             $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '3'
         }
         'crate-nudge' {
