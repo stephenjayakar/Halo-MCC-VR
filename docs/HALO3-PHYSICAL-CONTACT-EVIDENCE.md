@@ -1540,16 +1540,30 @@ external menu control. They prove bindings, exact geometry selection, native
 mass use, contact constraints, impulses, and melee routing. They do not prove
 headset alignment or feel.
 
-The current DLL's left-grab regression did not produce a valid feature result.
-One attempt exited during the MCC shell transition; the clean retry reached
-`halo3.dll` but remained in the already documented Halo 3 level-load gate and
-never entered Forge. Both invalid attempts were stopped without treating them
-as pickup failures. SteamVR was restored to the exact normal configuration,
-SHA-256
+The current DLL's left-grab regression then passed with clean validator source
+`7ac6bbe60c43a91c93465b431b6a6ab32e8337fa`. The preserved log is
+`out/debug-openxr/20260811-150713469Z-left-grab.log` (SHA-256
+`C9E7B6426907FA6494A35049E2B6E1EEE4470B778D228BD8F33350AC98B19613`).
+It acquired one exact `0.382 kg` equipment object, published 195 commands,
+applied 131 after the native object update, released once, lifted `0.300 m`,
+carried `0.213 m`, and retained `0.607 m/s` release speed. The isolated
+right-hand path again reported zero sweeps, hits, impulses, haptics, and melee.
+
+The clean result followed two invalid launch attempts. One exited during the
+MCC shell transition and one remained in the documented Halo 3 level-load gate;
+neither entered Forge and neither was counted as a pickup failure. Tool commit
+`c6589a8` now requires one unique visible MCC window, waits for the contact
+runtime rather than treating `halo3.dll` admission as success, and restarts MCC
+once when the frozen-camera gate exceeds 45 seconds. A later reproducibility
+run exposed 15 abandoned SteamVR Home `steamtours.exe` processes from earlier
+null-driver sessions. They reserved about 5.5 GiB of private memory and caused
+a recorded PowerShell `System.OutOfMemoryException`. Tool commit `7ac6bbe`
+adds SteamVR Home to the bounded shutdown set. The clean pass above ended with
+zero MCC, validator, SteamVR, or SteamVR Home processes and restored the exact
+normal SteamVR configuration, SHA-256
 `F95C7F261AD27423D1FAE287E2950E3471110C1DA969A4022E8298915801348C`.
-The earlier installed `95047a6` left-grab transaction remains the most recent
-valid null-driver pickup proof; current-build pickup and real-hand alignment
-remain pending.
+Natural palm alignment, grip feel, and toss feel still require headset
+acceptance.
 
 ## Verification boundary
 
