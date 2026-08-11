@@ -228,17 +228,26 @@ function Test-LeftGrabResult([string]$Text) {
     if ($Text -notmatch 'H3 physical contact DEBUG LEFT GRAB enabled') {
         return $false
     }
-    $status = ($Text -split "`r?`n") | Where-Object {
+    # Acquisition publishes the exact active handle and native mass. Release
+    # deliberately clears both fields, so those two states must be proven by
+    # separate status samples instead of one impossible post-release line.
+    $held = ($Text -split "`r?`n") | Where-Object {
         $_ -match 'H3 left grab status:' -and
         $_ -match 'bindings=1' -and
+        $_ -match 'active=0x(?!FFFFFFFF)[0-9A-F]+' -and
         $_ -match 'mass=(?!0\.000)([0-9]+\.[0-9]{3})' -and
+        $_ -match 'acquisitions=([1-9][0-9]*)'
+    } | Select-Object -Last 1
+    $released = ($Text -split "`r?`n") | Where-Object {
+        $_ -match 'H3 left grab status:' -and
+        $_ -match 'bindings=1' -and
         $_ -match 'acquisitions=([1-9][0-9]*)' -and
         $_ -match 'commands=([1-9][0-9]*)' -and
         $_ -match 'applied=([1-9][0-9]*)' -and
         $_ -match 'releases=([1-9][0-9]*)' -and
         $_ -match 'serial=([1-9][0-9]*) appliedSerial=([1-9][0-9]*)'
     } | Select-Object -Last 1
-    if (-not $status) { return $false }
+    if (-not $held -or -not $released) { return $false }
     return $Text -match
         'H3 physical contact DEBUG RIG:.*kind=3.*validated=1.*peakLift=(?!0\.000m)([0-9]+\.[0-9]{3})m.*peakCarry=(?!0\.000m)([0-9]+\.[0-9]{3})m.*releaseSpeed=(?!0\.000m/s)([0-9]+\.[0-9]{3})m/s'
 }
