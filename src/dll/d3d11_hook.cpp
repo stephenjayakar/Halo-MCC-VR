@@ -298,6 +298,8 @@ static void ScanProbeDecoratorBlocks(const void* source, unsigned records)
     size_t readableBytes = 0;
     unsigned candidates = 0;
     unsigned faults = 0;
+    uintptr_t candidateAddresses[512]{};
+    unsigned storedCandidates = 0;
 
     while (allocationSpan < kMaximumAllocationSpan)
     {
@@ -334,7 +336,8 @@ static void ScanProbeDecoratorBlocks(const void* source, unsigned records)
                         block[3] >= 11u)
                         continue;
                     std::memcpy(&start, block + 4u, sizeof(start));
-                    if (start > records || count > records - start)
+                    if ((start % 16u) != 0u || start / 16u > records ||
+                        count > records - start / 16u)
                         continue;
                     std::memcpy(minimum, block + 8u, sizeof(minimum));
                     std::memcpy(step, block + 0x18u, sizeof(step));
@@ -366,6 +369,8 @@ static void ScanProbeDecoratorBlocks(const void* source, unsigned records)
                     std::memcpy(&tail30, block + 0x30u, sizeof(tail30));
                     std::memcpy(&tail34, block + 0x34u, sizeof(tail34));
                     ++candidates;
+                    if (storedCandidates < _countof(candidateAddresses))
+                        candidateAddresses[storedCandidates++] = address;
                     if (candidates <= 256u)
                     {
                         LOG("H3DECORLIVEBLOCK[%u]: address=%p count=%u set=%u "
@@ -388,11 +393,123 @@ static void ScanProbeDecoratorBlocks(const void* source, unsigned records)
         }
         cursor = end;
     }
+
+    unsigned sequences = 0;
+    for (unsigned i = 0; i < storedCandidates;)
+    {
+        const unsigned first = i;
+        while (i + 1u < storedCandidates &&
+               candidateAddresses[i + 1u] ==
+                   candidateAddresses[i] + kBlockBytes)
+            ++i;
+        ++sequences;
+        if (sequences <= 128u)
+        {
+            LOG("H3DECORLIVESEQ[%u]: first=%p blocks=%u bytes=0x%llX",
+                sequences, reinterpret_cast<const void*>(candidateAddresses[first]),
+                i - first + 1u,
+                static_cast<unsigned long long>((i - first + 1u) * kBlockBytes));
+        }
+        ++i;
+    }
+
+    // Look for an owning pointer to the discovered table. Exact production
+    // capture must follow that owner; scanning a 2 GiB resource reservation is
+    // acceptable for this one-shot probe but never for normal map loading.
+    unsigned contextRefs = 0;
+    unsigned allocationRefs = 0;
+    if (storedCandidates != 0u)
+    {
+        const uintptr_t firstCandidate = candidateAddresses[0];
+        const uintptr_t lastCandidate =
+            candidateAddresses[storedCandidates - 1u] + kBlockBytes;
+        const uint8_t* context =
+            static_cast<const uint8_t*>(g_h3CurrentResourceContext);
+        if (context)
+        {
+            __try
+            {
+                for (unsigned offset = 0; offset + sizeof(uintptr_t) <= 0x200u;
+                     offset += 8u)
+                {
+                    uintptr_t value = 0;
+                    std::memcpy(&value, context + offset, sizeof(value));
+                    if (value >= firstCandidate && value < lastCandidate)
+                    {
+                        ++contextRefs;
+                        LOG("H3DECORLIVEREFCTX[%u]: context=%p offset=0x%X "
+                            "value=%p delta=0x%llX",
+                            contextRefs, context, offset,
+                            reinterpret_cast<const void*>(value),
+                            static_cast<unsigned long long>(value - firstCandidate));
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                ++faults;
+            }
+        }
+
+        cursor = allocation;
+        size_t referenceSpan = 0;
+        while (referenceSpan < kMaximumAllocationSpan)
+        {
+            MEMORY_BASIC_INFORMATION info{};
+            if (VirtualQuery(reinterpret_cast<const void*>(cursor), &info,
+                             sizeof(info)) == 0 ||
+                reinterpret_cast<uintptr_t>(info.AllocationBase) != allocation)
+                break;
+            const uintptr_t base = reinterpret_cast<uintptr_t>(info.BaseAddress);
+            const size_t regionSize = info.RegionSize;
+            if (regionSize == 0 || base > UINTPTR_MAX - regionSize)
+                break;
+            const uintptr_t end = base + regionSize;
+            referenceSpan = static_cast<size_t>(end - allocation);
+            if (info.State == MEM_COMMIT &&
+                IsProbeReadableProtection(info.Protect) &&
+                regionSize >= sizeof(uintptr_t))
+            {
+                __try
+                {
+                    const uintptr_t aligned = (base + 7u) & ~uintptr_t{7u};
+                    for (uintptr_t address = aligned;
+                         address <= end - sizeof(uintptr_t); address += 8u)
+                    {
+                        uintptr_t value = 0;
+                        std::memcpy(&value,
+                                    reinterpret_cast<const void*>(address),
+                                    sizeof(value));
+                        if (value < firstCandidate || value >= lastCandidate)
+                            continue;
+                        ++allocationRefs;
+                        if (allocationRefs <= 256u)
+                        {
+                            LOG("H3DECORLIVEREF[%u]: address=%p value=%p "
+                                "delta=0x%llX",
+                                allocationRefs,
+                                reinterpret_cast<const void*>(address),
+                                reinterpret_cast<const void*>(value),
+                                static_cast<unsigned long long>(
+                                    value - firstCandidate));
+                        }
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    ++faults;
+                }
+            }
+            cursor = end;
+        }
+    }
     LOG("H3DECORLIVE: allocation=%p span=0x%llX readable=0x%llX "
-        "candidates=%u faults=%u",
+        "candidates=%u stored=%u sequences=%u contextRefs=%u "
+        "allocationRefs=%u faults=%u",
         sourceInfo.AllocationBase,
         static_cast<unsigned long long>(allocationSpan),
-        static_cast<unsigned long long>(readableBytes), candidates, faults);
+        static_cast<unsigned long long>(readableBytes), candidates,
+        storedCandidates, sequences, contextRefs, allocationRefs, faults);
 }
 
 static HRESULT STDMETHODCALLTYPE CreateBufferHook(
