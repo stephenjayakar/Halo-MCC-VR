@@ -1592,6 +1592,73 @@ and restored the exact normal SteamVR settings hash. The saved visible replay
 screenshot also exposed one stale `vrwebhelper.exe` crash dialog left by the
 earlier memory exhaustion; it was dismissed after its owning process was gone.
 
+### Current crate and Valhalla decorator revalidation
+
+The same installed `bc44c6c` DLL passed a fresh crate-class nudge transaction
+at `out/debug-openxr/20260811-152036869Z-crate-nudge.log` (SHA-256
+`35F0F1317AA04EC37B1B69EF31BEC741D5458907F27FCF524682AADF1E5856DA`).
+It selected a detailed 12-triangle kind-10 target with native mass `1.819 kg`
+and the detailed 36-triangle held weapon with native mass `2.764 kg`. The
+scripted slow contact produced 76 authored hits, 62 point impulses, 76 body
+constraints, `0.260 m` peak correction, haptic amplitude `0.290`, and zero
+melee events. This is current-build proof that a medium loose body uses its
+authored geometry and mass while remaining on the gradual contact path.
+
+One subsequent legacy fixed-sequence launch selected Halo: Reach because the
+Forge title picker initially focused Reach. It was stopped immediately and was
+not counted as Halo 3 evidence. Validator commit `abee7eb` disables that blind
+menu path, requires `-ExternalMenuControl`, records
+`external-visible-state` in the result, and aborts if a non-Halo-3 gameplay
+module wins the transition. The no-switch path rejects the run before changing
+SteamVR settings or launching MCC, and the title classifier passed its Reach,
+ODST, and Halo 3 cases.
+
+Using that visible-only path, Valhalla and the built-in Forge game type were
+confirmed on captured screens before launch. The decorator-wall transaction
+then passed at `out/debug-openxr/20260811-152730096Z-decorator-wall.log`
+(SHA-256
+`A8709469F13D23BC47D5837E2987B29F3811C50A4D9CD4DF68C241CE2A91D991`).
+The runtime validated native type-1 structure geometry and native type-4
+placed-object geometry, and `decoratorSelfTest=1` proved the separately retained
+render-only decorator mesh path. The run ended with zero MCC, validator,
+SteamVR, or SteamVR Home processes and restored the user's exact normal
+SteamVR settings, SHA-256
+`F95C7F261AD27423D1FAE287E2950E3471110C1DA969A4022E8298915801348C`.
+
+### Current requirement audit
+
+- Missing walls: native structure planes, placed-object planes, and retained
+  decorator meshes all pass exact Valhalla runtime checks. The remaining test
+  is whether the weapon appears pixel-aligned against many real walls in a
+  headset.
+- Mongoose: the 502-triangle authored mesh, native `464.835 kg` mass, gradual
+  impulses, and zero accidental melee pass. Perceived force still needs a
+  headset check.
+- Loose weapons, equipment, and grenade-class bodies: exact authored-target
+  scoop, carry, release, and zero-melee transactions pass. The null driver
+  cannot judge whether a natural hand motion feels easy.
+- Crates: exact authored geometry, native mass, gradual impulses, constraints,
+  and haptics pass. The current proof does not replace freeform headset play.
+- Visible alignment and clipping control: the replay consumes the final visible
+  weapon palette, sweeps exact weapon and target triangles, and exercises
+  direct overlap, separation, body constraints, and short gap holds. Only a
+  headset can confirm that no visible gap or penetration remains during
+  unscripted motion.
+- Melee: authored damage/effect routing passes separately from slow contact.
+  Enemy difficulty and the threshold's feel in Campaign remain headset items.
+- Left-hand pickup: exact mass, acquisition, lift, carry, release, and strict
+  right-hand isolation pass. Palm alignment and grip/toss feel remain headset
+  items.
+- Campaign bodies: exact animated-body routing and safety rules have regression
+  coverage, but living/ragdoll body feel still needs a Campaign headset pass.
+- Test control: unattended checks now require inspected visible menu state and
+  have a wrong-title guard. Blind menu navigation is no longer an allowed
+  validation path.
+
+These null-driver runs prove bindings and deterministic transactions. They do
+not advance the accepted-build pointer; real-headset play remains the player
+acceptance gate.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
