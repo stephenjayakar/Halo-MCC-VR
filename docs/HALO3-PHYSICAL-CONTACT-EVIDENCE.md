@@ -1430,6 +1430,33 @@ requirement, grip hysteresis, no-snap follow correction, world-scale
 conversion, correction and toss clamps, and invalid scale. Runtime and headset
 acceptance remain pending.
 
+Source `95047a6` adds an environment-gated scripted left-palm transaction to
+the existing Forge validator. It reuses the proven movable-object selector,
+but returns before the right-hand sweep so the test cannot move the target by
+weapon contact. The scripted palm must overlap authored target geometry,
+acquire with grip, lift and carry through the normal camera-to-simulation
+handoff, then release with measured velocity. Production controller input and
+pickup behavior are unchanged when the environment variable is absent.
+
+The exact installed candidate is
+`out/package-worktrees/95047a6/out/candidates/95047a6-h3-physical-contact-20260811-032955950Z`.
+Its DLL is
+`C5CA7A67802971C88F34413608791E68068ED931BC2448D67CE7D25E05A10048`
+and its launcher is
+`659F4A16A53459B779C03D443DDC4AA59CCD95668986169D39FF1434A2474FAB`.
+The clean Release build and full `ctest` passed before automatic Steam install.
+
+The corrected scripted run passed at
+`out/debug-openxr/20260811-033900709Z-left-grab.log` (SHA-256
+`13EAC59F5A381ED522D8A923C83097490778EF5901B9F90AC2E99674143F5705`).
+It acquired one exact `0.226 kg` equipment object, published 194 commands,
+applied 147 after native object updates, released once, lifted `0.274 m`,
+carried `0.346 m`, and retained `0.235 m/s` release speed. The isolated
+right-hand path reported zero sweeps, hits, impulses, haptics, and melee. This
+proves the pickup bindings and semantic transaction under the SteamVR null
+driver; palm alignment, grip feel, and natural toss still require headset
+acceptance.
+
 ### Visible Forge launch recovery
 
 Two visible-state runs of installed source `dc03a63` reached the correct Halo 3
