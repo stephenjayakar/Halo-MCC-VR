@@ -28,12 +28,14 @@ param(
     [switch]$ExternalMenuControl
 )
 
-# Runs one unattended Halo 3 physical-contact transaction through SteamVR's
-# null driver. The user's exact SteamVR settings are copied before any change
-# and restored in finally, including launch or menu-control failures. SteamVR
-# stays stopped after restoration so a late null-driver process cannot rewrite
-# the restored file. This is a diagnostic tool only. A passing null-driver run
-# is never headset acceptance.
+# Runs one Halo 3 physical-contact transaction through SteamVR's null driver.
+# Visible external menu control is mandatory: MCC remembers the selected title,
+# so a fixed blind key sequence can enter another game even after returning to
+# the shell. The user's exact SteamVR settings are copied before any change and
+# restored in finally, including launch or menu-control failures. SteamVR stays
+# stopped after restoration so a late null-driver process cannot rewrite the
+# restored file. This is a diagnostic tool only. A passing null-driver run is
+# never headset acceptance.
 
 $ErrorActionPreference = 'Stop'
 
@@ -168,6 +170,16 @@ function Test-Halo3LevelLoadGateStalled([string]$Text) {
         $Text, 'Halo 3 level-load gate: holding install after ([0-9]+) ms')
     if ($matches.Count -eq 0) { return $false }
     return [int]$matches[$matches.Count - 1].Groups[1].Value -ge 45000
+}
+
+function Get-WrongSupportedTitle([string]$Text) {
+    $matches = [regex]::Matches(
+        $Text, 'Title adapter: detected supported title ([^\r\n]+)')
+    foreach ($match in $matches) {
+        $title = $match.Groups[1].Value
+        if ($title -cne 'Halo 3 (halo3.dll)') { return $title }
+    }
+    return $null
 }
 
 function Get-LatestContactStatusLine([string]$Text, [int]$Kind = -1) {
@@ -336,6 +348,11 @@ if (-not (Test-Path -LiteralPath $steamVrSettings -PathType Leaf)) {
 }
 if (-not (Test-Path -LiteralPath $vrMonitor -PathType Leaf)) {
     throw "SteamVR vrmonitor was not found: $vrMonitor"
+}
+if (-not $ExternalMenuControl) {
+    throw ('Blind MCC menu control is disabled because the shell remembers ' +
+        'the selected title. Re-run with -ExternalMenuControl and navigate ' +
+        'from visible Windows state.')
 }
 if (Get-Process $mccProcessName -ErrorAction SilentlyContinue) {
     throw 'Close MCC before starting unattended validation.'
@@ -630,6 +647,10 @@ public static class HaloMccVrContactInput {
 
         Wait-Until {
             $text = Get-NewLogText $runtimeLog $startedUtc
+            $wrongTitle = Get-WrongSupportedTitle $text
+            if ($wrongTitle) {
+                throw "Menu control launched $wrongTitle; only Halo 3 Forge is allowed."
+            }
             $text -match 'Title adapter: detected supported title Halo 3'
         } $MenuControlTimeoutSeconds 'Menu control did not start Halo 3.'
 
