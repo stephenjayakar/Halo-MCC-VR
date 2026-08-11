@@ -55,6 +55,7 @@ static std::atomic<bool> g_h3ResourceProbeInstallStarted{false};
 static std::atomic<unsigned> g_h3DecoratorBufferProbeSamples{0};
 static std::atomic<unsigned> g_h3DecoratorExactProbeSamples{0};
 static std::atomic<unsigned> g_h3DecoratorBlockProbeSamples{0};
+static std::atomic<bool> g_h3DecoratorLiveBlockScanStarted{false};
 #if HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE
 static DrawIndexedFn g_origDrawIndexed = nullptr;
 // The July 26 HUD-discovery detour performed synchronous GPU readback and
@@ -248,6 +249,152 @@ static void LogProbeResourceContext(const void* source, unsigned records)
     }
 }
 
+static bool IsProbeReadableProtection(DWORD protect)
+{
+    if ((protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
+        return false;
+    switch (protect & 0xFFu)
+    {
+    case PAGE_READONLY:
+    case PAGE_READWRITE:
+    case PAGE_WRITECOPY:
+    case PAGE_EXECUTE_READ:
+    case PAGE_EXECUTE_READWRITE:
+    case PAGE_EXECUTE_WRITECOPY:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Valhalla-only discovery filter. The bounds below come from the official H3EK
+// riverworld decorator resource and are deliberately not used by normal game
+// behavior. Run this while the 956-record placement stream is being uploaded:
+// the CPU-side 0x3c-byte decode blocks have already been released by the time a
+// post-load process scan can run.
+static void ScanProbeDecoratorBlocks(const void* source, unsigned records)
+{
+    if (records != 956u || !source)
+        return;
+    bool expected = false;
+    if (!g_h3DecoratorLiveBlockScanStarted.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel))
+        return;
+
+    MEMORY_BASIC_INFORMATION sourceInfo{};
+    if (VirtualQuery(source, &sourceInfo, sizeof(sourceInfo)) == 0 ||
+        !sourceInfo.AllocationBase)
+    {
+        LOG("H3DECORLIVE: source query failed");
+        return;
+    }
+
+    constexpr size_t kBlockBytes = 0x3Cu;
+    constexpr size_t kMaximumAllocationSpan = 2ull * 1024ull * 1024ull * 1024ull;
+    const uintptr_t allocation =
+        reinterpret_cast<uintptr_t>(sourceInfo.AllocationBase);
+    uintptr_t cursor = allocation;
+    size_t allocationSpan = 0;
+    size_t readableBytes = 0;
+    unsigned candidates = 0;
+    unsigned faults = 0;
+
+    while (allocationSpan < kMaximumAllocationSpan)
+    {
+        MEMORY_BASIC_INFORMATION info{};
+        if (VirtualQuery(reinterpret_cast<const void*>(cursor), &info,
+                         sizeof(info)) == 0 ||
+            reinterpret_cast<uintptr_t>(info.AllocationBase) != allocation)
+            break;
+
+        const uintptr_t base = reinterpret_cast<uintptr_t>(info.BaseAddress);
+        const size_t regionSize = info.RegionSize;
+        if (regionSize == 0 || base > UINTPTR_MAX - regionSize)
+            break;
+        const uintptr_t end = base + regionSize;
+        allocationSpan = static_cast<size_t>(end - allocation);
+
+        if (info.State == MEM_COMMIT && IsProbeReadableProtection(info.Protect) &&
+            regionSize >= kBlockBytes)
+        {
+            readableBytes += regionSize;
+            __try
+            {
+                const uintptr_t aligned = (base + 3u) & ~uintptr_t{3u};
+                for (uintptr_t address = aligned;
+                     address <= end - kBlockBytes; address += 4u)
+                {
+                    const uint8_t* block = reinterpret_cast<const uint8_t*>(address);
+                    uint16_t count = 0;
+                    uint32_t start = 0;
+                    float minimum[3]{};
+                    float step[3]{};
+                    std::memcpy(&count, block, sizeof(count));
+                    if (count == 0u || count > records || block[2] >= 11u ||
+                        block[3] >= 11u)
+                        continue;
+                    std::memcpy(&start, block + 4u, sizeof(start));
+                    if (start > records || count > records - start)
+                        continue;
+                    std::memcpy(minimum, block + 8u, sizeof(minimum));
+                    std::memcpy(step, block + 0x18u, sizeof(step));
+                    if (!std::isfinite(minimum[0]) ||
+                        !std::isfinite(minimum[1]) ||
+                        !std::isfinite(minimum[2]) ||
+                        !std::isfinite(step[0]) ||
+                        !std::isfinite(step[1]) ||
+                        !std::isfinite(step[2]) ||
+                        minimum[0] < 40.0f || minimum[0] > 110.0f ||
+                        minimum[1] < -170.0f || minimum[1] > -35.0f ||
+                        minimum[2] < -10.0f || minimum[2] > 10.0f ||
+                        step[0] < 1.0e-7f || step[0] > 0.01f ||
+                        step[1] < 1.0e-7f || step[1] > 0.01f ||
+                        step[2] < 1.0e-7f || step[2] > 0.01f)
+                        continue;
+                    const float maximum[3] = {
+                        minimum[0] + 65535.0f * step[0],
+                        minimum[1] + 65535.0f * step[1],
+                        minimum[2] + 65535.0f * step[2],
+                    };
+                    if (maximum[0] < 40.0f || maximum[0] > 110.0f ||
+                        maximum[1] < -170.0f || maximum[1] > -35.0f ||
+                        maximum[2] < -10.0f || maximum[2] > 10.0f)
+                        continue;
+
+                    uint32_t tail30 = 0;
+                    uint32_t tail34 = 0;
+                    std::memcpy(&tail30, block + 0x30u, sizeof(tail30));
+                    std::memcpy(&tail34, block + 0x34u, sizeof(tail34));
+                    ++candidates;
+                    if (candidates <= 256u)
+                    {
+                        LOG("H3DECORLIVEBLOCK[%u]: address=%p count=%u set=%u "
+                            "buffer=%u start=%u min=%.6f,%.6f,%.6f "
+                            "step=%.9f,%.9f,%.9f max=%.6f,%.6f,%.6f "
+                            "tail30=0x%08X tail34=0x%08X",
+                            candidates, block, count,
+                            static_cast<unsigned>(block[2]),
+                            static_cast<unsigned>(block[3]), start,
+                            minimum[0], minimum[1], minimum[2],
+                            step[0], step[1], step[2], maximum[0], maximum[1],
+                            maximum[2], tail30, tail34);
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                ++faults;
+            }
+        }
+        cursor = end;
+    }
+    LOG("H3DECORLIVE: allocation=%p span=0x%llX readable=0x%llX "
+        "candidates=%u faults=%u",
+        sourceInfo.AllocationBase,
+        static_cast<unsigned long long>(allocationSpan),
+        static_cast<unsigned long long>(readableBytes), candidates, faults);
+}
+
 static HRESULT STDMETHODCALLTYPE CreateBufferHook(
     ID3D11Device* device, const D3D11_BUFFER_DESC* desc,
     const D3D11_SUBRESOURCE_DATA* initialData, ID3D11Buffer** buffer)
@@ -354,6 +501,7 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
                     static_cast<unsigned long long>(halo3Rva),
                     static_cast<unsigned long long>(mccRva), stack, head);
                 LogProbeResourceContext(initialData->pSysMem, records);
+                ScanProbeDecoratorBlocks(initialData->pSysMem, records);
             }
         }
     }
