@@ -127,6 +127,8 @@ struct H3ProbeBufferMetadata
     UINT bindFlags = 0;
     UINT miscFlags = 0;
     UINT structureStride = 0;
+    uintptr_t halo3CreatorRva = UINTPTR_MAX;
+    uintptr_t mccCreatorRva = UINTPTR_MAX;
     bool decoratorPlacement = false;
 };
 
@@ -200,7 +202,8 @@ static unsigned H3ProbeBufferHash(ID3D11Buffer* buffer)
 
 static void H3ProbeRegisterBuffer(
     ID3D11Buffer* buffer, const D3D11_BUFFER_DESC* desc,
-    const D3D11_SUBRESOURCE_DATA* initialData, bool decoratorPlacement)
+    const D3D11_SUBRESOURCE_DATA* initialData, bool decoratorPlacement,
+    uintptr_t halo3CreatorRva, uintptr_t mccCreatorRva)
 {
     if (!buffer || !desc)
         return;
@@ -220,6 +223,8 @@ static void H3ProbeRegisterBuffer(
             entry.bindFlags = desc->BindFlags;
             entry.miscFlags = desc->MiscFlags;
             entry.structureStride = desc->StructureByteStride;
+            entry.halo3CreatorRva = halo3CreatorRva;
+            entry.mccCreatorRva = mccCreatorRva;
             entry.decoratorPlacement = decoratorPlacement;
             // Publish only after all plain fields are populated.  Readers only
             // consume metadata after an acquire load returns the exact key.
@@ -335,12 +340,15 @@ static HRESULT STDMETHODCALLTYPE H3ProbeCreateInputLayoutHook(
 static HRESULT H3ProbeCreateBuffer(
     ID3D11Device* device, const D3D11_BUFFER_DESC* desc,
     const D3D11_SUBRESOURCE_DATA* initialData, ID3D11Buffer** buffer,
-    bool decoratorPlacement)
+    bool decoratorPlacement, uintptr_t halo3CreatorRva,
+    uintptr_t mccCreatorRva)
 {
     const HRESULT result =
         g_origCreateBuffer(device, desc, initialData, buffer);
     if (SUCCEEDED(result) && buffer && *buffer)
-        H3ProbeRegisterBuffer(*buffer, desc, initialData, decoratorPlacement);
+        H3ProbeRegisterBuffer(
+            *buffer, desc, initialData, decoratorPlacement,
+            halo3CreatorRva, mccCreatorRva);
     return result;
 }
 
@@ -529,12 +537,14 @@ static void H3ProbeLogBuffer(
     }
     LOG("H3DECORDRAW%s[%u]: slot=%u buffer=%p bytes=%u bind=0x%X misc=0x%X "
         "structureStride=%u stride=%u offset=%u placement=%d source=%p "
-        "readable=%d head="
+        "creatorHalo3Rva=0x%llX creatorMccRva=0x%llX readable=%d head="
         "%08X,%08X,%08X,%08X|%08X,%08X,%08X,%08X|"
         "%08X,%08X,%08X,%08X|%08X,%08X,%08X,%08X",
         kind, draw, slot, buffer, metadata->byteWidth, metadata->bindFlags,
         metadata->miscFlags, metadata->structureStride, stride, offset,
         metadata->decoratorPlacement ? 1 : 0, metadata->source,
+        static_cast<unsigned long long>(metadata->halo3CreatorRva),
+        static_cast<unsigned long long>(metadata->mccCreatorRva),
         readable ? 1 : 0, words[0], words[1], words[2], words[3],
         words[4], words[5], words[6], words[7], words[8], words[9],
         words[10], words[11], words[12], words[13], words[14], words[15]);
@@ -1242,15 +1252,16 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
 {
     TryInstallH3ResourceFixupProbe();
     bool decoratorPlacement = false;
+    const void* caller = _ReturnAddress();
+    const uintptr_t halo3Rva = ProbeModuleRva(
+        caller, GetModuleHandleW(L"halo3.dll"));
+    const uintptr_t mccRva = ProbeModuleRva(
+        caller, GetModuleHandleW(nullptr));
     if (desc && initialData && initialData->pSysMem &&
         desc->ByteWidth >= 16u * 32u && (desc->ByteWidth % 16u) == 0)
     {
         const uint8_t* bytes = static_cast<const uint8_t*>(initialData->pSysMem);
         const unsigned records = desc->ByteWidth / 16u;
-        const void* caller = _ReturnAddress();
-        const uintptr_t halo3Rva = ProbeModuleRva(
-            caller, GetModuleHandleW(L"halo3.dll"));
-        const uintptr_t mccRva = ProbeModuleRva(caller, GetModuleHandleW(nullptr));
         // Official H3EK resource packing gives these invariant suffixes for
         // Valhalla's first four rock placements. XYZ occupies the six bytes
         // before each suffix and depends on the runtime block bounds. Matching
@@ -1300,7 +1311,8 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
 
         if ((desc->BindFlags & D3D11_BIND_VERTEX_BUFFER) == 0)
             return H3ProbeCreateBuffer(
-                device, desc, initialData, buffer, decoratorPlacement);
+                device, desc, initialData, buffer, decoratorPlacement,
+                halo3Rva, mccRva);
 
         const unsigned sampledRecords = std::min(records, 4096u);
         unsigned smallPartIndices = 0;
@@ -1422,7 +1434,8 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
         }
     }
     return H3ProbeCreateBuffer(
-        device, desc, initialData, buffer, decoratorPlacement);
+        device, desc, initialData, buffer, decoratorPlacement,
+        halo3Rva, mccRva);
 }
 
 // --- Desktop-window fit (config.fit_desktop_window) -----------------------
