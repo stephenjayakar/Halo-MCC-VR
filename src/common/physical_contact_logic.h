@@ -1964,6 +1964,16 @@ inline bool PhysicalContactMovableKind(uint8_t kind)
     return kind <= 4 || kind == 11 || kind == 12 || kind == 13;
 }
 
+inline bool PhysicalContactUseExactBodyPointImpulse(
+    uint32_t targetShapeSource, int32_t rigidBodyIndex)
+{
+    // Shape source 3 is the H3EK-authored animated multi-body path. The
+    // physics-model reader admits at most 32 bodies, so keep the command in
+    // that same fixed domain.
+    return targetShapeSource == 3 && rigidBodyIndex >= 0 &&
+        rigidBodyIndex < 32;
+}
+
 struct PhysicalContactDebugTargetRank
 {
     bool valid = false;

@@ -6595,7 +6595,9 @@ namespace
     std::atomic<float> g_halo3ContactTangentImpulse{0.0f};
     std::atomic<int32_t> g_halo3ContactTargetHandle{-1};
     std::atomic<uint32_t> g_halo3ContactTargetKind{0xFFFFFFFFu};
+    std::atomic<int32_t> g_halo3ContactTargetBodyIndex{-1};
     std::atomic<int32_t> g_halo3ContactCommandHandle{-1};
+    std::atomic<int32_t> g_halo3ContactCommandBodyIndex{-1};
     std::atomic<float> g_halo3ContactCommandVelocity[3]{};
     std::atomic<uint32_t> g_halo3ContactCommandGeneration{0};
     std::atomic<uint64_t> g_halo3ContactCommandSampleMs{0};
@@ -7687,9 +7689,9 @@ namespace
         return objectData != nullptr;
     }
 
-    bool Halo3ContactMassForObjectData(
-        const unsigned char* objectData, void*& component,
-        int32_t& bodyIndex, float& massKilograms,
+    bool Halo3ContactMassForObjectBodyData(
+        const unsigned char* objectData, int32_t requestedBodyIndex,
+        void*& component, int32_t& bodyIndex, float& massKilograms,
         uint8_t* motionType = nullptr)
     {
         component = nullptr;
@@ -7713,9 +7715,10 @@ namespace
             static_cast<size_t>(componentIndex) * 0xC0;
         const int32_t count = *reinterpret_cast<const int32_t*>(
             resolved + 0x28);
-        const int32_t resolvedBodyIndex =
-            static_cast<int32_t>(*reinterpret_cast<const int8_t*>(
-                resolved + 0x0C));
+        const int32_t rootBodyIndex = static_cast<int32_t>(
+            *reinterpret_cast<const int8_t*>(resolved + 0x0C));
+        const int32_t resolvedBodyIndex = requestedBodyIndex >= 0
+            ? requestedBodyIndex : rootBodyIndex;
         auto* bodyRecords = *reinterpret_cast<unsigned char**>(
             resolved + 0x20);
         if (!bodyRecords || count <= 0 || count > 1024 ||
@@ -7742,6 +7745,16 @@ namespace
         if (motionType)
             *motionType = resolvedMotionType;
         return true;
+    }
+
+    bool Halo3ContactMassForObjectData(
+        const unsigned char* objectData, void*& component,
+        int32_t& bodyIndex, float& massKilograms,
+        uint8_t* motionType = nullptr)
+    {
+        return Halo3ContactMassForObjectBodyData(
+            objectData, -1, component, bodyIndex, massKilograms,
+            motionType);
     }
 
     PhysicalContactTransform Halo3ContactObjectTransform(
@@ -10518,6 +10531,8 @@ namespace
         g_halo3ContactTargetHandle.store(-1, std::memory_order_relaxed);
         g_halo3ContactTargetKind.store(
             0xFFFFFFFFu, std::memory_order_relaxed);
+        g_halo3ContactTargetBodyIndex.store(-1, std::memory_order_relaxed);
+        g_halo3ContactCommandBodyIndex.store(-1, std::memory_order_relaxed);
         g_halo3ContactNativeSamples.store(0, std::memory_order_relaxed);
         g_halo3ContactWeaponShapeSource.store(0, std::memory_order_relaxed);
         g_halo3ContactTargetShapeSource.store(0, std::memory_order_relaxed);
@@ -10572,6 +10587,9 @@ namespace
             const uint64_t nowMs = GetTickCount64();
             const int32_t handle =
                 g_halo3ContactCommandHandle.load(std::memory_order_relaxed);
+            const int32_t commandBodyIndex =
+                g_halo3ContactCommandBodyIndex.load(
+                    std::memory_order_relaxed);
             const int32_t unitHandle =
                 g_halo3ContactCommandUnitHandle.load(std::memory_order_relaxed);
             const int32_t weaponHandle =
@@ -10668,9 +10686,11 @@ namespace
                                     float targetMass = 0.0f;
                                     if (Halo3ContactObjectDataForHandle(
                                             handle, targetData) &&
-                                        Halo3ContactMassForObjectData(
-                                            targetData, component, bodyIndex,
-                                            targetMass))
+                                        PhysicalContactUseExactBodyPointImpulse(
+                                            3, commandBodyIndex) &&
+                                        Halo3ContactMassForObjectBodyData(
+                                            targetData, commandBodyIndex,
+                                            component, bodyIndex, targetMass))
                                     {
                                         g_halo3ComponentApplyPointImpulse(
                                             component, bodyIndex, point,
@@ -12881,6 +12901,7 @@ namespace
             PhysicalContactTransform closestTargetTransform{};
             uint32_t closestTargetShapeSource = 0;
             uint32_t closestTargetTriangleCount = 0;
+            int32_t closestTargetBodyIndex = -1;
             uint32_t eligibleObjects = 0;
             uint32_t detailedTargetCandidates = 0;
             uint32_t fallbackTargetCandidates = 0;
@@ -13030,6 +13051,7 @@ namespace
                 PhysicalContactConvexShape authoredTargetShape{};
                 PhysicalContactTransform authoredTargetTransform{};
                 uint32_t targetShapeSource = 0;
+                int32_t targetBodyIndex = -1;
                 PhysicalContactCompoundShape targetShape{};
                 PhysicalContactTriangleMesh targetTriangleMesh{};
                 uint32_t targetTriangleCount = 0;
@@ -13159,6 +13181,7 @@ namespace
                     authoredWeaponShape = animated.weaponShape;
                     authoredTargetShape = animated.targetShape;
                     authoredTargetTransform = animated.targetTransform;
+                    targetBodyIndex = animated.rigidBodyIndex;
                 }
                 ++eligibleObjects;
                 if (!authored.hit ||
@@ -13181,6 +13204,7 @@ namespace
                 closestTargetTransform = authoredTargetTransform;
                 closestTargetShapeSource = targetShapeSource;
                 closestTargetTriangleCount = targetTriangleCount;
+                closestTargetBodyIndex = targetBodyIndex;
                 if (targetShapeSource == 3)
                     g_halo3ContactAnimatedBodyHits.fetch_add(
                         1, std::memory_order_relaxed);
@@ -13547,12 +13571,19 @@ namespace
             float weaponMass = 0.0f;
             float targetMass = 0.0f;
             uint8_t targetMotionType = 0;
+            const bool exactBodyPointImpulse =
+                PhysicalContactUseExactBodyPointImpulse(
+                    closestTargetShapeSource, closestTargetBodyIndex);
+            const bool targetMassResolved = exactBodyPointImpulse
+                ? Halo3ContactMassForObjectBodyData(
+                      closestData, closestTargetBodyIndex, targetComponent,
+                      targetBodyIndex, targetMass, &targetMotionType)
+                : Halo3ContactMassForObjectData(
+                      closestData, targetComponent, targetBodyIndex,
+                      targetMass, &targetMotionType);
             const bool haveNativeMasses = Halo3ContactMassForObjectData(
                     weaponData, weaponComponent, weaponBodyIndex,
-                    weaponMass) &&
-                Halo3ContactMassForObjectData(
-                    closestData, targetComponent, targetBodyIndex,
-                    targetMass, &targetMotionType);
+                    weaponMass) && targetMassResolved;
             const bool targetIsDynamic = haveNativeMasses &&
                 PhysicalContactMotionTypeIsDynamic(targetMotionType);
             const PhysicalContactConstraintImpulse constraintImpulse =
@@ -13583,24 +13614,36 @@ namespace
                 closestHandle, std::memory_order_relaxed);
             g_halo3ContactTargetKind.store(
                 targetKind, std::memory_order_relaxed);
+            g_halo3ContactTargetBodyIndex.store(
+                haveNativeMasses ? targetBodyIndex : -1,
+                std::memory_order_relaxed);
             if (constraintImpulse.apply)
             {
                 // The controlled Forge split moved the exact same 2.019 kg
                 // loose weapon through object_set_velocities after the point-
-                // impulse path repeatedly failed under floor load. Publish an
-                // authored-mass velocity change for every sustained contact.
-                // Halo keeps the body's angular velocity because the native
-                // setter receives a null angular pointer. Native melee remains
-                // an independent command and is unchanged.
-                worldVelocity = {
-                    targetLinear[0], targetLinear[1], targetLinear[2]};
-                worldVelocity = worldVelocity +
-                    PhysicalContactTargetDeltaVelocity(
-                        constraintImpulse, targetMass);
+                // impulse path repeatedly failed under floor load. Single-body
+                // props therefore retain the authored-mass velocity change.
+                // An animated multi-body target is different: publish the
+                // bounded physical impulse to the exact body selected by the
+                // authored sweep so Halo applies that limb's mass and inertia.
+                // Native melee remains independent and unchanged.
+                if (exactBodyPointImpulse)
+                    worldVelocity = constraintImpulse.worldImpulse;
+                else
+                {
+                    worldVelocity = {
+                        targetLinear[0], targetLinear[1], targetLinear[2]};
+                    worldVelocity = worldVelocity +
+                        PhysicalContactTargetDeltaVelocity(
+                            constraintImpulse, targetMass);
+                }
                 if (PhysicalContactFinite(worldVelocity))
                 {
-                    commandFlags |= kHalo3ContactCommandImpulse;
-                    if (action == PhysicalContactAction::ImpulseOnly)
+                    commandFlags |= exactBodyPointImpulse
+                        ? kHalo3ContactCommandPointImpulse
+                        : kHalo3ContactCommandImpulse;
+                    if (!exactBodyPointImpulse &&
+                        action == PhysicalContactAction::ImpulseOnly)
                     {
                         g_halo3ContactReleaseLatch.Arm(
                             closestHandle, closest.point,
@@ -13626,6 +13669,9 @@ namespace
                     requestMelee);
                 g_halo3ContactCommandHandle.store(
                     closestHandle, std::memory_order_relaxed);
+                g_halo3ContactCommandBodyIndex.store(
+                    exactBodyPointImpulse ? targetBodyIndex : -1,
+                    std::memory_order_relaxed);
                 g_halo3ContactCommandUnitHandle.store(
                     unitHandle, std::memory_order_relaxed);
                 g_halo3ContactCommandWeaponHandle.store(
@@ -13708,7 +13754,7 @@ namespace
             "command=%llu applied=%llu commandStatus=%u meleeStatus=%u "
             "damage=0x%08X response=0x%08X rawMaterial=%u material=%u "
             "target=0x%08X kind=%u weaponMass=%.3f targetMass=%.3f "
-            "targetMotion=%u "
+            "targetMotion=%u targetBody=%d commandBody=%d "
             "depth=%.4fm normalImpulse=%.5f tangentImpulse=%.5f "
             "contactPoint=(%.4f %.4f %.4f) contactHaptic=%.3f "
             "lastImpulse=(%.5f %.5f %.5f) "
@@ -13762,6 +13808,8 @@ namespace
             g_halo3ContactWeaponMass.load(std::memory_order_relaxed),
             g_halo3ContactTargetMass.load(std::memory_order_relaxed),
             g_halo3ContactTargetMotionType.load(std::memory_order_relaxed),
+            g_halo3ContactTargetBodyIndex.load(std::memory_order_relaxed),
+            g_halo3ContactCommandBodyIndex.load(std::memory_order_relaxed),
             g_halo3ContactPenetrationMeters.load(
                 std::memory_order_relaxed),
             g_halo3ContactNormalImpulse.load(std::memory_order_relaxed),

@@ -9445,10 +9445,17 @@ int main()
               PhysicalContactMovableKind(11) &&
               !PhysicalContactMovableKind(6) &&
               !PhysicalContactMovableKind(7) &&
+              PhysicalContactUseExactBodyPointImpulse(3, 0) &&
+              PhysicalContactUseExactBodyPointImpulse(3, 31) &&
+              !PhysicalContactUseExactBodyPointImpulse(3, -1) &&
+              !PhysicalContactUseExactBodyPointImpulse(3, 32) &&
+              !PhysicalContactUseExactBodyPointImpulse(1, 4) &&
+              !PhysicalContactUseExactBodyPointImpulse(2, 4) &&
               PhysicalContactImpulseDeltaMetersPerSecond(0.10f) == 0.05f &&
               PhysicalContactImpulseDeltaMetersPerSecond(20.0f) == 1.5f,
-            "Capsule fallback pushes movable rigid-body kinds only and clamps "
-            "velocity-scaled impulse strength");
+            "Movable-kind filtering and animated exact-body transport stay "
+            "inside their proven domains, and velocity response remains "
+            "clamped");
 
         const PhysicalContactDebugTargetRank settledWeapon =
             PhysicalContactRankDebugTarget(2, 2.0f, 0.02f, 100.0f, false);

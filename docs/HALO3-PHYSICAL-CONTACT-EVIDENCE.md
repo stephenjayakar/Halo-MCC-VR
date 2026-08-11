@@ -1334,6 +1334,30 @@ spike rejection remain unchanged. Pure tests cover enemy tangential hits,
 stationary weapons, sustained contact, and unchanged vehicle/prop behavior.
 Headset acceptance remains pending.
 
+### Exact animated-body impulse target
+
+The same `b154546` headset run recorded 865 exact animated-body hits, while
+the user reported that physical interaction with bodies still felt poor. Code
+review found a deterministic mismatch after collision: the animated sweep
+returned `rigidBodyIndex` for the exact authored head, torso, arm, pelvis, or
+leg body, but the closest-hit record discarded that index. Mass lookup and the
+simulation command then selected the component root body at `+0x0C` instead.
+Thus collision could occur on one visible limb while response was applied to a
+different rigid body.
+
+The replacement carries the selected index through the bounded command. It
+validates that index against the runtime component body count, reads that
+body's wrapper, inverse mass, and motion type, and calls the already proven
+`havok_component_apply_point_impulse` with the same exact body index and
+surface point. This path is used only for target shape source `3`, the fixed
+H3EK-authored animated multi-body sweep, and only for body indices `0..31`.
+Single-body props and vehicles keep their headset-proven whole-object velocity
+path. Dynamic ragdoll bodies receive their own mass/inertia response;
+keyframed living bodies remain non-movable while their independent native
+melee path continues. Telemetry now reports `targetBody` and `commandBody`.
+Pure tests cover the exact-body source/index boundary. Runtime and headset
+acceptance remain pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
