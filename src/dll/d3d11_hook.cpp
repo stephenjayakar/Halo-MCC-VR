@@ -109,6 +109,12 @@ static std::atomic<bool> g_h3DecoratorLiveBlockScanStarted{false};
 static std::atomic<bool> g_h3DecoratorDrawProbeEnabled{false};
 static bool g_h3DecoratorDiagnosticEnabled = false;
 static bool g_h3DecoratorContactCaptureEnabled = false;
+constexpr uint32_t kH3DecoratorSelfTestDisabled = 0u;
+constexpr uint32_t kH3DecoratorSelfTestPassed = 1u;
+constexpr uint32_t kH3DecoratorSelfTestFailed = 2u;
+constexpr uint32_t kH3DecoratorSelfTestWaiting = 3u;
+static std::atomic<uint32_t> g_h3DecoratorSelfTestState{0};
+static std::atomic<uint32_t> g_h3DecoratorSelfTestAttempts{0};
 constexpr bool kEnableH3DecoratorDrawFamilyProbe = true;
 // Candidate b223294 proved that copying each bound vertex constant buffer in
 // decorator draw callbacks can make the null-driver wall transaction miss its
@@ -1024,13 +1030,16 @@ size_t D3D_Halo3DecoratorWallPlanes(
                 std::fabs(draw.positionMinimum.z + draw.positionSize.z))};
         const float maximumTargetRadius =
             PhysicalContactLength(localMaximum) * std::sqrt(2.10f);
+        const bool selfTestPending =
+            g_h3DecoratorSelfTestState.load(std::memory_order_acquire) ==
+            kH3DecoratorSelfTestWaiting;
         if (!PhysicalContactFinite(blockMaximum) ||
             !std::isfinite(maximumTargetRadius) ||
-            !PhysicalContactSegmentIntersectsExpandedAabb(
+            (!selfTestPending && !PhysicalContactSegmentIntersectsExpandedAabb(
                 previousWeapon.position, currentWeapon.position,
                 draw.blockMinimum, blockMaximum,
                 weaponRadius + maximumTargetRadius +
-                    surfaceRadiusWorldUnits + clearanceWorldUnits))
+                    surfaceRadiusWorldUnits + clearanceWorldUnits)))
             continue;
         const size_t geometryOffset =
             static_cast<size_t>(draw.startVertex) * 20u;
@@ -1076,6 +1085,55 @@ size_t D3D_Halo3DecoratorWallPlanes(
                 continue;
             const float targetRadius = target.groups[0].boundRadius *
                 targetTransform.scale;
+            if (selfTestPending &&
+                g_h3DecoratorSelfTestState.load(
+                    std::memory_order_relaxed) ==
+                    kH3DecoratorSelfTestWaiting)
+            {
+                const uint32_t attempt =
+                    g_h3DecoratorSelfTestAttempts.fetch_add(
+                        1u, std::memory_order_relaxed) + 1u;
+                if (attempt <= 8u)
+                {
+                    const PhysicalContactVec3 targetCentre =
+                        PhysicalContactTransformPoint(
+                            targetTransform, target.groups[0].centre);
+                    const PhysicalContactVec3 axes[3] = {
+                        targetTransform.forward, targetTransform.left,
+                        targetTransform.up};
+                    const float distance = std::max(
+                        weaponRadius + targetRadius +
+                            surfaceRadiusWorldUnits + clearanceWorldUnits,
+                        stepWorldUnits * 4.0f);
+                    for (const PhysicalContactVec3 rawAxis : axes)
+                    {
+                        const PhysicalContactVec3 axis =
+                            PhysicalContactNormalize(rawAxis, {1.0f, 0.0f, 0.0f});
+                        PhysicalContactTransform from = currentWeapon;
+                        PhysicalContactTransform to = currentWeapon;
+                        from.position = targetCentre - axis * distance;
+                        to.position = targetCentre + axis * distance;
+                        const float selfTestStep = std::max(
+                            stepWorldUnits, distance * (2.0f / 128.0f));
+                        if (PhysicalContactSweepTriangleMeshes(
+                                weapon, from, to, target, targetTransform,
+                                selfTestStep, surfaceRadiusWorldUnits).hit)
+                        {
+                            g_h3DecoratorSelfTestState.store(
+                                kH3DecoratorSelfTestPassed,
+                                std::memory_order_release);
+                            break;
+                        }
+                    }
+                }
+                if (attempt >= 8u &&
+                    g_h3DecoratorSelfTestState.load(
+                        std::memory_order_relaxed) ==
+                        kH3DecoratorSelfTestWaiting)
+                    g_h3DecoratorSelfTestState.store(
+                        kH3DecoratorSelfTestFailed,
+                        std::memory_order_release);
+            }
             const float broadphaseRadius = weaponRadius + targetRadius +
                 surfaceRadiusWorldUnits + clearanceWorldUnits;
             const PhysicalContactVec3 targetCentre =
@@ -1117,6 +1175,11 @@ size_t D3D_Halo3DecoratorWallPlanes(
         }
     }
     return planeCount;
+}
+
+uint32_t D3D_Halo3DecoratorSelfTestState()
+{
+    return g_h3DecoratorSelfTestState.load(std::memory_order_acquire);
 }
 
 static void STDMETHODCALLTYPE H3ProbeDrawIndexedInstancedHook(
@@ -3273,6 +3336,16 @@ bool InstallD3D11Hooks()
     g_h3DecoratorDiagnosticEnabled = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_DECORATOR_BUFFER_PROBE",
         decoratorProbeValue, 2) > 0;
+    wchar_t decoratorSelfTestValue[2]{};
+    const bool decoratorSelfTestEnabled = GetEnvironmentVariableW(
+        L"HALOMCCVR_H3_CONTACT_DEBUG_WALL",
+        decoratorSelfTestValue, 2) > 0;
+    g_h3DecoratorSelfTestState.store(
+        decoratorSelfTestEnabled ? kH3DecoratorSelfTestWaiting
+                                 : kH3DecoratorSelfTestDisabled,
+        std::memory_order_release);
+    if (decoratorSelfTestEnabled)
+        LOG("H3 decorator captured-mesh self-test enabled by wall diagnostic");
     const bool decoratorCaptureRequested =
         g_config.physical_weapon_contact || g_h3DecoratorDiagnosticEnabled;
     if (decoratorCaptureRequested)
