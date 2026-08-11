@@ -49,6 +49,7 @@ static OMSetRenderTargetsFn g_origOMSetRenderTargets = nullptr;
 static CreateBufferFn g_origCreateBuffer = nullptr;
 static std::atomic<unsigned> g_h3DecoratorBufferProbeSamples{0};
 static std::atomic<unsigned> g_h3DecoratorExactProbeSamples{0};
+static std::atomic<unsigned> g_h3DecoratorBlockProbeSamples{0};
 #if HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE
 static DrawIndexedFn g_origDrawIndexed = nullptr;
 // The July 26 HUD-discovery detour performed synchronous GPU readback and
@@ -90,6 +91,24 @@ static void FormatProbeRecords(
     }
 }
 
+static uintptr_t ProbeModuleRva(const void* address, HMODULE module)
+{
+    if (!address || !module)
+        return UINTPTR_MAX;
+    const auto* base = reinterpret_cast<const uint8_t*>(module);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0)
+        return UINTPTR_MAX;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+        base + static_cast<size_t>(dos->e_lfanew));
+    if (nt->Signature != IMAGE_NT_SIGNATURE)
+        return UINTPTR_MAX;
+    const uintptr_t value = reinterpret_cast<uintptr_t>(address);
+    const uintptr_t begin = reinterpret_cast<uintptr_t>(base);
+    const uintptr_t end = begin + nt->OptionalHeader.SizeOfImage;
+    return value >= begin && value < end ? value - begin : UINTPTR_MAX;
+}
+
 static HRESULT STDMETHODCALLTYPE CreateBufferHook(
     ID3D11Device* device, const D3D11_BUFFER_DESC* desc,
     const D3D11_SUBRESOURCE_DATA* initialData, ID3D11Buffer** buffer)
@@ -99,6 +118,10 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
     {
         const uint8_t* bytes = static_cast<const uint8_t*>(initialData->pSysMem);
         const unsigned records = desc->ByteWidth / 16u;
+        const void* caller = _ReturnAddress();
+        const uintptr_t halo3Rva = ProbeModuleRva(
+            caller, GetModuleHandleW(L"halo3.dll"));
+        const uintptr_t mccRva = ProbeModuleRva(caller, GetModuleHandleW(nullptr));
         // Official H3EK resource packing gives these invariant suffixes for
         // Valhalla's first four rock placements. XYZ occupies the six bytes
         // before each suffix and depends on the runtime block bounds. Matching
@@ -135,11 +158,14 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
                 FormatProbeRecords(
                     bytes, desc->ByteWidth, firstRecord, around, sizeof(around));
                 LOG("H3DECOREXACT[%u]: suffix=%u record=%u/%u bytes=%u "
-                    "usage=%u bind=0x%X cpu=0x%X misc=0x%X stride=%u around=%s",
+                    "usage=%u bind=0x%X cpu=0x%X misc=0x%X stride=%u "
+                    "halo3Rva=0x%llX mccRva=0x%llX around=%s",
                     sample, matchedSuffix, record, records, desc->ByteWidth,
                     static_cast<unsigned>(desc->Usage), desc->BindFlags,
                     desc->CPUAccessFlags, desc->MiscFlags,
-                    desc->StructureByteStride, around);
+                    desc->StructureByteStride,
+                    static_cast<unsigned long long>(halo3Rva),
+                    static_cast<unsigned long long>(mccRva), around);
             }
         }
 
@@ -177,12 +203,85 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
                 FormatProbeRecords(bytes, desc->ByteWidth, 0u, head, sizeof(head));
                 LOG("H3DECORBUF[%u]: bytes=%u records=%u smallPart=%u/%u "
                     "nonzeroPart=%u nonzeroColor=%u usage=%u bind=0x%X cpu=0x%X "
-                    "misc=0x%X stride=%u head=%s",
+                    "misc=0x%X stride=%u halo3Rva=0x%llX mccRva=0x%llX head=%s",
                     sample, desc->ByteWidth, records, smallPartIndices,
                     sampledRecords, nonzeroPartIndices, nonzeroColors,
                     static_cast<unsigned>(desc->Usage), desc->BindFlags,
                     desc->CPUAccessFlags, desc->MiscFlags, desc->StructureByteStride,
-                    head);
+                    static_cast<unsigned long long>(halo3Rva),
+                    static_cast<unsigned long long>(mccRva), head);
+            }
+        }
+    }
+
+    if (desc && initialData && initialData->pSysMem &&
+        desc->ByteWidth >= 0x3Cu * 4u && (desc->ByteWidth % 0x3Cu) == 0)
+    {
+        const uint8_t* bytes = static_cast<const uint8_t*>(initialData->pSysMem);
+        const unsigned blocks = desc->ByteWidth / 0x3Cu;
+        const unsigned sampledBlocks = std::min(blocks, 1024u);
+        unsigned validBlocks = 0;
+        for (unsigned i = 0; i < sampledBlocks; ++i)
+        {
+            const uint8_t* block = bytes + static_cast<size_t>(i) * 0x3Cu;
+            uint16_t count = 0;
+            uint32_t start = 0;
+            float minimum[3]{};
+            float step[3]{};
+            std::memcpy(&count, block, sizeof(count));
+            std::memcpy(&start, block + 4u, sizeof(start));
+            std::memcpy(minimum, block + 8u, sizeof(minimum));
+            std::memcpy(step, block + 0x18u, sizeof(step));
+            const bool finite =
+                std::isfinite(minimum[0]) && std::isfinite(minimum[1]) &&
+                std::isfinite(minimum[2]) && std::isfinite(step[0]) &&
+                std::isfinite(step[1]) && std::isfinite(step[2]);
+            if (count > 0u && count <= 4096u && block[2] < 64u &&
+                start < (1u << 24u) && finite &&
+                std::fabs(minimum[0]) < 100000.0f &&
+                std::fabs(minimum[1]) < 100000.0f &&
+                std::fabs(minimum[2]) < 100000.0f &&
+                step[0] > 0.0f && step[0] < 1000.0f &&
+                step[1] > 0.0f && step[1] < 1000.0f &&
+                step[2] > 0.0f && step[2] < 1000.0f)
+                ++validBlocks;
+        }
+        if (sampledBlocks >= 4u &&
+            validBlocks * 100u >= sampledBlocks * 90u)
+        {
+            const unsigned sample =
+                g_h3DecoratorBlockProbeSamples.fetch_add(
+                    1, std::memory_order_relaxed) + 1u;
+            if (sample <= 32u)
+            {
+                const uint8_t* first = bytes;
+                uint16_t count = 0;
+                uint32_t start = 0;
+                float minimum[3]{};
+                float step[3]{};
+                std::memcpy(&count, first, sizeof(count));
+                std::memcpy(&start, first + 4u, sizeof(start));
+                std::memcpy(minimum, first + 8u, sizeof(minimum));
+                std::memcpy(step, first + 0x18u, sizeof(step));
+                const void* caller = _ReturnAddress();
+                const uintptr_t halo3Rva = ProbeModuleRva(
+                    caller, GetModuleHandleW(L"halo3.dll"));
+                const uintptr_t mccRva = ProbeModuleRva(
+                    caller, GetModuleHandleW(nullptr));
+                LOG("H3DECORBLOCK[%u]: bytes=%u blocks=%u valid=%u/%u usage=%u "
+                    "bind=0x%X cpu=0x%X misc=0x%X stride=%u halo3Rva=0x%llX "
+                    "mccRva=0x%llX first=(count=%u set=%u remap=%u start=%u "
+                    "min=%.6f,%.6f,%.6f step=%.9f,%.9f,%.9f)",
+                    sample, desc->ByteWidth, blocks, validBlocks, sampledBlocks,
+                    static_cast<unsigned>(desc->Usage), desc->BindFlags,
+                    desc->CPUAccessFlags, desc->MiscFlags,
+                    desc->StructureByteStride,
+                    static_cast<unsigned long long>(halo3Rva),
+                    static_cast<unsigned long long>(mccRva), count,
+                    static_cast<unsigned>(first[2]),
+                    static_cast<unsigned>(first[3]), start,
+                    minimum[0], minimum[1], minimum[2],
+                    step[0], step[1], step[2]);
             }
         }
     }
