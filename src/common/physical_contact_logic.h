@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cmath>
 #include <cstdint>
 #include <utility>
@@ -371,6 +372,184 @@ inline bool PhysicalContactTriangleMeshValid(
         if (!PhysicalContactTriangleValid(mesh.triangles[triangle]))
             return false;
     return true;
+}
+
+// Halo 3 decorator instances use a fixed 16-byte vertex record. XYZ are
+// unsigned 16-bit values expanded by a draw-block minimum and step. The four
+// orientation bytes hold rotation * sqrt(scale): signed zero is byte 127 and
+// the full quaternion range is sqrt(2), matching the authored 2.0 scale cap.
+// Keeping this decoder pure lets the renderer bridge copy fixed records out of
+// Halo-owned memory before the contact thread uses them.
+inline bool PhysicalContactDecodeH3DecoratorPlacement(
+    const uint8_t* record, PhysicalContactVec3 blockMinimum,
+    PhysicalContactVec3 blockStep, PhysicalContactTransform& output,
+    uint16_t* partIndex = nullptr)
+{
+    output = {};
+    if (!record || !PhysicalContactFinite(blockMinimum) ||
+        !PhysicalContactFinite(blockStep) || blockStep.x <= 0.0f ||
+        blockStep.y <= 0.0f || blockStep.z <= 0.0f)
+        return false;
+    const auto word = [&](size_t offset) {
+        return static_cast<uint16_t>(
+            static_cast<uint16_t>(record[offset]) |
+            static_cast<uint16_t>(record[offset + 1]) << 8u);
+    };
+    output.position = {
+        blockMinimum.x + static_cast<float>(word(0)) * blockStep.x,
+        blockMinimum.y + static_cast<float>(word(2)) * blockStep.y,
+        blockMinimum.z + static_cast<float>(word(4)) * blockStep.z};
+    if (partIndex)
+        *partIndex = word(6);
+
+    constexpr float kSqrtTwoOverSignedByteMaximum =
+        1.4142135623730950488f / 127.0f;
+    const float x = (static_cast<float>(record[8]) - 127.0f) *
+        kSqrtTwoOverSignedByteMaximum;
+    const float y = (static_cast<float>(record[9]) - 127.0f) *
+        kSqrtTwoOverSignedByteMaximum;
+    const float z = (static_cast<float>(record[10]) - 127.0f) *
+        kSqrtTwoOverSignedByteMaximum;
+    const float w = (static_cast<float>(record[11]) - 127.0f) *
+        kSqrtTwoOverSignedByteMaximum;
+    const float scale = x * x + y * y + z * z + w * w;
+    if (!std::isfinite(scale) || scale < 0.01f || scale > 2.10f ||
+        !PhysicalContactFinite(output.position))
+        return false;
+    const float inverseRootScale = 1.0f / std::sqrt(scale);
+    const float qx = x * inverseRootScale;
+    const float qy = y * inverseRootScale;
+    const float qz = z * inverseRootScale;
+    const float qw = w * inverseRootScale;
+    output.forward = {
+        1.0f - 2.0f * (qy * qy + qz * qz),
+        2.0f * (qx * qy + qz * qw),
+        2.0f * (qx * qz - qy * qw)};
+    output.left = {
+        2.0f * (qx * qy - qz * qw),
+        1.0f - 2.0f * (qx * qx + qz * qz),
+        2.0f * (qy * qz + qx * qw)};
+    output.up = {
+        2.0f * (qx * qz + qy * qw),
+        2.0f * (qy * qz - qx * qw),
+        1.0f - 2.0f * (qx * qx + qy * qy)};
+    output.scale = scale;
+    return PhysicalContactTransformFinite(output);
+}
+
+inline bool PhysicalContactDecodeH3DecoratorTriangleStrip(
+    const uint8_t* bytes, size_t byteCount, uint32_t startVertex,
+    uint32_t vertexCount, PhysicalContactVec3 positionMinimum,
+    PhysicalContactVec3 positionSize, PhysicalContactTriangleMesh& output)
+{
+    output = {};
+    constexpr size_t kStride = 20u;
+    if (!bytes || vertexCount < 3u ||
+        vertexCount > PhysicalContactTriangleMesh::kMaximumTriangles + 2u ||
+        !PhysicalContactFinite(positionMinimum) ||
+        !PhysicalContactFinite(positionSize) || positionSize.x <= 0.0f ||
+        positionSize.y <= 0.0f || positionSize.z <= 0.0f ||
+        positionSize.x > 10.0f || positionSize.y > 10.0f ||
+        positionSize.z > 10.0f || startVertex > SIZE_MAX / kStride ||
+        vertexCount > (SIZE_MAX / kStride) - startVertex ||
+        (static_cast<size_t>(startVertex) + vertexCount) * kStride >
+            byteCount)
+        return false;
+
+    std::array<PhysicalContactVec3,
+               PhysicalContactTriangleMesh::kMaximumTriangles + 2u> vertices{};
+    PhysicalContactVec3 groupMinimum{INFINITY, INFINITY, INFINITY};
+    PhysicalContactVec3 groupMaximum{-INFINITY, -INFINITY, -INFINITY};
+    for (uint32_t index = 0; index < vertexCount; ++index)
+    {
+        const uint8_t* vertex = bytes +
+            (static_cast<size_t>(startVertex) + index) * kStride;
+        const auto word = [&](size_t offset) {
+            return static_cast<uint16_t>(
+                static_cast<uint16_t>(vertex[offset]) |
+                static_cast<uint16_t>(vertex[offset + 1]) << 8u);
+        };
+        constexpr float kInverseUnsignedShortMaximum = 1.0f / 65535.0f;
+        const PhysicalContactVec3 point{
+            positionMinimum.x + static_cast<float>(word(0)) *
+                kInverseUnsignedShortMaximum * positionSize.x,
+            positionMinimum.y + static_cast<float>(word(2)) *
+                kInverseUnsignedShortMaximum * positionSize.y,
+            positionMinimum.z + static_cast<float>(word(4)) *
+                kInverseUnsignedShortMaximum * positionSize.z};
+        if (!PhysicalContactFinite(point))
+            return false;
+        vertices[index] = point;
+        groupMinimum.x = std::min(groupMinimum.x, point.x);
+        groupMinimum.y = std::min(groupMinimum.y, point.y);
+        groupMinimum.z = std::min(groupMinimum.z, point.z);
+        groupMaximum.x = std::max(groupMaximum.x, point.x);
+        groupMaximum.y = std::max(groupMaximum.y, point.y);
+        groupMaximum.z = std::max(groupMaximum.z, point.z);
+    }
+
+    for (uint32_t index = 2; index < vertexCount; ++index)
+    {
+        uint32_t a = index - 2u;
+        uint32_t b = index - 1u;
+        if ((index & 1u) != 0u)
+            std::swap(a, b);
+        const PhysicalContactVec3 edgeA = vertices[b] - vertices[a];
+        const PhysicalContactVec3 edgeB = vertices[index] - vertices[a];
+        if (PhysicalContactLengthSquared(
+                PhysicalContactCross(edgeA, edgeB)) <= 1.0e-16f)
+            continue;
+        if (output.triangleCount >=
+            PhysicalContactTriangleMesh::kMaximumTriangles)
+            return false;
+        PhysicalContactTriangle& triangle =
+            output.triangles[output.triangleCount++];
+        triangle.vertices = {vertices[a], vertices[b], vertices[index]};
+        PhysicalContactVec3 minimum{INFINITY, INFINITY, INFINITY};
+        PhysicalContactVec3 maximum{-INFINITY, -INFINITY, -INFINITY};
+        for (const PhysicalContactVec3 point : triangle.vertices)
+        {
+            minimum.x = std::min(minimum.x, point.x);
+            minimum.y = std::min(minimum.y, point.y);
+            minimum.z = std::min(minimum.z, point.z);
+            maximum.x = std::max(maximum.x, point.x);
+            maximum.y = std::max(maximum.y, point.y);
+            maximum.z = std::max(maximum.z, point.z);
+        }
+        triangle.centre = (minimum + maximum) * 0.5f;
+        triangle.halfExtents = (maximum - minimum) * 0.5f;
+        for (const PhysicalContactVec3 point : triangle.vertices)
+            triangle.boundRadius = std::max(
+                triangle.boundRadius,
+                PhysicalContactLength(point - triangle.centre));
+    }
+    if (!output.triangleCount)
+        return false;
+    output.groupCount = 1;
+    PhysicalContactTriangleGroup& group = output.groups[0];
+    group.firstTriangle = 0;
+    group.triangleCount = output.triangleCount;
+    group.centre = (groupMinimum + groupMaximum) * 0.5f;
+    group.halfExtents = (groupMaximum - groupMinimum) * 0.5f;
+    for (uint32_t index = 0; index < vertexCount; ++index)
+        group.boundRadius = std::max(
+            group.boundRadius,
+            PhysicalContactLength(vertices[index] - group.centre));
+    return PhysicalContactTriangleMeshValid(output);
+}
+
+inline bool PhysicalContactH3DecoratorMeshIsSolid(
+    const PhysicalContactTriangleMesh& mesh, float minimumAxisRatio = 0.08f)
+{
+    if (!PhysicalContactTriangleMeshValid(mesh) ||
+        !std::isfinite(minimumAxisRatio) || minimumAxisRatio < 0.0f ||
+        minimumAxisRatio > 1.0f)
+        return false;
+    const PhysicalContactVec3 size = mesh.groups[0].halfExtents * 2.0f;
+    const float minimum = std::min({size.x, size.y, size.z});
+    const float maximum = std::max({size.x, size.y, size.z});
+    return std::isfinite(minimum) && std::isfinite(maximum) &&
+        maximum > 1.0e-5f && minimum / maximum >= minimumAxisRatio;
 }
 
 inline PhysicalContactVec3 PhysicalContactCompoundWorldCentroid(

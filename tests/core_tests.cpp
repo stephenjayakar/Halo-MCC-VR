@@ -9058,6 +9058,71 @@ int main()
             "preserves grazing and concave gaps, and rejects malformed fixed "
             "mesh bounds");
 
+        const std::array<uint8_t, 16> packedRockPlacement{
+            0xA9, 0xBE, 0xA5, 0x22, 0x65, 0x35, 0x00, 0x00,
+            0x7E, 0x7D, 0xC7, 0x52, 0x78, 0x96, 0xE7, 0x77};
+        PhysicalContactTransform decodedRockPlacement{};
+        uint16_t decodedRockPart = 0xFFFFu;
+        const bool decodedRock = PhysicalContactDecodeH3DecoratorPlacement(
+            packedRockPlacement.data(),
+            {81.999191f, -104.174675f, 4.827974f},
+            {0.000038887f, 0.000033686f, 0.000002232f},
+            decodedRockPlacement, &decodedRockPart);
+        const PhysicalContactVec3 decodedRockUp =
+            decodedRockPlacement.up;
+
+        std::array<uint8_t, 4u * 20u> packedSolidStrip{};
+        const auto setPackedPosition = [&packedSolidStrip](
+            size_t vertex, uint16_t x, uint16_t y, uint16_t z) {
+            const size_t offset = vertex * 20u;
+            const uint16_t values[3]{x, y, z};
+            for (size_t axis = 0; axis < 3u; ++axis)
+            {
+                packedSolidStrip[offset + axis * 2u] =
+                    static_cast<uint8_t>(values[axis] & 0xFFu);
+                packedSolidStrip[offset + axis * 2u + 1u] =
+                    static_cast<uint8_t>(values[axis] >> 8u);
+            }
+        };
+        setPackedPosition(0, 0, 0, 0);
+        setPackedPosition(1, 0xFFFFu, 0, 0);
+        setPackedPosition(2, 0, 0xFFFFu, 0);
+        setPackedPosition(3, 0, 0, 0xFFFFu);
+        PhysicalContactTriangleMesh decodedSolidStrip{};
+        const bool decodedSolid =
+            PhysicalContactDecodeH3DecoratorTriangleStrip(
+                packedSolidStrip.data(), packedSolidStrip.size(), 0, 4,
+                {}, {1.0f, 1.0f, 1.0f}, decodedSolidStrip);
+        std::array<uint8_t, 3u * 20u> packedPlaneStrip{};
+        std::copy_n(packedSolidStrip.begin(), packedPlaneStrip.size(),
+                    packedPlaneStrip.begin());
+        PhysicalContactTriangleMesh decodedPlaneStrip{};
+        const bool decodedPlane =
+            PhysicalContactDecodeH3DecoratorTriangleStrip(
+                packedPlaneStrip.data(), packedPlaneStrip.size(), 0, 3,
+                {}, {1.0f, 1.0f, 1.0f}, decodedPlaneStrip);
+        Check(decodedRock && decodedRockPart == 0 &&
+              std::fabs(decodedRockPlacement.position.x - 83.8972266f) <
+                  2.0e-5f &&
+              std::fabs(decodedRockPlacement.position.y + 103.875914f) <
+                  2.0e-5f &&
+              std::fabs(decodedRockPlacement.position.z - 4.8584833f) <
+                  2.0e-5f &&
+              std::fabs(decodedRockPlacement.scale - 0.894538f) < 2.0e-5f &&
+              std::fabs(decodedRockUp.x - 0.016f) < 0.02f &&
+              std::fabs(decodedRockUp.y + 0.054f) < 0.02f &&
+              decodedRockUp.z > 0.99f && decodedSolid &&
+              decodedSolidStrip.triangleCount == 2 &&
+              PhysicalContactH3DecoratorMeshIsSolid(decodedSolidStrip) &&
+              decodedPlane && decodedPlaneStrip.triangleCount == 1 &&
+              !PhysicalContactH3DecoratorMeshIsSolid(decodedPlaneStrip) &&
+              !PhysicalContactDecodeH3DecoratorPlacement(
+                  packedRockPlacement.data(), {}, {},
+                  decodedRockPlacement),
+            "Halo 3 decorator decoding reconstructs Valhalla position, "
+            "rotation, and scale, expands exact strips, rejects planar foliage "
+            "as a rigid wall, and fails closed on invalid block bounds");
+
         const auto makeBenchmarkMesh = [&](uint16_t triangleCount,
                                            uint16_t groupCount) {
             PhysicalContactTriangleMesh mesh{};
