@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <climits>
 #include <cmath>
+#include <cstring>
 #include <intrin.h>
 #include <MinHook.h>
 
@@ -47,6 +48,7 @@ static ResizeBuffersFn g_origResizeBuffers = nullptr;
 static OMSetRenderTargetsFn g_origOMSetRenderTargets = nullptr;
 static CreateBufferFn g_origCreateBuffer = nullptr;
 static std::atomic<unsigned> g_h3DecoratorBufferProbeSamples{0};
+static std::atomic<unsigned> g_h3DecoratorExactProbeSamples{0};
 #if HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE
 static DrawIndexedFn g_origDrawIndexed = nullptr;
 // The July 26 HUD-discovery detour performed synchronous GPU readback and
@@ -64,50 +66,123 @@ static CopyResourceFn g_origCopyResource = nullptr;
 // into 16-byte records and uploaded while a map loads. Reading immutable
 // initial data here avoids the synchronous GPU readback that made the retired
 // draw-hook diagnostics unsafe. The hook is not installed in normal play.
+static void FormatProbeRecords(
+    const uint8_t* bytes, unsigned byteWidth, unsigned firstRecord,
+    char* output, size_t outputSize)
+{
+    if (!bytes || !output || outputSize == 0)
+        return;
+    output[0] = '\0';
+    const size_t firstByte = static_cast<size_t>(firstRecord) * 16u;
+    if (firstByte >= byteWidth)
+        return;
+    const unsigned available = byteWidth - static_cast<unsigned>(firstByte);
+    const unsigned recordBytes = std::min(available, 16u * 4u);
+    size_t used = 0;
+    for (unsigned i = 0; i < recordBytes && used + 4u < outputSize; ++i)
+    {
+        const int wrote = _snprintf_s(
+            output + used, outputSize - used, _TRUNCATE,
+            "%02X%s", bytes[firstByte + i], ((i + 1u) % 16u) ? " " : "|");
+        if (wrote <= 0)
+            break;
+        used += static_cast<size_t>(wrote);
+    }
+}
+
 static HRESULT STDMETHODCALLTYPE CreateBufferHook(
     ID3D11Device* device, const D3D11_BUFFER_DESC* desc,
     const D3D11_SUBRESOURCE_DATA* initialData, ID3D11Buffer** buffer)
 {
     if (desc && initialData && initialData->pSysMem &&
-        desc->ByteWidth >= 16u * 32u && (desc->ByteWidth % 16u) == 0 &&
-        (desc->BindFlags & D3D11_BIND_VERTEX_BUFFER) != 0)
+        desc->ByteWidth >= 16u * 32u && (desc->ByteWidth % 16u) == 0)
     {
         const uint8_t* bytes = static_cast<const uint8_t*>(initialData->pSysMem);
         const unsigned records = desc->ByteWidth / 16u;
+        // Official H3EK resource packing gives these invariant suffixes for
+        // Valhalla's first four rock placements. XYZ occupies the six bytes
+        // before each suffix and depends on the runtime block bounds. Matching
+        // ten fixed bytes avoids confusing ordinary 8-byte mesh vertices with
+        // 16-byte decorator placements.
+        static constexpr uint8_t kRockSuffixes[][10] = {
+            {0x00, 0x02, 0x88, 0x8E, 0xD1, 0xA4, 0xFF, 0xFF, 0xFF, 0x00},
+            {0x00, 0x02, 0x83, 0x93, 0xCF, 0xC7, 0xFF, 0xFF, 0xFF, 0x00},
+            {0x00, 0x00, 0x80, 0x7F, 0x92, 0x25, 0xFF, 0xFF, 0xFF, 0x00},
+            {0x00, 0x02, 0x7E, 0x80, 0xCD, 0xC2, 0xFF, 0xFF, 0xFF, 0x00},
+            {0x00, 0x02, 0x09, 0x0F, 0x52, 0x25, 0xFF, 0xFF, 0xFF, 0x00},
+        };
+        for (unsigned record = 0; record < records; ++record)
+        {
+            const uint8_t* suffix = bytes + static_cast<size_t>(record) * 16u + 6u;
+            unsigned matchedSuffix = 0;
+            for (unsigned i = 0; i < _countof(kRockSuffixes); ++i)
+            {
+                if (std::memcmp(suffix, kRockSuffixes[i], sizeof(kRockSuffixes[i])) == 0)
+                {
+                    matchedSuffix = i + 1u;
+                    break;
+                }
+            }
+            if (!matchedSuffix)
+                continue;
+            const unsigned sample =
+                g_h3DecoratorExactProbeSamples.fetch_add(
+                    1, std::memory_order_relaxed) + 1u;
+            if (sample <= 32u)
+            {
+                const unsigned firstRecord = record > 0 ? record - 1u : 0u;
+                char around[16u * 4u * 3u + 1u]{};
+                FormatProbeRecords(
+                    bytes, desc->ByteWidth, firstRecord, around, sizeof(around));
+                LOG("H3DECOREXACT[%u]: suffix=%u record=%u/%u bytes=%u "
+                    "usage=%u bind=0x%X cpu=0x%X misc=0x%X stride=%u around=%s",
+                    sample, matchedSuffix, record, records, desc->ByteWidth,
+                    static_cast<unsigned>(desc->Usage), desc->BindFlags,
+                    desc->CPUAccessFlags, desc->MiscFlags,
+                    desc->StructureByteStride, around);
+            }
+        }
+
+        if ((desc->BindFlags & D3D11_BIND_VERTEX_BUFFER) == 0)
+            return g_origCreateBuffer(device, desc, initialData, buffer);
+
         const unsigned sampledRecords = std::min(records, 4096u);
         unsigned smallPartIndices = 0;
+        unsigned nonzeroPartIndices = 0;
+        unsigned nonzeroColors = 0;
         for (unsigned i = 0; i < sampledRecords; ++i)
         {
-            if (bytes[static_cast<size_t>(i) * 16u + 7u] < 64u)
+            const size_t offset = static_cast<size_t>(i) * 16u;
+            const uint8_t part = bytes[offset + 7u];
+            if (part < 16u)
                 ++smallPartIndices;
+            if (part != 0u)
+                ++nonzeroPartIndices;
+            if (bytes[offset + 12u] != 0u && bytes[offset + 13u] != 0u &&
+                bytes[offset + 14u] != 0u)
+                ++nonzeroColors;
         }
-        const bool placementLike = sampledRecords >= 32u &&
-            smallPartIndices * 100u >= sampledRecords * 95u;
+        const bool placementLike = sampledRecords >= 256u &&
+            smallPartIndices * 100u >= sampledRecords * 99u &&
+            nonzeroPartIndices * 100u >= sampledRecords &&
+            nonzeroColors * 100u >= sampledRecords * 50u;
         if (placementLike)
         {
             const unsigned sample =
                 g_h3DecoratorBufferProbeSamples.fetch_add(
                     1, std::memory_order_relaxed) + 1;
-            if (sample <= 256u)
+            if (sample <= 128u)
             {
                 char head[16u * 4u * 3u + 1u]{};
-                size_t used = 0;
-                const unsigned headBytes = std::min(desc->ByteWidth, 16u * 4u);
-                for (unsigned i = 0; i < headBytes && used + 4u < sizeof(head); ++i)
-                {
-                    const int wrote = _snprintf_s(
-                        head + used, sizeof(head) - used, _TRUNCATE,
-                        "%02X%s", bytes[i], ((i + 1u) % 16u) ? " " : "|");
-                    if (wrote <= 0)
-                        break;
-                    used += static_cast<size_t>(wrote);
-                }
+                FormatProbeRecords(bytes, desc->ByteWidth, 0u, head, sizeof(head));
                 LOG("H3DECORBUF[%u]: bytes=%u records=%u smallPart=%u/%u "
-                    "usage=%u bind=0x%X cpu=0x%X misc=0x%X stride=%u head=%s",
+                    "nonzeroPart=%u nonzeroColor=%u usage=%u bind=0x%X cpu=0x%X "
+                    "misc=0x%X stride=%u head=%s",
                     sample, desc->ByteWidth, records, smallPartIndices,
-                    sampledRecords, static_cast<unsigned>(desc->Usage),
-                    desc->BindFlags, desc->CPUAccessFlags, desc->MiscFlags,
-                    desc->StructureByteStride, head);
+                    sampledRecords, nonzeroPartIndices, nonzeroColors,
+                    static_cast<unsigned>(desc->Usage), desc->BindFlags,
+                    desc->CPUAccessFlags, desc->MiscFlags, desc->StructureByteStride,
+                    head);
             }
         }
     }
