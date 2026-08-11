@@ -1974,6 +1974,52 @@ inline bool PhysicalContactUseExactBodyPointImpulse(
         rigidBodyIndex < 32;
 }
 
+inline bool PhysicalContactLeftGrabKind(uint8_t kind)
+{
+    // H3 object kinds proven by the contact runs: weapon, equipment/grenade,
+    // garbage, and crate-class. Bipeds, vehicles, scenery, projectiles, and
+    // giants are deliberately excluded.
+    return kind == 2 || kind == 3 || kind == 4 || kind == 10;
+}
+
+inline bool PhysicalContactGripHeld(float gripValue, bool previouslyHeld)
+{
+    if (!std::isfinite(gripValue))
+        return false;
+    return previouslyHeld ? gripValue > 0.45f : gripValue >= 0.65f;
+}
+
+inline PhysicalContactVec3 PhysicalContactLeftGrabFollowVelocity(
+    PhysicalContactVec3 currentCentreWorld,
+    PhysicalContactVec3 desiredCentreWorld,
+    PhysicalContactVec3 palmVelocityMetersPerSecond,
+    float worldUnitsPerMeter)
+{
+    if (!PhysicalContactFinite(currentCentreWorld) ||
+        !PhysicalContactFinite(desiredCentreWorld) ||
+        !PhysicalContactFinite(palmVelocityMetersPerSecond) ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter < 0.05f ||
+        worldUnitsPerMeter > 2.0f)
+        return {};
+    PhysicalContactVec3 correctionMetersPerSecond =
+        (desiredCentreWorld - currentCentreWorld) *
+        (12.0f / worldUnitsPerMeter);
+    const float correctionSpeed = PhysicalContactLength(
+        correctionMetersPerSecond);
+    if (correctionSpeed > 2.5f)
+        correctionMetersPerSecond = correctionMetersPerSecond *
+            (2.5f / correctionSpeed);
+    PhysicalContactVec3 velocityMetersPerSecond =
+        palmVelocityMetersPerSecond + correctionMetersPerSecond;
+    const float speed = PhysicalContactLength(velocityMetersPerSecond);
+    if (speed > 8.0f)
+        velocityMetersPerSecond = velocityMetersPerSecond * (8.0f / speed);
+    const PhysicalContactVec3 worldVelocity =
+        velocityMetersPerSecond * worldUnitsPerMeter;
+    return PhysicalContactFinite(worldVelocity) ? worldVelocity
+                                                 : PhysicalContactVec3{};
+}
+
 struct PhysicalContactDebugTargetRank
 {
     bool valid = false;
@@ -2222,6 +2268,16 @@ inline float PhysicalContactMassFromInverseMass(float inverseMass)
 inline bool PhysicalContactMotionTypeIsDynamic(uint8_t motionType)
 {
     return (motionType >= 1 && motionType <= 5) || motionType == 8;
+}
+
+inline bool PhysicalContactLeftGrabCandidate(
+    bool exactPalmOverlap, uint8_t kind, uint8_t motionType,
+    float massKilograms)
+{
+    return exactPalmOverlap && PhysicalContactLeftGrabKind(kind) &&
+        PhysicalContactMotionTypeIsDynamic(motionType) &&
+        std::isfinite(massKilograms) && massKilograms >= 0.01f &&
+        massKilograms <= 25.0f;
 }
 
 // Native object collision also reports scenery, machines, and fixed physics

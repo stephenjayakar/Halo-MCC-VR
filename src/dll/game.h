@@ -143,6 +143,10 @@ void Game_Halo3UpdateVehicleWheel(const VrPadState& pad);
 // input hook withholds the grip buttons for exactly that window, so a lone
 // right grip keeps performing the dismount it already does.
 bool Game_Halo3VehicleSwallowsGrips();
+// True only while the left palm exactly overlaps a grabbable Halo 3 object or
+// already holds one. The input hook then withholds the grenade/left-bumper
+// action while preserving it everywhere else.
+bool Game_Halo3PhysicalGrabSwallowsLeftGrip();
 // True while the wheel, rather than the turn stick, authors the steering.
 bool Game_Halo3VehicleWheelActive();
 // C13 per-SEAT trim: the config storage slot for the seat the player occupies

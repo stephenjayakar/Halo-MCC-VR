@@ -165,12 +165,15 @@ struct VrControllerMotionSnapshot
     bool poseValid = false;
     bool linearVelocityValid = false;
     bool angularVelocityValid = false;
+    bool gripValid = false;
     float orientation[4]{0.0f, 0.0f, 0.0f, 1.0f};
     float position[3]{};
     float linearVelocity[3]{};
     float angularVelocity[3]{};
+    float grip = 0.0f;
 };
 bool VR_GetRightControllerMotion(VrControllerMotionSnapshot& out) noexcept;
+bool VR_GetLeftControllerMotion(VrControllerMotionSnapshot& out) noexcept;
 // Left controller pose (used by the D-pad gesture; false until tracked).
 bool VR_GetLeftControllerPose(float outQuat[4], float outPos[3]);
 // Called only from Halo's already-validated class-2 CHUD path. The active

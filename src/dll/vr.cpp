@@ -399,8 +399,10 @@ namespace
         std::atomic<float> position[3]{};
         std::atomic<float> linearVelocity[3]{};
         std::atomic<float> angularVelocity[3]{};
+        std::atomic<float> grip{0.0f};
     };
     ControllerMotionPublication g_rightMotion;
+    ControllerMotionPublication g_leftMotion;
     XrPosef g_leftAimPose{{0, 0, 0, 1}, {0, 0, 0}};
     bool g_leftAimPoseValid = false;
     // Render-thread-only filtered copy for the compositor crosshair. Keeping it
@@ -6028,9 +6030,12 @@ float4 ps_scope_linearize(VSOut i):SV_Target { return paint(i.uv,true); }
             valid = (location.locationFlags & required) == required &&
                     NormalizeTrackedPose(location.pose);
         }
-        // Left hand: position only matters (D-pad gesture), same locate path.
+        // Left hand: pose serves the D-pad gesture and support hand; velocity
+        // additionally drives Halo 3's optional physical pickup transaction.
         bool leftValid = false;
+        XrSpaceVelocity leftVelocity{XR_TYPE_SPACE_VELOCITY};
         XrSpaceLocation leftLocation{XR_TYPE_SPACE_LOCATION};
+        leftLocation.next = &leftVelocity;
         if (g_leftAimAction != XR_NULL_HANDLE && g_leftAimSpace != XR_NULL_HANDLE)
         {
             get.action = g_leftAimAction;
@@ -6120,12 +6125,13 @@ float4 ps_scope_linearize(VSOut i):SV_Target { return paint(i.uv,true); }
             { outX = st.currentState.x; outY = st.currentState.y; pad.valid = true; }
         };
         auto getF = [&](XrAction action, float& out) {
-            if (action == XR_NULL_HANDLE) return;
+            if (action == XR_NULL_HANDLE) return false;
             XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
             gi.action = action;
             XrActionStateFloat st{XR_TYPE_ACTION_STATE_FLOAT};
             if (XR_SUCCEEDED(xrGetActionStateFloat(g_session, &gi, &st)) && st.isActive)
-            { out = st.currentState; pad.valid = true; }
+            { out = st.currentState; pad.valid = true; return true; }
+            return false;
         };
         auto getB = [&](XrAction action, bool& out) {
             if (action == XR_NULL_HANDLE) return;
@@ -6139,7 +6145,7 @@ float4 ps_scope_linearize(VSOut i):SV_Target { return paint(i.uv,true); }
         getV2(g_actTurn, pad.turnX, pad.turnY);
         getF(g_actTrigL, pad.trigL);
         getF(g_actTrigR, pad.trigR);
-        getF(g_actGripL, pad.gripL);
+        const bool gripLValid = getF(g_actGripL, pad.gripL);
         getF(g_actGripR, pad.gripR);
         getB(g_actA, pad.a);
         getB(g_actB, pad.b);
@@ -6148,6 +6154,68 @@ float4 ps_scope_linearize(VSOut i):SV_Target { return paint(i.uv,true); }
         getB(g_actClickL, pad.clickL);
         getB(g_actClickR, pad.clickR);
         getB(g_actMenu, pad.menu);
+        {
+            // Publish the left pose, velocities, and the grip sampled by this
+            // same action sync as one bounded lock-free snapshot. Halo 3's
+            // camera callback can then drive a physical grab without entering
+            // the legacy controller critical section.
+            auto& publication = g_leftMotion;
+            publication.sequence.fetch_add(1, std::memory_order_acq_rel);
+            const auto finite3 = [](const XrVector3f& value) {
+                return std::isfinite(value.x) && std::isfinite(value.y) &&
+                    std::isfinite(value.z);
+            };
+            const bool linearValid = leftValid &&
+                (leftVelocity.velocityFlags &
+                 XR_SPACE_VELOCITY_LINEAR_VALID_BIT) != 0 &&
+                finite3(leftVelocity.linearVelocity);
+            const bool angularValid = leftValid &&
+                (leftVelocity.velocityFlags &
+                 XR_SPACE_VELOCITY_ANGULAR_VALID_BIT) != 0 &&
+                finite3(leftVelocity.angularVelocity);
+            const bool sampledGrip = leftValid && gripLValid &&
+                std::isfinite(pad.gripL);
+            uint8_t flags = leftValid ? 1u : 0u;
+            flags |= linearValid ? 2u : 0u;
+            flags |= angularValid ? 4u : 0u;
+            flags |= sampledGrip ? 8u : 0u;
+            publication.flags.store(flags, std::memory_order_relaxed);
+            publication.xrTime.store(
+                static_cast<int64_t>(time), std::memory_order_relaxed);
+            publication.sampleMs.store(
+                leftValid ? GetTickCount64() : 0,
+                std::memory_order_relaxed);
+            const XrQuaternionf q = leftValid
+                ? leftLocation.pose.orientation
+                : XrQuaternionf{0, 0, 0, 1};
+            const XrVector3f p = leftValid
+                ? leftLocation.pose.position : XrVector3f{0, 0, 0};
+            const XrVector3f linear = linearValid
+                ? leftVelocity.linearVelocity : XrVector3f{0, 0, 0};
+            const XrVector3f angular = angularValid
+                ? leftVelocity.angularVelocity : XrVector3f{0, 0, 0};
+            const float qv[4] = {q.x, q.y, q.z, q.w};
+            const float pv[3] = {p.x, p.y, p.z};
+            const float lv[3] = {linear.x, linear.y, linear.z};
+            const float av[3] = {angular.x, angular.y, angular.z};
+            for (int i = 0; i < 4; ++i)
+                publication.orientation[i].store(
+                    qv[i], std::memory_order_relaxed);
+            for (int i = 0; i < 3; ++i)
+            {
+                publication.position[i].store(
+                    pv[i], std::memory_order_relaxed);
+                publication.linearVelocity[i].store(
+                    lv[i], std::memory_order_relaxed);
+                publication.angularVelocity[i].store(
+                    av[i], std::memory_order_relaxed);
+            }
+            publication.grip.store(
+                sampledGrip ? std::clamp(pad.gripL, 0.0f, 1.0f) : 0.0f,
+                std::memory_order_relaxed);
+            publication.serial.fetch_add(1, std::memory_order_relaxed);
+            publication.sequence.fetch_add(1, std::memory_order_release);
+        }
         static VrPadState previousPad{};
         static bool previousRawMenu = false;
         static uint64_t odstMenuPulseUntil = 0;
@@ -9845,6 +9913,7 @@ bool VR_GetRightControllerMotion(VrControllerMotionSnapshot& out) noexcept
         next.poseValid = (flags & 1u) != 0;
         next.linearVelocityValid = (flags & 2u) != 0;
         next.angularVelocityValid = (flags & 4u) != 0;
+        next.gripValid = (flags & 8u) != 0;
         for (int i = 0; i < 4; ++i)
             next.orientation[i] =
                 publication.orientation[i].load(std::memory_order_relaxed);
@@ -9857,6 +9926,49 @@ bool VR_GetRightControllerMotion(VrControllerMotionSnapshot& out) noexcept
             next.angularVelocity[i] =
                 publication.angularVelocity[i].load(std::memory_order_relaxed);
         }
+        next.grip = publication.grip.load(std::memory_order_relaxed);
+        if (publication.sequence.load(std::memory_order_acquire) == before)
+        {
+            out = next;
+            return next.serial != 0;
+        }
+    }
+    return false;
+}
+
+bool VR_GetLeftControllerMotion(VrControllerMotionSnapshot& out) noexcept
+{
+    auto& publication = g_leftMotion;
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        const uint32_t before =
+            publication.sequence.load(std::memory_order_acquire);
+        if (before & 1u)
+            continue;
+        VrControllerMotionSnapshot next{};
+        next.serial = publication.serial.load(std::memory_order_relaxed);
+        next.xrTime = publication.xrTime.load(std::memory_order_relaxed);
+        next.sampleMs = publication.sampleMs.load(std::memory_order_relaxed);
+        const uint8_t flags = publication.flags.load(std::memory_order_relaxed);
+        next.poseValid = (flags & 1u) != 0;
+        next.linearVelocityValid = (flags & 2u) != 0;
+        next.angularVelocityValid = (flags & 4u) != 0;
+        next.gripValid = (flags & 8u) != 0;
+        for (int i = 0; i < 4; ++i)
+            next.orientation[i] =
+                publication.orientation[i].load(std::memory_order_relaxed);
+        for (int i = 0; i < 3; ++i)
+        {
+            next.position[i] =
+                publication.position[i].load(std::memory_order_relaxed);
+            next.linearVelocity[i] =
+                publication.linearVelocity[i].load(
+                    std::memory_order_relaxed);
+            next.angularVelocity[i] =
+                publication.angularVelocity[i].load(
+                    std::memory_order_relaxed);
+        }
+        next.grip = publication.grip.load(std::memory_order_relaxed);
         if (publication.sequence.load(std::memory_order_acquire) == before)
         {
             out = next;

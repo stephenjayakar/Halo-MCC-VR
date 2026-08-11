@@ -6497,6 +6497,10 @@ namespace
     Halo3ObjectsUpdateFn g_origHalo3ObjectsUpdate = nullptr;
     std::atomic<bool> g_halo3PhysicalContactBindings{false};
     std::atomic<bool> g_halo3PhysicalMeleeBindings{false};
+    // Left-hand pickup shares the proven object/velocity bindings but owns a
+    // separate failure atom. A bad pickup sample must never disable weapon
+    // contact, melee, camera ownership, or the OpenXR session.
+    std::atomic<bool> g_halo3LeftGrabBindings{false};
     // Runtime acceptance rejected the bounds-sphere proxy: it remained in
     // near-continuous false contact and did not move Forge or campaign props.
     // Keep the failed implementation inert while preserving it for evidence.
@@ -6615,6 +6619,44 @@ namespace
     std::atomic<float> g_halo3ContactCommandNormal[3]{};
     std::atomic<uint16_t> g_halo3ContactCommandMaterial{0};
     std::atomic<float> g_halo3ContactCommandHaptic{0.0f};
+    struct Halo3LeftGrabCameraState
+    {
+        bool gripHeld = false;
+        int32_t activeHandle = -1;
+        PhysicalContactVec3 centreOffset{};
+        uint64_t lastMotionSerial = 0;
+    };
+    Halo3LeftGrabCameraState g_halo3LeftGrabCamera;
+    std::atomic<int32_t> g_halo3LeftGrabCandidateHandle{-1};
+    std::atomic<uint64_t> g_halo3LeftGrabCandidateSampleMs{0};
+    std::atomic<int32_t> g_halo3LeftGrabActiveHandle{-1};
+    std::atomic<float> g_halo3LeftGrabTargetMass{0.0f};
+    std::atomic<uint32_t> g_halo3LeftGrabStage{0};
+    std::atomic<uint64_t> g_halo3LeftGrabAcquisitions{0};
+    std::atomic<uint64_t> g_halo3LeftGrabCommands{0};
+    std::atomic<uint64_t> g_halo3LeftGrabReleases{0};
+    std::atomic<uint64_t> g_halo3LeftGrabApplied{0};
+    enum class Halo3LeftGrabStage : uint32_t
+    {
+        Disabled = 0,
+        BaseGate,
+        Motion,
+        Searching,
+        Candidate,
+        Holding,
+        Released,
+        Faulted,
+    };
+    std::atomic<uint32_t> g_halo3LeftGrabCommandGeneration{0};
+    std::atomic<uint64_t> g_halo3LeftGrabCommandSampleMs{0};
+    std::atomic<int32_t> g_halo3LeftGrabCommandHandle{-1};
+    std::atomic<uint32_t> g_halo3LeftGrabCommandMode{0};
+    std::atomic<float> g_halo3LeftGrabCommandVelocity[3]{};
+    std::atomic<float> g_halo3LeftGrabCommandAngular[3]{};
+    std::atomic<uint64_t> g_halo3LeftGrabCommandSerial{0};
+    std::atomic<uint64_t> g_halo3LeftGrabAppliedSerial{0};
+    constexpr uint32_t kHalo3LeftGrabCommandFollow = 1;
+    constexpr uint32_t kHalo3LeftGrabCommandRelease = 2;
     std::atomic<uint32_t> g_halo3ContactMeleeStatus{0};
     std::atomic<int32_t> g_halo3ContactMeleeDamageTag{-1};
     std::atomic<int32_t> g_halo3ContactMeleeResponseTag{-1};
@@ -7646,7 +7688,8 @@ namespace
     // impulse wrapper. Callers keep them inside SEH because Halo owns both
     // datum arrays and can invalidate them during title or map transitions.
     bool Halo3ContactObjectDataForHandle(
-        int32_t objectHandle, unsigned char*& objectData)
+        int32_t objectHandle, unsigned char*& objectData,
+        uint8_t* objectKind = nullptr)
     {
         objectData = nullptr;
         if (objectHandle == -1 || !g_engineTlsIndex)
@@ -7686,6 +7729,8 @@ namespace
             return false;
         objectData = *reinterpret_cast<unsigned char**>(
             entry + kHalo3ObjectEntryDataOffset);
+        if (objectKind)
+            *objectKind = *(entry + kHalo3ObjectEntryKindOffset);
         return objectData != nullptr;
     }
 
@@ -10557,6 +10602,147 @@ namespace
         g_halo3ContactWallPlanes.store(0, std::memory_order_relaxed);
     }
 
+    void Halo3ResetLeftGrab()
+    {
+        g_halo3LeftGrabCamera = {};
+        g_halo3LeftGrabCandidateHandle.store(-1, std::memory_order_relaxed);
+        g_halo3LeftGrabCandidateSampleMs.store(0, std::memory_order_relaxed);
+        g_halo3LeftGrabActiveHandle.store(-1, std::memory_order_release);
+        g_halo3LeftGrabTargetMass.store(0.0f, std::memory_order_relaxed);
+    }
+
+    void Halo3PublishLeftGrabCommand(
+        uint32_t generation, uint64_t nowMs, int32_t handle, uint32_t mode,
+        PhysicalContactVec3 velocity, PhysicalContactVec3 angularVelocity)
+    {
+        if (!generation || !nowMs || handle == -1 ||
+            (mode != kHalo3LeftGrabCommandFollow &&
+             mode != kHalo3LeftGrabCommandRelease) ||
+            !PhysicalContactFinite(velocity) ||
+            !PhysicalContactFinite(angularVelocity))
+            return;
+        g_halo3LeftGrabCommandHandle.store(handle, std::memory_order_relaxed);
+        g_halo3LeftGrabCommandMode.store(mode, std::memory_order_relaxed);
+        const float linear[3] = {velocity.x, velocity.y, velocity.z};
+        const float angular[3] = {
+            angularVelocity.x, angularVelocity.y, angularVelocity.z};
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            g_halo3LeftGrabCommandVelocity[axis].store(
+                linear[axis], std::memory_order_relaxed);
+            g_halo3LeftGrabCommandAngular[axis].store(
+                angular[axis], std::memory_order_relaxed);
+        }
+        g_halo3LeftGrabCommandGeneration.store(
+            generation, std::memory_order_relaxed);
+        g_halo3LeftGrabCommandSampleMs.store(nowMs, std::memory_order_relaxed);
+        const uint64_t next =
+            g_halo3LeftGrabCommandSerial.load(std::memory_order_relaxed) + 1;
+        g_halo3LeftGrabCommandSerial.store(
+            next ? next : 1, std::memory_order_release);
+        g_halo3LeftGrabCommands.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // Runs after Halo's object update, so a floor-loaded prop cannot overwrite
+    // the follow velocity in the same simulation tick. Only this optional
+    // feature is disabled if its native call faults.
+    void Halo3ConsumeLeftGrabCommand()
+    {
+        const uint64_t serial =
+            g_halo3LeftGrabCommandSerial.load(std::memory_order_acquire);
+        if (!serial ||
+            serial == g_halo3LeftGrabAppliedSerial.load(
+                          std::memory_order_relaxed) ||
+            !g_halo3LeftGrabBindings.load(std::memory_order_acquire))
+            return;
+        uint64_t applied = g_halo3LeftGrabAppliedSerial.load(
+            std::memory_order_relaxed);
+        if (applied == serial ||
+            !g_halo3LeftGrabAppliedSerial.compare_exchange_strong(
+                applied, serial, std::memory_order_acq_rel,
+                std::memory_order_relaxed))
+            return;
+
+        const uint32_t generation =
+            g_halo3LeftGrabCommandGeneration.load(std::memory_order_relaxed);
+        const uint64_t sampleMs =
+            g_halo3LeftGrabCommandSampleMs.load(std::memory_order_relaxed);
+        const int32_t handle =
+            g_halo3LeftGrabCommandHandle.load(std::memory_order_relaxed);
+        const uint32_t mode =
+            g_halo3LeftGrabCommandMode.load(std::memory_order_relaxed);
+        float velocity[3]{};
+        float angular[3]{};
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            velocity[axis] = g_halo3LeftGrabCommandVelocity[axis].load(
+                std::memory_order_relaxed);
+            angular[axis] = g_halo3LeftGrabCommandAngular[axis].load(
+                std::memory_order_relaxed);
+        }
+        const uint64_t nowMs = GetTickCount64();
+        bool valid = generation && generation ==
+                g_halo3RuntimeGeneration.load(std::memory_order_acquire) &&
+            sampleMs && nowMs >= sampleMs && nowMs - sampleMs <= 500 &&
+            handle != -1 &&
+            (mode == kHalo3LeftGrabCommandFollow ||
+             mode == kHalo3LeftGrabCommandRelease) &&
+            g_halo3ObjectSetVelocities;
+        for (int axis = 0; axis < 3; ++axis)
+            valid = valid && std::isfinite(velocity[axis]) &&
+                std::isfinite(angular[axis]);
+
+        bool faulted = false;
+        if (valid)
+        {
+            __try
+            {
+                unsigned char* data = nullptr;
+                uint8_t kind = 0xFF;
+                void* component = nullptr;
+                int32_t bodyIndex = -1;
+                float mass = 0.0f;
+                uint8_t motionType = 0;
+                valid = Halo3ContactObjectDataForHandle(
+                            handle, data, &kind) &&
+                    data && *reinterpret_cast<const int32_t*>(
+                                data + kHalo3ObjectParentOffset) == -1 &&
+                    Halo3ContactMassForObjectData(
+                        data, component, bodyIndex, mass, &motionType) &&
+                    PhysicalContactLeftGrabCandidate(
+                        true, kind, motionType, mass);
+                if (valid)
+                    g_halo3ObjectSetVelocities(handle, velocity, angular);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                faulted = true;
+            }
+        }
+        if (faulted)
+        {
+            g_halo3LeftGrabStage.store(
+                static_cast<uint32_t>(Halo3LeftGrabStage::Faulted),
+                std::memory_order_relaxed);
+            g_halo3LeftGrabBindings.store(false, std::memory_order_release);
+            g_halo3LeftGrabActiveHandle.store(-1, std::memory_order_release);
+            g_halo3LeftGrabCandidateHandle.store(
+                -1, std::memory_order_relaxed);
+            g_halo3LeftGrabCandidateSampleMs.store(
+                0, std::memory_order_relaxed);
+            return;
+        }
+        if (!valid)
+            return;
+        g_halo3LeftGrabApplied.fetch_add(1, std::memory_order_relaxed);
+        g_halo3LeftGrabStage.store(
+            static_cast<uint32_t>(
+                mode == kHalo3LeftGrabCommandRelease
+                    ? Halo3LeftGrabStage::Released
+                    : Halo3LeftGrabStage::Holding),
+            std::memory_order_relaxed);
+    }
+
     // Authoritative Halo 3 simulation thread. H3EK's objects_update body owns
     // the object_update_absolute_index transaction; the unique retail homolog
     // at +0x34067C carries the same object-list/update-loop invariants. Native
@@ -11193,6 +11379,10 @@ namespace
                     std::memory_order_relaxed);
             }
         }
+        // A deliberate left-hand hold wins if the same object also received a
+        // right-weapon contact this tick. This ordering prevents the nudge
+        // response from knocking an actively held prop out of the palm.
+        Halo3ConsumeLeftGrabCommand();
     }
 
     // Camera-thread-only. Native writes are reached only after the same
@@ -13729,6 +13919,485 @@ namespace
         }
     }
 
+    bool Halo3LeftPalmWorldPose(
+        const VrControllerMotionSnapshot& motion,
+        PhysicalContactTransform& palmTransform,
+        PhysicalContactVec3& palmVelocityMetersPerSecond,
+        PhysicalContactVec3& palmAngularRadiansPerSecond)
+    {
+        palmTransform = {};
+        palmVelocityMetersPerSecond = {};
+        palmAngularRadiansPerSecond = {};
+        if (!motion.poseValid || !motion.linearVelocityValid ||
+            !g_camValid.load(std::memory_order_acquire) ||
+            !g_baseCamValid.load(std::memory_order_acquire))
+            return false;
+        float basis[9]{};
+        float hullYaw = 0.0f;
+        float hullPitch = 0.0f;
+        const bool followValid =
+            Halo3ReadRollStableFollow(hullYaw, hullPitch);
+        BuildTrackedGameBasisFromFrame(
+            motion.orientation, false, followValid, hullYaw, hullPitch,
+            basis);
+        const float dx = motion.position[0] - g_headPosRef[0];
+        const float dy = motion.position[1] - g_headPosRef[1];
+        const float dz = motion.position[2] - g_headPosRef[2];
+        const float sh = std::sin(g_headYawRef);
+        const float ch = std::cos(g_headYawRef);
+        const float roomForward = dx * sh - dz * ch;
+        const float roomRight = dx * ch + dz * sh;
+        const float cg = std::cos(g_gameYawRef);
+        const float sg = std::sin(g_gameYawRef);
+        const float worldScale =
+            g_worldScale.load(std::memory_order_relaxed);
+        if (!std::isfinite(worldScale) || worldScale < 0.05f ||
+            worldScale > 2.0f)
+            return false;
+        float offset[3]{};
+        float followBasis[9]{};
+        float followLocal[3] = {roomForward, -roomRight, dy};
+        float followedOffset[3]{};
+        const bool positionFollows = followValid &&
+            Halo3ComposeRollStableFollowBasis(
+                hullYaw, hullPitch, g_gameYawRef, 0.0f, 0.0f, 0.0f,
+                followBasis) &&
+            Halo3TransformBasisVector(
+                followBasis, followLocal, followedOffset);
+        if (positionFollows)
+        {
+            for (int axis = 0; axis < 3; ++axis)
+                offset[axis] = followedOffset[axis] * worldScale;
+        }
+        else
+        {
+            offset[0] =
+                (cg * roomForward + sg * roomRight) * worldScale;
+            offset[1] =
+                (sg * roomForward - cg * roomRight) * worldScale;
+            offset[2] = dy * worldScale;
+        }
+        palmTransform.forward = PhysicalContactNormalize(
+            {basis[0], basis[1], basis[2]});
+        palmTransform.left = PhysicalContactNormalize(
+            {basis[3], basis[4], basis[5]}, {0.0f, 1.0f, 0.0f});
+        palmTransform.up = PhysicalContactNormalize(
+            {basis[6], basis[7], basis[8]}, {0.0f, 0.0f, 1.0f});
+        palmTransform.scale = 1.0f;
+        const float standoffMeters =
+            Clamp(g_config.left_hand_forward_m, -0.15f, 0.30f) +
+            Clamp(g_config.left_grip_forward_m, -0.05f, 0.25f);
+        palmTransform.position = {
+            g_baseCamX.load(std::memory_order_relaxed) + offset[0],
+            g_baseCamY.load(std::memory_order_relaxed) + offset[1],
+            g_baseCamZ.load(std::memory_order_relaxed) + offset[2]};
+        palmTransform.position = palmTransform.position +
+            palmTransform.forward * (standoffMeters * worldScale);
+        if (!PhysicalContactTrackingVectorToGame(
+                {motion.linearVelocity[0], motion.linearVelocity[1],
+                 motion.linearVelocity[2]},
+                g_headYawRef, g_gameYawRef,
+                palmVelocityMetersPerSecond))
+            return false;
+        if (motion.angularVelocityValid &&
+            !PhysicalContactTrackingVectorToGame(
+                {motion.angularVelocity[0], motion.angularVelocity[1],
+                 motion.angularVelocity[2]},
+                g_headYawRef, g_gameYawRef,
+                palmAngularRadiansPerSecond))
+            return false;
+        const float angularSpeed = PhysicalContactLength(
+            palmAngularRadiansPerSecond);
+        if (angularSpeed > 12.0f)
+            palmAngularRadiansPerSecond =
+                palmAngularRadiansPerSecond * (12.0f / angularSpeed);
+        palmVelocityMetersPerSecond = palmVelocityMetersPerSecond +
+            PhysicalContactCross(
+                palmAngularRadiansPerSecond,
+                palmTransform.forward * standoffMeters);
+        return PhysicalContactTransformFinite(palmTransform) &&
+            PhysicalContactFinite(palmVelocityMetersPerSecond) &&
+            PhysicalContactFinite(palmAngularRadiansPerSecond);
+    }
+
+    bool Halo3LeftPalmOverlapsObject(
+        int32_t handle, const unsigned char* data,
+        const PhysicalContactConvexShape& palmShape,
+        const PhysicalContactTransform& palmTransform,
+        float worldScale)
+    {
+        PhysicalContactCompoundShape targetShape{};
+        PhysicalContactTransform targetTransform{};
+        PhysicalContactTriangleMesh triangleMesh{};
+        bool requiresNativeConfirmation = false;
+        if (Halo3ContactDetailedTargetShape(
+                handle, data, targetShape, targetTransform,
+                requiresNativeConfirmation, &triangleMesh))
+        {
+            if (requiresNativeConfirmation)
+                return false;
+            if (PhysicalContactTriangleMeshValid(triangleMesh))
+            {
+                for (uint16_t triangle = 0;
+                     triangle < triangleMesh.triangleCount; ++triangle)
+                {
+                    if (PhysicalContactTriangleConvexIntersect(
+                            triangleMesh.triangles[triangle], targetTransform,
+                            palmShape, palmTransform,
+                            kHalo3ContactTriangleSurfaceRadiusMeters *
+                                worldScale))
+                        return true;
+                }
+                return false;
+            }
+            if (PhysicalContactCompoundValid(targetShape))
+            {
+                for (uint16_t child = 0;
+                     child < targetShape.childCount; ++child)
+                {
+                    if (PhysicalContactConvexIntersect(
+                            palmShape, palmTransform,
+                            targetShape.children[child], targetTransform))
+                        return true;
+                }
+            }
+            return false;
+        }
+        if (!Halo3ContactShapeForObject(data, targetShape))
+            return false;
+        targetTransform = Halo3ContactObjectTransform(data);
+        if (!PhysicalContactTransformFinite(targetTransform))
+            return false;
+        for (uint16_t child = 0; child < targetShape.childCount; ++child)
+        {
+            if (PhysicalContactConvexIntersect(
+                    palmShape, palmTransform, targetShape.children[child],
+                    targetTransform))
+                return true;
+        }
+        return false;
+    }
+
+    // Camera-thread producer for the left-hand pickup transaction. It scans
+    // only lightweight dynamic object kinds, requires exact authored overlap,
+    // and publishes bounded velocity commands for the simulation thread.
+    void Halo3ProcessLeftHandGrab(uint64_t nowMs)
+    {
+        const uint32_t generation =
+            g_halo3RuntimeGeneration.load(std::memory_order_acquire);
+        bool paused = true;
+        int32_t scene = -1;
+        int32_t shot = -1;
+        const bool gate = g_config.physical_weapon_contact && generation &&
+            g_halo3LeftGrabBindings.load(std::memory_order_acquire) &&
+            g_halo3VehicleBinding.load(std::memory_order_acquire) ==
+                static_cast<uint8_t>(Halo3VehicleBindingState::Installed) &&
+            g_engineTlsIndex && g_enabled.load(std::memory_order_relaxed) &&
+            g_vrAim.load(std::memory_order_relaxed) &&
+            TitleAdapter_GetRuntimeMode() == RuntimeMode::Gameplay &&
+            Halo3VehicleSnapshotState(
+                g_halo3VehicleSnapshot.load(std::memory_order_acquire),
+                generation) == Halo3VehicleState::OnFoot &&
+            ReadEnginePaused(paused) && !paused &&
+            ReadCinematicControl(scene, shot) ==
+                CinematicControlState::PlayerControlled;
+        if (!gate)
+        {
+            g_halo3LeftGrabStage.store(
+                static_cast<uint32_t>(
+                    g_config.physical_weapon_contact
+                        ? Halo3LeftGrabStage::BaseGate
+                        : Halo3LeftGrabStage::Disabled),
+                std::memory_order_relaxed);
+            Halo3ResetLeftGrab();
+            return;
+        }
+
+        VrControllerMotionSnapshot motion{};
+        if (!VR_GetLeftControllerMotion(motion) || !motion.poseValid ||
+            !motion.linearVelocityValid || !motion.gripValid ||
+            !motion.sampleMs || nowMs < motion.sampleMs ||
+            nowMs - motion.sampleMs > 100)
+        {
+            g_halo3LeftGrabStage.store(
+                static_cast<uint32_t>(Halo3LeftGrabStage::Motion),
+                std::memory_order_relaxed);
+            Halo3ResetLeftGrab();
+            return;
+        }
+        if (motion.serial == g_halo3LeftGrabCamera.lastMotionSerial)
+            return;
+        g_halo3LeftGrabCamera.lastMotionSerial = motion.serial;
+
+        PhysicalContactTransform palmTransform{};
+        PhysicalContactVec3 palmVelocity{};
+        PhysicalContactVec3 palmAngular{};
+        if (!Halo3LeftPalmWorldPose(
+                motion, palmTransform, palmVelocity, palmAngular))
+        {
+            g_halo3LeftGrabStage.store(
+                static_cast<uint32_t>(Halo3LeftGrabStage::Motion),
+                std::memory_order_relaxed);
+            Halo3ResetLeftGrab();
+            return;
+        }
+        const bool gripHeld = PhysicalContactGripHeld(
+            motion.grip, g_halo3LeftGrabCamera.gripHeld);
+        g_halo3LeftGrabCamera.gripHeld = gripHeld;
+        const float worldScale =
+            g_worldScale.load(std::memory_order_relaxed);
+
+        bool faulted = false;
+        __try
+        {
+            auto** slots = reinterpret_cast<void**>(__readgsqword(0x58));
+            auto* tls = slots ? reinterpret_cast<unsigned char*>(
+                slots[*g_engineTlsIndex]) : nullptr;
+            auto* gameOptions = tls
+                ? *reinterpret_cast<unsigned char**>(tls + 0x48) : nullptr;
+            const bool cooperative = gameOptions && gameOptions[0x10] == 1
+                ? g_halo3GameIsCooperative() : false;
+            if (!gameOptions || !PhysicalContactGameModeAllowed(
+                    gameOptions[0x10], gameOptions[0x11], cooperative))
+            {
+                Halo3ResetLeftGrab();
+                return;
+            }
+            auto* table = tls ? *reinterpret_cast<unsigned char**>(
+                tls + kHalo3TlsObjectTableOffset) : nullptr;
+            if (!table)
+            {
+                Halo3ResetLeftGrab();
+                return;
+            }
+            OdstDataArrayHeaderView header{};
+            header.nameIsObject =
+                memcmp(table + kOdstDataArrayNameOffset, "object", 7) == 0;
+            header.signature = *reinterpret_cast<const uint32_t*>(
+                table + kOdstDataArraySignatureOffset);
+            header.maximumCount = *reinterpret_cast<const uint32_t*>(
+                table + kOdstDataArrayMaxCountOffset);
+            header.elementSize = *reinterpret_cast<const uint32_t*>(
+                table + kOdstDataArrayElementSizeOffset);
+            header.firstUnallocated = *reinterpret_cast<const uint32_t*>(
+                table + kOdstDataArrayFirstUnallocatedOffset);
+            header.valid = *(table + kOdstDataArrayValidOffset);
+            auto* entries = *reinterpret_cast<unsigned char**>(
+                table + kOdstDataArrayElementsOffset);
+            if (!OdstObjectTableIsWalkable(header) || !entries)
+            {
+                Halo3ResetLeftGrab();
+                return;
+            }
+
+            const int32_t unitHandle = g_halo3PlayerUnitGetter(0);
+            unsigned char* unitData = nullptr;
+            if (unitHandle == -1 ||
+                !Halo3ContactObjectDataForHandle(unitHandle, unitData))
+            {
+                Halo3ResetLeftGrab();
+                return;
+            }
+            const int weaponSlot =
+                *reinterpret_cast<const int8_t*>(unitData + 0x262);
+            const int32_t weaponHandle = weaponSlot >= 0 && weaponSlot < 4
+                ? *reinterpret_cast<const int32_t*>(
+                      unitData + 0x268 + weaponSlot * 4)
+                : -1;
+
+            if (g_halo3LeftGrabCamera.activeHandle != -1)
+            {
+                const int32_t handle =
+                    g_halo3LeftGrabCamera.activeHandle;
+                if (!gripHeld)
+                {
+                    Halo3PublishLeftGrabCommand(
+                        generation, nowMs, handle,
+                        kHalo3LeftGrabCommandRelease,
+                        palmVelocity * worldScale, palmAngular);
+                    g_halo3LeftGrabReleases.fetch_add(
+                        1, std::memory_order_relaxed);
+                    g_halo3LeftGrabCamera.activeHandle = -1;
+                    g_halo3LeftGrabActiveHandle.store(
+                        -1, std::memory_order_release);
+                    g_halo3LeftGrabCandidateHandle.store(
+                        -1, std::memory_order_relaxed);
+                    g_halo3LeftGrabCandidateSampleMs.store(
+                        0, std::memory_order_relaxed);
+                    g_halo3LeftGrabTargetMass.store(
+                        0.0f, std::memory_order_relaxed);
+                    g_halo3LeftGrabStage.store(
+                        static_cast<uint32_t>(
+                            Halo3LeftGrabStage::Released),
+                        std::memory_order_relaxed);
+                    return;
+                }
+                unsigned char* data = nullptr;
+                uint8_t kind = 0xFF;
+                void* component = nullptr;
+                int32_t bodyIndex = -1;
+                float mass = 0.0f;
+                uint8_t motionType = 0;
+                float centreRaw[3]{};
+                const bool valid = Halo3ContactObjectDataForHandle(
+                        handle, data, &kind) && data &&
+                    *reinterpret_cast<const int32_t*>(
+                        data + kHalo3ObjectParentOffset) == -1 &&
+                    Halo3ContactMassForObjectData(
+                        data, component, bodyIndex, mass, &motionType) &&
+                    PhysicalContactLeftGrabCandidate(
+                        true, kind, motionType, mass) &&
+                    g_halo3ObjectGetCenter &&
+                    g_halo3ObjectGetCenter(handle, centreRaw) &&
+                    PhysicalContactFinite(
+                        {centreRaw[0], centreRaw[1], centreRaw[2]});
+                if (!valid)
+                {
+                    Halo3ResetLeftGrab();
+                    return;
+                }
+                const PhysicalContactVec3 desiredCentre =
+                    palmTransform.position +
+                    g_halo3LeftGrabCamera.centreOffset;
+                const PhysicalContactVec3 followVelocity =
+                    PhysicalContactLeftGrabFollowVelocity(
+                        {centreRaw[0], centreRaw[1], centreRaw[2]},
+                        desiredCentre, palmVelocity, worldScale);
+                Halo3PublishLeftGrabCommand(
+                    generation, nowMs, handle,
+                    kHalo3LeftGrabCommandFollow, followVelocity, palmAngular);
+                g_halo3LeftGrabCandidateHandle.store(
+                    handle, std::memory_order_relaxed);
+                g_halo3LeftGrabCandidateSampleMs.store(
+                    nowMs, std::memory_order_release);
+                g_halo3LeftGrabActiveHandle.store(
+                    handle, std::memory_order_release);
+                g_halo3LeftGrabTargetMass.store(
+                    mass, std::memory_order_relaxed);
+                g_halo3LeftGrabStage.store(
+                    static_cast<uint32_t>(Halo3LeftGrabStage::Holding),
+                    std::memory_order_relaxed);
+                return;
+            }
+
+            g_halo3LeftGrabStage.store(
+                static_cast<uint32_t>(Halo3LeftGrabStage::Searching),
+                std::memory_order_relaxed);
+            PhysicalContactConvexShape palmShape{};
+            palmShape.vertexCount = 1;
+            palmShape.vertices[0] = {};
+            palmShape.radius = 0.055f * worldScale;
+            int32_t closestHandle = -1;
+            float closestMass = 0.0f;
+            PhysicalContactVec3 closestCentre{};
+            float closestDistanceSquared = FLT_MAX;
+            const uint32_t limit = std::min(
+                header.firstUnallocated, header.maximumCount);
+            for (uint32_t index = 0; index < limit; ++index)
+            {
+                auto* entry = entries + static_cast<size_t>(index) *
+                    kHalo3ObjectEntryStride;
+                const uint16_t identifier =
+                    *reinterpret_cast<const uint16_t*>(entry);
+                if (!OdstObjectEntryIsLive(identifier))
+                    continue;
+                const int32_t handle = static_cast<int32_t>(
+                    (uint32_t{identifier} << 16) | index);
+                const uint8_t kind =
+                    *(entry + kHalo3ObjectEntryKindOffset);
+                if (handle == unitHandle || handle == weaponHandle ||
+                    !PhysicalContactLeftGrabKind(kind))
+                    continue;
+                auto* data = *reinterpret_cast<unsigned char**>(
+                    entry + kHalo3ObjectEntryDataOffset);
+                if (!data || *reinterpret_cast<const int32_t*>(
+                                 data + kHalo3ObjectParentOffset) != -1)
+                    continue;
+                void* component = nullptr;
+                int32_t bodyIndex = -1;
+                float mass = 0.0f;
+                uint8_t motionType = 0;
+                if (!Halo3ContactMassForObjectData(
+                        data, component, bodyIndex, mass, &motionType) ||
+                    !PhysicalContactLeftGrabCandidate(
+                        true, kind, motionType, mass))
+                    continue;
+                const auto* bounds = reinterpret_cast<const float*>(
+                    data + kHalo3ObjectBoundingCenterOffset);
+                const float radius =
+                    *reinterpret_cast<const float*>(data + 0x28);
+                const PhysicalContactVec3 boundsCentre{
+                    bounds[0], bounds[1], bounds[2]};
+                if (!PhysicalContactFinite(boundsCentre) ||
+                    !std::isfinite(radius) || radius <= 0.01f ||
+                    radius > 5.0f)
+                    continue;
+                const float distanceSquared = PhysicalContactLengthSquared(
+                    boundsCentre - palmTransform.position);
+                const float broadRadius = radius + palmShape.radius;
+                if (distanceSquared > broadRadius * broadRadius ||
+                    distanceSquared >= closestDistanceSquared ||
+                    !Halo3LeftPalmOverlapsObject(
+                        handle, data, palmShape, palmTransform, worldScale))
+                    continue;
+                float centreRaw[3]{};
+                if (!g_halo3ObjectGetCenter ||
+                    !g_halo3ObjectGetCenter(handle, centreRaw))
+                    continue;
+                const PhysicalContactVec3 centre{
+                    centreRaw[0], centreRaw[1], centreRaw[2]};
+                if (!PhysicalContactFinite(centre))
+                    continue;
+                closestDistanceSquared = distanceSquared;
+                closestHandle = handle;
+                closestMass = mass;
+                closestCentre = centre;
+            }
+            g_halo3LeftGrabCandidateHandle.store(
+                closestHandle, std::memory_order_relaxed);
+            g_halo3LeftGrabCandidateSampleMs.store(
+                closestHandle != -1 ? nowMs : 0,
+                std::memory_order_release);
+            g_halo3LeftGrabTargetMass.store(
+                closestHandle != -1 ? closestMass : 0.0f,
+                std::memory_order_relaxed);
+            if (closestHandle == -1)
+                return;
+            g_halo3LeftGrabStage.store(
+                static_cast<uint32_t>(Halo3LeftGrabStage::Candidate),
+                std::memory_order_relaxed);
+            if (!gripHeld)
+                return;
+
+            g_halo3LeftGrabCamera.activeHandle = closestHandle;
+            g_halo3LeftGrabCamera.centreOffset =
+                closestCentre - palmTransform.position;
+            g_halo3LeftGrabActiveHandle.store(
+                closestHandle, std::memory_order_release);
+            g_halo3LeftGrabAcquisitions.fetch_add(
+                1, std::memory_order_relaxed);
+            Halo3PublishLeftGrabCommand(
+                generation, nowMs, closestHandle,
+                kHalo3LeftGrabCommandFollow,
+                palmVelocity * worldScale, palmAngular);
+            g_halo3LeftGrabStage.store(
+                static_cast<uint32_t>(Halo3LeftGrabStage::Holding),
+                std::memory_order_relaxed);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            faulted = true;
+        }
+        if (faulted)
+        {
+            g_halo3LeftGrabStage.store(
+                static_cast<uint32_t>(Halo3LeftGrabStage::Faulted),
+                std::memory_order_relaxed);
+            g_halo3LeftGrabBindings.store(false, std::memory_order_release);
+            Halo3ResetLeftGrab();
+        }
+    }
+
     void LogHalo3PhysicalContactStatus()
     {
         static uint64_t nextLogMs = 0;
@@ -13886,6 +14555,34 @@ namespace
                 std::memory_order_relaxed),
             g_halo3ContactWallVertices.load(std::memory_order_relaxed),
             g_halo3ContactWallPlanes.load(std::memory_order_relaxed));
+        static constexpr const char* kGrabStageNames[] = {
+            "disabled", "base-gate", "motion", "searching", "candidate",
+            "holding", "released", "faulted"};
+        const uint32_t grabStage =
+            g_halo3LeftGrabStage.load(std::memory_order_relaxed);
+        LOG("H3 left grab status: stage=%s bindings=%u candidate=0x%08X "
+            "active=0x%08X mass=%.3f acquisitions=%llu commands=%llu "
+            "applied=%llu releases=%llu serial=%llu appliedSerial=%llu",
+            grabStage < std::size(kGrabStageNames)
+                ? kGrabStageNames[grabStage] : "invalid",
+            g_halo3LeftGrabBindings.load(std::memory_order_relaxed) ? 1u : 0u,
+            static_cast<uint32_t>(g_halo3LeftGrabCandidateHandle.load(
+                std::memory_order_relaxed)),
+            static_cast<uint32_t>(g_halo3LeftGrabActiveHandle.load(
+                std::memory_order_relaxed)),
+            g_halo3LeftGrabTargetMass.load(std::memory_order_relaxed),
+            (unsigned long long)g_halo3LeftGrabAcquisitions.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3LeftGrabCommands.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3LeftGrabApplied.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3LeftGrabReleases.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3LeftGrabCommandSerial.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3LeftGrabAppliedSerial.load(
+                std::memory_order_relaxed));
         LOG("H3 physical contact visible IDs: prepared=0x%08X "
             "slotMatches=%llu slotMisses=%llu submissions=%llu "
             "last=0x%016llX keys=[%016llX %016llX %016llX %016llX "
@@ -14092,6 +14789,7 @@ namespace
                 GameTitle::Halo3, runtimeGeneration, cameraNowMs);
             Halo3SampleVehicleState(cameraNowMs);
             Halo3ProcessPhysicalWeaponContact(cameraNowMs);
+            Halo3ProcessLeftHandGrab(cameraNowMs);
         }
         // Low-frequency timing proof paired with vr.cpp's HMD sample-rate log.
         // The hook normally runs multiple times per presented frame, and every
@@ -19207,6 +19905,9 @@ namespace
                 false, std::memory_order_release);
             g_halo3PhysicalMeleeBindings.store(
                 false, std::memory_order_release);
+            g_halo3LeftGrabBindings.store(
+                false, std::memory_order_release);
+            Halo3ResetLeftGrab();
             g_halo3ObjectSetVelocity = nullptr;
             g_halo3ObjectSetVelocities = nullptr;
             g_origHalo3ObjectsUpdate = nullptr;
@@ -19401,6 +20102,8 @@ namespace
                     RememberInstalledGameHook(
                         reinterpret_cast<void*>(updateHit));
                     g_halo3PhysicalContactBindings.store(
+                        true, std::memory_order_release);
+                    g_halo3LeftGrabBindings.store(
                         true, std::memory_order_release);
                 }
                 else
@@ -36995,6 +37698,24 @@ void Game_Halo3UpdateVehicleWheel(const VrPadState& pad)
 bool Game_Halo3VehicleSwallowsGrips()
 {
     return g_halo3WheelSwallowsGrips.load(std::memory_order_acquire) != 0;
+}
+
+bool Game_Halo3PhysicalGrabSwallowsLeftGrip()
+{
+    if (!g_config.physical_weapon_contact ||
+        !g_halo3RuntimeGeneration.load(std::memory_order_acquire) ||
+        !g_halo3LeftGrabBindings.load(std::memory_order_acquire))
+        return false;
+    const int32_t active =
+        g_halo3LeftGrabActiveHandle.load(std::memory_order_acquire);
+    const int32_t candidate =
+        g_halo3LeftGrabCandidateHandle.load(std::memory_order_relaxed);
+    const uint64_t sampleMs =
+        g_halo3LeftGrabCandidateSampleMs.load(std::memory_order_acquire);
+    const uint64_t nowMs = GetTickCount64();
+    return (active != -1 || candidate != -1) && sampleMs &&
+        nowMs >= sampleMs &&
+        nowMs - sampleMs <= 120;
 }
 
 // True while the wheel, not the stick, is authoring the steering.

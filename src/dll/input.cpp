@@ -229,9 +229,12 @@ namespace
         previousMenu = pad.menu;
         if (pad.menu || inputNow < g_startPulseUntilMs.load())
             btn |= XINPUT_GAMEPAD_START;
+        const bool leftPhysicalGrab =
+            Game_Halo3PhysicalGrabSwallowsLeftGrip();
         if (!wheelGesture)
         {
-            if (pad.gripL > 0.6f) btn |= XINPUT_GAMEPAD_LEFT_SHOULDER;
+            if (pad.gripL > 0.6f && !leftPhysicalGrab)
+                btn |= XINPUT_GAMEPAD_LEFT_SHOULDER;
             if (pad.gripR > 0.6f) btn |= XINPUT_GAMEPAD_RIGHT_SHOULDER;
         }
         state->Gamepad.wButtons = btn;

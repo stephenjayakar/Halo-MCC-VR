@@ -9451,11 +9451,43 @@ int main()
               !PhysicalContactUseExactBodyPointImpulse(3, 32) &&
               !PhysicalContactUseExactBodyPointImpulse(1, 4) &&
               !PhysicalContactUseExactBodyPointImpulse(2, 4) &&
+              PhysicalContactLeftGrabCandidate(true, 2, 4, 2.0f) &&
+              PhysicalContactLeftGrabCandidate(true, 3, 4, 0.4f) &&
+              PhysicalContactLeftGrabCandidate(true, 10, 4, 6.4f) &&
+              !PhysicalContactLeftGrabCandidate(false, 2, 4, 2.0f) &&
+              !PhysicalContactLeftGrabCandidate(true, 1, 4, 2.0f) &&
+              !PhysicalContactLeftGrabCandidate(true, 2, 6, 2.0f) &&
+              !PhysicalContactLeftGrabCandidate(true, 2, 4, 25.1f) &&
+              PhysicalContactGripHeld(0.65f, false) &&
+              PhysicalContactGripHeld(0.46f, true) &&
+              !PhysicalContactGripHeld(0.64f, false) &&
+              !PhysicalContactGripHeld(0.45f, true) &&
               PhysicalContactImpulseDeltaMetersPerSecond(0.10f) == 0.05f &&
               PhysicalContactImpulseDeltaMetersPerSecond(20.0f) == 1.5f,
             "Movable-kind filtering and animated exact-body transport stay "
             "inside their proven domains, and velocity response remains "
             "clamped");
+
+        const PhysicalContactVec3 grabFollow =
+            PhysicalContactLeftGrabFollowVelocity(
+                {0.0f, 0.0f, 0.0f}, {0.05f, 0.0f, 0.0f},
+                {0.20f, 0.0f, 0.0f}, 0.5f);
+        const PhysicalContactVec3 grabCorrectionClamped =
+            PhysicalContactLeftGrabFollowVelocity(
+                {0.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, {}, 0.5f);
+        const PhysicalContactVec3 grabSpeedClamped =
+            PhysicalContactLeftGrabFollowVelocity(
+                {}, {}, {20.0f, 0.0f, 0.0f}, 0.5f);
+        const PhysicalContactVec3 grabInvalid =
+            PhysicalContactLeftGrabFollowVelocity(
+                {}, {}, {}, 0.0f);
+        Check(std::fabs(grabFollow.x - 0.70f) < 1.0e-5f &&
+              std::fabs(grabCorrectionClamped.x - 1.25f) < 1.0e-5f &&
+              std::fabs(grabSpeedClamped.x - 4.0f) < 1.0e-5f &&
+              PhysicalContactLengthSquared(grabInvalid) == 0.0f,
+            "Left-hand grab follows the tracked palm without an acquisition "
+            "snap, bounds positional correction to 2.5 m/s, bounds throws to "
+            "8 m/s, converts world scale, and rejects invalid scale");
 
         const PhysicalContactDebugTargetRank settledWeapon =
             PhysicalContactRankDebugTarget(2, 2.0f, 0.02f, 100.0f, false);

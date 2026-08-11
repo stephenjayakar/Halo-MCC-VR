@@ -165,6 +165,14 @@ try {
         halo3_physical_weapon_melee_speed_default_mps = 1.50
         halo3_physical_weapon_slow_contact_damage = $false
         halo3_physical_weapon_native_authored_melee = $true
+        halo3_left_hand_physical_pickup_compiled = $true
+        halo3_left_hand_physical_pickup_parent_opt_in =
+            'physical_weapon_contact'
+        halo3_left_hand_physical_pickup_scope =
+            'exact-palm-overlap-dynamic-weapons-equipment-garbage-crates'
+        halo3_left_hand_physical_pickup_max_mass_kg = 25.0
+        halo3_left_hand_physical_pickup_geometry =
+            'authored-collision-triangles-with-proven-havok-convex-fallback'
         reach_controller_input_enabled = $true
         reach_render_candidate_compiled = $true
         reach_loaded_image_preflight_enabled = $true

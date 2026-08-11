@@ -1358,6 +1358,42 @@ melee path continues. Telemetry now reports `targetBody` and `commandBody`.
 Pure tests cover the exact-body source/index boundary. Runtime and headset
 acceptance remain pending.
 
+### Left-hand physical pickup candidate
+
+The pickup candidate reuses only the already proven Halo 3 object table,
+authored collision-model extraction, Havok mass/motion lookup, object center,
+and post-`objects_update` velocity binding. OpenXR now publishes the left aim
+pose, linear velocity, angular velocity, grip value, timestamp, and serial as
+one bounded lock-free snapshot. The camera callback never enters the legacy
+controller lock.
+
+The palm is a `5.5 cm` sphere at the same configured wrist-to-visible-palm
+point used by two-hand aiming. A bounds sphere is only the broad phase. A grab
+candidate must overlap the target's fixed-storage authored triangle mesh or,
+when that is unavailable, its proven Havok convex. Candidates are limited to
+root dynamic weapon, equipment/grenade, garbage, and crate-class objects with
+a native mass from `0.01` through `25 kg`. The player, held weapon, bipeds,
+vehicles, scenery, projectiles, parented attachments, keyframed bodies, and
+invalid/stale data are rejected.
+
+Left grip uses `0.65` acquisition and `0.45` release hysteresis. Acquisition
+stores the current center-to-palm offset, so the object does not snap to the
+controller. Each later sample adds the tracked palm velocity to a bounded
+position correction (`12/s`, at most `2.5 m/s`) and caps total follow/release
+speed at `8 m/s`. Halo applies that linear and tracked angular velocity after
+its own object update; the object's native body, mass, inertia, contacts, and
+gravity remain intact. Release publishes the tracked palm velocity once for a
+bounded toss. The left-bumper/grenade input is withheld only while an exact
+candidate or active hold was published within `120 ms`; everywhere else the
+stock input remains available.
+
+Pickup owns a separate runtime binding and failure atom. A pickup fault clears
+only pickup and cannot disable right-hand contact, native melee, the camera,
+or OpenXR. Pure tests cover kind/motion/mass eligibility, exact-overlap
+requirement, grip hysteresis, no-snap follow correction, world-scale
+conversion, correction and toss clamps, and invalid scale. Runtime and headset
+acceptance remain pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
