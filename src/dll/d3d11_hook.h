@@ -48,3 +48,7 @@ size_t D3D_Halo3DecoratorWallPlanes(
     float clearanceWorldUnits, PhysicalContactWallPlane* planes,
     size_t planeCapacity, uint32_t* testedInstances = nullptr,
     uint32_t* solidDraws = nullptr);
+
+// Null-driver-only proof state: 0 waiting, 1 exact captured-mesh sweep passed,
+// 2 bounded attempts failed. Normal play never enables this path.
+uint32_t D3D_Halo3DecoratorSelfTestState();
