@@ -1679,6 +1679,20 @@ second replay against the current `bc44c6c` Valhalla null-driver log identifies
 the null device, structure, placed-object, and decorator wall paths without
 claiming headset acceptance.
 
+`tools/run-h3-contact-headset-session.ps1` is the real-headset capture wrapper.
+It refuses null/debug SteamVR settings, identifies the exact installed package
+from both installed hashes and a unique candidate manifest, verifies that
+physical contact is enabled, and supports either Steam or Microsoft Store. It
+can attach to an already open matching MCC process or start the installed
+edition-aware launcher. It never drives MCC menus. When MCC closes it preserves
+the log, verifies that installed bytes did not change, runs the analyzer, and
+writes a reproducible session manifest. It does not edit SteamVR, the game,
+`halomccvr.cfg`, or Easy Anti-Cheat. The settings safety self-test and a
+read-only `-VerifyOnly` check pass against installed `bc44c6c`; the latter
+matched both hashes, normal SteamVR settings, `physical_weapon_contact=1`, and
+the `1.50 m/s` threshold without launching any process. Full record-until-exit
+behavior intentionally awaits the next real-headset session.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
