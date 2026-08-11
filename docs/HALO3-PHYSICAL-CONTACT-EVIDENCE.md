@@ -1430,6 +1430,28 @@ requirement, grip hysteresis, no-snap follow correction, world-scale
 conversion, correction and toss clamps, and invalid scale. Runtime and headset
 acceptance remain pending.
 
+### Visible Forge launch recovery
+
+Two visible-state runs of installed source `dc03a63` reached the correct Halo 3
+Forge Launch Game panel with Construct, Forge, and the Start row selected, but
+MCC dropped the first synthetic Enter while the shell was settling.  A later
+visible Enter started the title without changing any game option.  The melee
+run then passed at
+`out/debug-openxr/20260811-030307988Z-melee.log` (SHA-256
+`C36549285C4E1AEF92FE853569DB3999C23DD24AF714DD951D0296EF36DE6979`),
+and the equipment/grenade run passed at
+`out/debug-openxr/20260811-030926727Z-equipment-scoop.log` (SHA-256
+`EA3521703D8021C0DCBCCBB8D83D753B9BD547F6A0796146B04C69F0C03A4904`).
+
+The internal validator now waits up to 25 seconds for the runtime log to prove
+that Halo 3 loaded.  It sends one recovery Enter only when that proof is still
+absent.  This avoids both the dropped-launch failure and an unconditional
+second input landing inside a successfully loading game.  The first unattended
+run of that recovery passed the exact visible-weapon gap scenario at
+`out/debug-openxr/20260811-031621916Z-visible-weapon-gap.log` (SHA-256
+`B148C42D9F607E3C2D6267EF3DDE11179C8DF0BA34AF13D761DA5A3B6EF2F4AE`).
+The tool change does not alter the installed runtime candidate.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

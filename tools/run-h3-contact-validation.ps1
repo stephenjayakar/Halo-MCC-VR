@@ -516,7 +516,28 @@ public static class HaloMccVrContactInput {
         Send-Enter
         Start-Sleep -Seconds 2
         Send-Enter
-        Start-Sleep -Seconds 10
+        # MCC can visibly accept the Launch Game panel while dropping this
+        # first scan-code during the shell transition.  Do not blindly send a
+        # second Enter: if the first one worked, that input would land in the
+        # loading game.  Wait long enough for the measured ~20 second Halo 3
+        # module admission, then retry only when the runtime log proves that
+        # the title never started.
+        $halo3Started = $false
+        for ($attempt = 0; $attempt -lt 50; ++$attempt) {
+            Start-Sleep -Milliseconds 500
+            $launchText = Get-NewLogText $runtimeLog $startedUtc
+            if ($launchText -match
+                'Title adapter: detected supported title Halo 3') {
+                $halo3Started = $true
+                break
+            }
+        }
+        if (-not $halo3Started) {
+            $mcc = Get-Process $mccProcessName -ErrorAction Stop
+            $null = [HaloMccVrContactInput]::SetForegroundWindow(
+                $mcc.MainWindowHandle)
+            Send-Enter
+        }
     }
     else {
         Write-Host 'MCC is ready for visible external Forge menu control.'
