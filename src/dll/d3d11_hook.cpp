@@ -51,6 +51,7 @@ static OMSetRenderTargetsFn g_origOMSetRenderTargets = nullptr;
 static CreateBufferFn g_origCreateBuffer = nullptr;
 static H3ResourceFixupFn g_origH3ResourceFixup = nullptr;
 static thread_local void* g_h3CurrentResourceContext = nullptr;
+static std::atomic<bool> g_h3ResourceProbeInstallStarted{false};
 static std::atomic<unsigned> g_h3DecoratorBufferProbeSamples{0};
 static std::atomic<unsigned> g_h3DecoratorExactProbeSamples{0};
 static std::atomic<unsigned> g_h3DecoratorBlockProbeSamples{0};
@@ -150,6 +151,49 @@ static void __fastcall H3ResourceFixupHook(void* context)
     g_h3CurrentResourceContext = previous;
 }
 
+static void TryInstallH3ResourceFixupProbe()
+{
+    if (g_origH3ResourceFixup || !GetModuleHandleW(L"halo3.dll"))
+        return;
+    bool expected = false;
+    if (!g_h3ResourceProbeInstallStarted.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel))
+        return;
+
+    static constexpr char kH3ResourceFixupSignature[] =
+        "48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 "
+        "41 56 41 57 48 8D 68 A1 48 81 EC A0 00 00 00 0F 10 41 30 83 "
+        "65 FF 00";
+    uintptr_t moduleBase = 0;
+    size_t moduleSize = 0;
+    uintptr_t fixup = 0;
+    uintptr_t secondFixup = 0;
+    if (sig::ModuleRange(L"halo3.dll", moduleBase, moduleSize))
+    {
+        fixup = sig::Find(moduleBase, moduleSize, kH3ResourceFixupSignature);
+        if (fixup && fixup + 1u < moduleBase + moduleSize)
+            secondFixup = sig::Find(
+                fixup + 1u, moduleBase + moduleSize - fixup - 1u,
+                kH3ResourceFixupSignature);
+    }
+    if (fixup && !secondFixup &&
+        MH_CreateHook(reinterpret_cast<void*>(fixup),
+                      (void*)&H3ResourceFixupHook,
+                      (void**)&g_origH3ResourceFixup) == MH_OK &&
+        MH_EnableHook(reinterpret_cast<void*>(fixup)) == MH_OK)
+    {
+        LOG("H3DECORBUF: resource-owner probe installed after Halo 3 load "
+            "(environment-only; owner=+0x%llX)",
+            static_cast<unsigned long long>(fixup - moduleBase));
+        return;
+    }
+    if (fixup)
+        MH_RemoveHook(reinterpret_cast<void*>(fixup));
+    g_origH3ResourceFixup = nullptr;
+    LOG("H3DECORBUF: resource-owner signature missing, ambiguous, or hook "
+        "failed; buffer-only probe remains active");
+}
+
 static void LogProbeResourceContext(const void* source, unsigned records)
 {
     MEMORY_BASIC_INFORMATION sourceInfo{};
@@ -208,6 +252,7 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
     ID3D11Device* device, const D3D11_BUFFER_DESC* desc,
     const D3D11_SUBRESOURCE_DATA* initialData, ID3D11Buffer** buffer)
 {
+    TryInstallH3ResourceFixupProbe();
     if (desc && initialData && initialData->pSysMem &&
         desc->ByteWidth >= 16u * 32u && (desc->ByteWidth % 16u) == 0)
     {
@@ -1483,41 +1528,12 @@ bool InstallD3D11Hooks()
             L"HALOMCCVR_H3_DECORATOR_BUFFER_PROBE",
             decoratorProbeValue, 2) > 0)
     {
-        static constexpr char kH3ResourceFixupSignature[] =
-            "48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 "
-            "41 56 41 57 48 8D 68 A1 48 81 EC A0 00 00 00 0F 10 41 30 83 "
-            "65 FF 00";
-        uintptr_t moduleBase = 0;
-        size_t moduleSize = 0;
-        uintptr_t fixup = 0;
-        uintptr_t secondFixup = 0;
-        if (sig::ModuleRange(L"halo3.dll", moduleBase, moduleSize))
-        {
-            fixup = sig::Find(moduleBase, moduleSize, kH3ResourceFixupSignature);
-            if (fixup && fixup + 1u < moduleBase + moduleSize)
-                secondFixup = sig::Find(
-                    fixup + 1u, moduleBase + moduleSize - fixup - 1u,
-                    kH3ResourceFixupSignature);
-        }
-        const bool bufferHookOk =
-            MH_CreateHook(deviceVtbl[3], (void*)&CreateBufferHook,
-                          (void**)&g_origCreateBuffer) == MH_OK;
-        const bool resourceHookOk = fixup && !secondFixup &&
-            MH_CreateHook(reinterpret_cast<void*>(fixup),
-                          (void*)&H3ResourceFixupHook,
-                          (void**)&g_origH3ResourceFixup) == MH_OK;
-        if (bufferHookOk && resourceHookOk)
-            LOG("H3DECORBUF: initial-data/resource-owner probe installed "
-                "(environment-only; owner=+0x%llX)",
-                static_cast<unsigned long long>(fixup - moduleBase));
+        if (MH_CreateHook(deviceVtbl[3], (void*)&CreateBufferHook,
+                          (void**)&g_origCreateBuffer) == MH_OK)
+            LOG("H3DECORBUF: initial-data probe installed; resource owner will "
+                "bind after Halo 3 loads (environment-only)");
         else
-        {
-            if (bufferHookOk)
-                MH_RemoveHook(deviceVtbl[3]);
-            if (resourceHookOk)
-                MH_RemoveHook(reinterpret_cast<void*>(fixup));
             LOG("H3DECORBUF: CreateBuffer hook failed; probe disabled");
-        }
     }
 
     IDXGISwapChain1* sc1 = nullptr;
