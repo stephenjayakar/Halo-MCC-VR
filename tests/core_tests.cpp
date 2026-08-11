@@ -9101,6 +9101,18 @@ int main()
             PhysicalContactDecodeH3DecoratorTriangleStrip(
                 packedPlaneStrip.data(), packedPlaneStrip.size(), 0, 3,
                 {}, {1.0f, 1.0f, 1.0f}, decodedPlaneStrip);
+        const bool decoratorBlockCrossed =
+            PhysicalContactSegmentIntersectsExpandedAabb(
+                {-2.0f, 0.5f, 0.5f}, {2.0f, 0.5f, 0.5f},
+                {}, {1.0f, 1.0f, 1.0f}, 0.0f);
+        const bool decoratorBlockNearMissAccepted =
+            PhysicalContactSegmentIntersectsExpandedAabb(
+                {-2.0f, 1.05f, 0.5f}, {2.0f, 1.05f, 0.5f},
+                {}, {1.0f, 1.0f, 1.0f}, 0.10f);
+        const bool decoratorBlockFarMissRejected =
+            !PhysicalContactSegmentIntersectsExpandedAabb(
+                {-2.0f, 1.20f, 0.5f}, {2.0f, 1.20f, 0.5f},
+                {}, {1.0f, 1.0f, 1.0f}, 0.10f);
         Check(decodedRock && decodedRockPart == 0 &&
               std::fabs(decodedRockPlacement.position.x - 83.8972266f) <
                   2.0e-5f &&
@@ -9116,12 +9128,15 @@ int main()
               PhysicalContactH3DecoratorMeshIsSolid(decodedSolidStrip) &&
               decodedPlane && decodedPlaneStrip.triangleCount == 1 &&
               !PhysicalContactH3DecoratorMeshIsSolid(decodedPlaneStrip) &&
+              decoratorBlockCrossed && decoratorBlockNearMissAccepted &&
+              decoratorBlockFarMissRejected &&
               !PhysicalContactDecodeH3DecoratorPlacement(
                   packedRockPlacement.data(), {}, {},
                   decodedRockPlacement),
             "Halo 3 decorator decoding reconstructs Valhalla position, "
             "rotation, and scale, expands exact strips, rejects planar foliage "
-            "as a rigid wall, and fails closed on invalid block bounds");
+            "as a rigid wall, rejects distant blocks before decoding, and "
+            "fails closed on invalid block bounds");
 
         const auto makeBenchmarkMesh = [&](uint16_t triangleCount,
                                            uint16_t groupCount) {

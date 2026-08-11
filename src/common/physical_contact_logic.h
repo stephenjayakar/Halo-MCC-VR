@@ -193,6 +193,50 @@ inline PhysicalContactVec3 PhysicalContactInverseTransformPoint(
     return PhysicalContactInverseTransformVector(t, world - t.position);
 }
 
+inline bool PhysicalContactSegmentIntersectsExpandedAabb(
+    PhysicalContactVec3 start, PhysicalContactVec3 end,
+    PhysicalContactVec3 minimum, PhysicalContactVec3 maximum,
+    float expansion)
+{
+    if (!PhysicalContactFinite(start) || !PhysicalContactFinite(end) ||
+        !PhysicalContactFinite(minimum) || !PhysicalContactFinite(maximum) ||
+        !std::isfinite(expansion) || expansion < 0.0f)
+        return false;
+    const float origins[3] = {start.x, start.y, start.z};
+    const PhysicalContactVec3 delta = end - start;
+    const float directions[3] = {delta.x, delta.y, delta.z};
+    const float lower[3] = {
+        minimum.x - expansion, minimum.y - expansion,
+        minimum.z - expansion};
+    const float upper[3] = {
+        maximum.x + expansion, maximum.y + expansion,
+        maximum.z + expansion};
+    float first = 0.0f;
+    float last = 1.0f;
+    for (unsigned axis = 0; axis < 3u; ++axis)
+    {
+        if (lower[axis] > upper[axis])
+            return false;
+        if (std::fabs(directions[axis]) <= 1.0e-8f)
+        {
+            if (origins[axis] < lower[axis] || origins[axis] > upper[axis])
+                return false;
+            continue;
+        }
+        float nearFraction =
+            (lower[axis] - origins[axis]) / directions[axis];
+        float farFraction =
+            (upper[axis] - origins[axis]) / directions[axis];
+        if (nearFraction > farFraction)
+            std::swap(nearFraction, farFraction);
+        first = std::max(first, nearFraction);
+        last = std::min(last, farFraction);
+        if (first > last)
+            return false;
+    }
+    return true;
+}
+
 inline PhysicalContactTransform PhysicalContactInterpolateTransform(
     const PhysicalContactTransform& from, const PhysicalContactTransform& to,
     float fraction)

@@ -963,6 +963,7 @@ size_t D3D_Halo3DecoratorWallPlanes(
     constexpr size_t kGeometryBytes =
         (PhysicalContactTriangleMesh::kMaximumTriangles + 2u) * 20u;
     std::array<uint8_t, kGeometryBytes> geometryBytes{};
+    std::array<uint8_t, 4096u * 16u> placementBytes{};
     const float weaponRadius = H3DecoratorMeshRadius(weapon) *
         std::max(previousWeapon.scale, currentWeapon.scale);
     uint32_t exactInstances = 0;
@@ -972,6 +973,30 @@ size_t D3D_Halo3DecoratorWallPlanes(
          exactInstances < kMaximumExactInstances; ++drawIndex)
     {
         const H3DecoratorFrameDraw& draw = draws[drawIndex];
+        const PhysicalContactVec3 blockMaximum{
+            draw.blockMinimum.x + draw.blockStep.x * 65535.0f,
+            draw.blockMinimum.y + draw.blockStep.y * 65535.0f,
+            draw.blockMinimum.z + draw.blockStep.z * 65535.0f};
+        const PhysicalContactVec3 localMaximum{
+            std::max(
+                std::fabs(draw.positionMinimum.x),
+                std::fabs(draw.positionMinimum.x + draw.positionSize.x)),
+            std::max(
+                std::fabs(draw.positionMinimum.y),
+                std::fabs(draw.positionMinimum.y + draw.positionSize.y)),
+            std::max(
+                std::fabs(draw.positionMinimum.z),
+                std::fabs(draw.positionMinimum.z + draw.positionSize.z))};
+        const float maximumTargetRadius =
+            PhysicalContactLength(localMaximum) * std::sqrt(2.10f);
+        if (!PhysicalContactFinite(blockMaximum) ||
+            !std::isfinite(maximumTargetRadius) ||
+            !PhysicalContactSegmentIntersectsExpandedAabb(
+                previousWeapon.position, currentWeapon.position,
+                draw.blockMinimum, blockMaximum,
+                weaponRadius + maximumTargetRadius +
+                    surfaceRadiusWorldUnits + clearanceWorldUnits))
+            continue;
         const size_t geometryOffset =
             static_cast<size_t>(draw.startVertex) * 20u;
         const size_t geometrySize =
@@ -992,24 +1017,26 @@ size_t D3D_Halo3DecoratorWallPlanes(
         if (solidDraws)
             ++*solidDraws;
 
+        const size_t placementSize =
+            static_cast<size_t>(draw.instanceCount) * 16u;
+        if (!draw.placementSource || placementSize > placementBytes.size() ||
+            draw.placementOffset > draw.placementBytes ||
+            placementSize > draw.placementBytes - draw.placementOffset ||
+            !H3DecoratorSafeCopy(
+                placementBytes.data(),
+                draw.placementSource + draw.placementOffset,
+                placementSize))
+            continue;
+
         for (uint32_t instance = 0;
              instance < draw.instanceCount && planeCount < planeCapacity &&
              exactInstances < kMaximumExactInstances; ++instance)
         {
-            const size_t placementOffset =
-                static_cast<size_t>(draw.placementOffset) +
-                static_cast<size_t>(instance) * 16u;
-            if (!draw.placementSource || placementOffset > draw.placementBytes ||
-                16u > draw.placementBytes - placementOffset)
-                break;
-            uint8_t placementBytes[16]{};
-            if (!H3DecoratorSafeCopy(
-                    placementBytes, draw.placementSource + placementOffset,
-                    sizeof(placementBytes)))
-                break;
             PhysicalContactTransform targetTransform{};
             if (!PhysicalContactDecodeH3DecoratorPlacement(
-                    placementBytes, draw.blockMinimum, draw.blockStep,
+                    placementBytes.data() +
+                        static_cast<size_t>(instance) * 16u,
+                    draw.blockMinimum, draw.blockStep,
                     targetTransform))
                 continue;
             const float targetRadius = target.groups[0].boundRadius *
