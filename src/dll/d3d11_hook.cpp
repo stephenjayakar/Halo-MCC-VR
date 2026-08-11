@@ -67,6 +67,7 @@ static std::atomic<unsigned> g_h3DecoratorExactProbeSamples{0};
 static std::atomic<unsigned> g_h3DecoratorBlockProbeSamples{0};
 static std::atomic<bool> g_h3DecoratorLiveBlockScanStarted{false};
 static std::atomic<bool> g_h3DecoratorDrawProbeEnabled{false};
+constexpr bool kEnableH3DecoratorInstancedDrawProbe = false;
 #if HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE
 static DrawIndexedFn g_origDrawIndexed = nullptr;
 // The July 26 HUD-discovery detour performed synchronous GPU readback and
@@ -2271,6 +2272,7 @@ bool InstallD3D11Hooks()
             MH_CreateHook(deviceVtbl[3], (void*)&CreateBufferHook,
                           (void**)&g_origCreateBuffer) == MH_OK;
         const bool vertexBindingOk = createBufferOk &&
+            kEnableH3DecoratorInstancedDrawProbe &&
             MH_CreateHook(contextVtbl[18],
                           (void*)&H3ProbeIASetVertexBuffersHook,
                           (void**)&g_origIASetVertexBuffers) == MH_OK;
@@ -2309,7 +2311,8 @@ bool InstallD3D11Hooks()
         }
         else
         {
-            LOG("H3DECORDRAW: binding/draw hook failed; draw tracer disabled");
+            LOG("H3DECORDRAW: DrawIndexedInstanced-only tracer disabled after "
+                "capturing zero Valhalla decorator draws");
         }
     }
 
