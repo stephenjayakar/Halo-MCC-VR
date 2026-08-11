@@ -141,7 +141,8 @@ constexpr unsigned kH3ProbeConstantSlots =
     D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;
 constexpr unsigned kH3ProbeConstantBytes = 512u;
 constexpr unsigned kH3ProbeConstantBufferSlots = 1u << 11u;
-constexpr uint32_t kH3DecoratorOwnedBufferBytes = 16u * 1024u * 1024u;
+constexpr uint32_t kH3DecoratorOwnedPlacementBytes = 4u * 1024u * 1024u;
+constexpr uint32_t kH3DecoratorOwnedGeometryBytes = 64u * 1024u * 1024u;
 
 struct H3ProbeBufferMetadata
 {
@@ -227,8 +228,11 @@ static H3ProbeInputLayoutMetadata
     g_h3ProbeInputLayouts[kH3ProbeInputLayoutSlots]{};
 static H3ProbeDrawSlot g_h3ProbeDraws[kH3ProbeDrawSlots]{};
 alignas(16) static uint8_t
-    g_h3DecoratorOwnedBuffers[kH3DecoratorOwnedBufferBytes]{};
-static std::atomic<uint32_t> g_h3DecoratorOwnedBufferOffset{0};
+    g_h3DecoratorOwnedPlacements[kH3DecoratorOwnedPlacementBytes]{};
+alignas(16) static uint8_t
+    g_h3DecoratorOwnedGeometry[kH3DecoratorOwnedGeometryBytes]{};
+static std::atomic<uint32_t> g_h3DecoratorOwnedPlacementOffset{0};
+static std::atomic<uint32_t> g_h3DecoratorOwnedGeometryOffset{0};
 static std::atomic<unsigned> g_h3ProbeDrawCount{0};
 static thread_local ID3D11Buffer*
     g_h3ProbeBoundVertexBuffers[kH3ProbeVertexSlots]{};
@@ -377,16 +381,21 @@ static void H3ProbeRegisterBuffer(
             {
                 const uint32_t reservedBytes =
                     (desc->ByteWidth + 15u) & ~15u;
-                const uint32_t offset =
-                    g_h3DecoratorOwnedBufferOffset.fetch_add(
-                        reservedBytes, std::memory_order_relaxed);
-                if (offset <= kH3DecoratorOwnedBufferBytes &&
-                    reservedBytes <= kH3DecoratorOwnedBufferBytes - offset)
+                uint8_t* const storage = retainPlacement
+                    ? g_h3DecoratorOwnedPlacements
+                    : g_h3DecoratorOwnedGeometry;
+                const uint32_t capacity = retainPlacement
+                    ? kH3DecoratorOwnedPlacementBytes
+                    : kH3DecoratorOwnedGeometryBytes;
+                std::atomic<uint32_t>& nextOffset = retainPlacement
+                    ? g_h3DecoratorOwnedPlacementOffset
+                    : g_h3DecoratorOwnedGeometryOffset;
+                const uint32_t offset = nextOffset.fetch_add(
+                    reservedBytes, std::memory_order_relaxed);
+                if (offset <= capacity && reservedBytes <= capacity - offset)
                 {
-                    std::memcpy(
-                        g_h3DecoratorOwnedBuffers + offset, source,
-                        desc->ByteWidth);
-                    source = g_h3DecoratorOwnedBuffers + offset;
+                    std::memcpy(storage + offset, source, desc->ByteWidth);
+                    source = storage + offset;
                 }
                 else if (!g_h3DecoratorDiagnosticEnabled)
                     source = nullptr;
