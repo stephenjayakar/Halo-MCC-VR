@@ -514,10 +514,7 @@ public static class HaloMccVrContactInput {
         # starts loading; the previous Right + Enter + Enter sequence could
         # leave MCC in the shell instead of starting Halo 3.
         Send-Enter
-        # Construct can paint the Launch Game panel before its Start row
-        # accepts input. The shorter two-second settle left the exact visible
-        # Start row selected without starting the title.
-        Start-Sleep -Seconds 5
+        Start-Sleep -Seconds 2
         Send-Enter
         Start-Sleep -Seconds 10
     }
