@@ -1659,6 +1659,26 @@ These null-driver runs prove bindings and deterministic transactions. They do
 not advance the accepted-build pointer; real-headset play remains the player
 acceptance gate.
 
+### Read-only headset-session audit
+
+`tools/analyze-h3-contact-session.ps1` turns one preserved `halo3xr.log` into a
+short console summary and optional JSON. It reports source, edition, runtime,
+headset, observed collision paths, contacted object kinds, native mass, wall
+sources, impulses, constraints, haptics, melee, animated bodies, and left-hand
+pickup. It labels missing counters as `not observed`, not failed, because a
+player may simply not have exercised that path. It also marks null-driver runs
+separately and states that logs cannot prove visual alignment, clipping, force
+feel, haptic feel, or player acceptance.
+
+The embedded self-test passes. A replay against the preserved `b154546` Quest
+headset log correctly identifies Steam, SteamVR/OpenXR, the Oculus headset,
+exact visible-weapon and authored-target contact, gradual response, gap holds,
+haptics, structure and placed-object walls, animated bodies, and native melee;
+it correctly leaves the later decorator and left-grab paths unobserved. A
+second replay against the current `bc44c6c` Valhalla null-driver log identifies
+the null device, structure, placed-object, and decorator wall paths without
+claiming headset acceptance.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
