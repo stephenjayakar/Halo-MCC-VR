@@ -1565,6 +1565,33 @@ normal SteamVR configuration, SHA-256
 Natural palm alignment, grip feel, and toss feel still require headset
 acceptance.
 
+Two further clean Valhalla runs used the same installed `bc44c6c` DLL and
+validator source `61462b92d7cecc8cd2a6bc2e0c1491cd6a511f53`:
+
+- Right-hand equipment/grenade-class scoop and toss passed at
+  `out/debug-openxr/20260811-151156042Z-equipment-scoop.log` (SHA-256
+  `896F6BE5B4FB675E2581AFC666AF8410DC7D6611F01A0527C4C01CE5304745F5`).
+  The exact 8-triangle target had native mass `0.382 kg`. It received 68
+  impulses and one release with zero melee, reached `0.271 m` lift and
+  `0.122 m` carry, and retained `0.272 m/s` release speed. A live exact contact
+  published right-hand haptic amplitude `0.234`.
+- The rendered-weapon gap replay passed at
+  `out/debug-openxr/20260811-151438607Z-visible-weapon-gap.log` (SHA-256
+  `91CC0FD4F4CDBCE57E73DEA82B50B4EA38F00DE458C04090C562044AB73A067A`).
+  It consumed 2,706 exact visible palettes and swept the 36-triangle weapon
+  against an 88-triangle detailed target through 462 direct overlaps and 884
+  direct separations across the scripted `-0.0600..+0.0703 m` surface range.
+  The normal contact path recorded 496 authored hits, 297 impulses, 484 body
+  constraints, 67 short gap holds, zero melee, and haptic amplitude `0.301`.
+  This proves that contact, correction, and haptics share the final visible
+  weapon geometry in the replay; headset pixel alignment and perceived haptic
+  strength remain acceptance items.
+
+Both runs ended with zero MCC, validator, SteamVR, and SteamVR Home processes
+and restored the exact normal SteamVR settings hash. The saved visible replay
+screenshot also exposed one stale `vrwebhelper.exe` crash dialog left by the
+earlier memory exhaustion; it was dismissed after its owning process was gone.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
