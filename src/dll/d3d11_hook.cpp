@@ -109,6 +109,35 @@ static uintptr_t ProbeModuleRva(const void* address, HMODULE module)
     return value >= begin && value < end ? value - begin : UINTPTR_MAX;
 }
 
+static void FormatProbeStack(char* output, size_t outputSize)
+{
+    if (!output || outputSize == 0)
+        return;
+    output[0] = '\0';
+    void* frames[12]{};
+    const USHORT count = RtlCaptureStackBackTrace(
+        1, static_cast<ULONG>(_countof(frames)), frames, nullptr);
+    const HMODULE halo3 = GetModuleHandleW(L"halo3.dll");
+    const HMODULE mcc = GetModuleHandleW(nullptr);
+    size_t used = 0;
+    for (USHORT i = 0; i < count && used + 24u < outputSize; ++i)
+    {
+        const uintptr_t halo3Rva = ProbeModuleRva(frames[i], halo3);
+        const uintptr_t mccRva = ProbeModuleRva(frames[i], mcc);
+        const char* module = halo3Rva != UINTPTR_MAX ? "h3" :
+            (mccRva != UINTPTR_MAX ? "mcc" : "other");
+        const uintptr_t rva = halo3Rva != UINTPTR_MAX ? halo3Rva :
+            (mccRva != UINTPTR_MAX ? mccRva : 0u);
+        const int wrote = _snprintf_s(
+            output + used, outputSize - used, _TRUNCATE,
+            "%s%s+0x%llX", i ? " " : "", module,
+            static_cast<unsigned long long>(rva));
+        if (wrote <= 0)
+            break;
+        used += static_cast<size_t>(wrote);
+    }
+}
+
 static HRESULT STDMETHODCALLTYPE CreateBufferHook(
     ID3D11Device* device, const D3D11_BUFFER_DESC* desc,
     const D3D11_SUBRESOURCE_DATA* initialData, ID3D11Buffer** buffer)
@@ -200,16 +229,19 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
             if (sample <= 128u)
             {
                 char head[16u * 4u * 3u + 1u]{};
+                char stack[512]{};
                 FormatProbeRecords(bytes, desc->ByteWidth, 0u, head, sizeof(head));
+                FormatProbeStack(stack, sizeof(stack));
                 LOG("H3DECORBUF[%u]: bytes=%u records=%u smallPart=%u/%u "
                     "nonzeroPart=%u nonzeroColor=%u usage=%u bind=0x%X cpu=0x%X "
-                    "misc=0x%X stride=%u halo3Rva=0x%llX mccRva=0x%llX head=%s",
+                    "misc=0x%X stride=%u halo3Rva=0x%llX mccRva=0x%llX "
+                    "stack=[%s] head=%s",
                     sample, desc->ByteWidth, records, smallPartIndices,
                     sampledRecords, nonzeroPartIndices, nonzeroColors,
                     static_cast<unsigned>(desc->Usage), desc->BindFlags,
                     desc->CPUAccessFlags, desc->MiscFlags, desc->StructureByteStride,
                     static_cast<unsigned long long>(halo3Rva),
-                    static_cast<unsigned long long>(mccRva), head);
+                    static_cast<unsigned long long>(mccRva), stack, head);
             }
         }
     }
