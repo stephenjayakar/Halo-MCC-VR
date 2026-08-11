@@ -41,6 +41,16 @@ typedef void(STDMETHODCALLTYPE* IASetIndexBufferFn)(ID3D11DeviceContext*,
     ID3D11Buffer*, DXGI_FORMAT, UINT);
 typedef void(STDMETHODCALLTYPE* DrawIndexedInstancedFn)(ID3D11DeviceContext*,
     UINT, UINT, UINT, INT, UINT);
+typedef void(STDMETHODCALLTYPE* H3ProbeDrawIndexedFn)(ID3D11DeviceContext*,
+    UINT, UINT, INT);
+typedef void(STDMETHODCALLTYPE* H3ProbeDrawFn)(ID3D11DeviceContext*,
+    UINT, UINT);
+typedef void(STDMETHODCALLTYPE* H3ProbeDrawInstancedFn)(ID3D11DeviceContext*,
+    UINT, UINT, UINT, UINT);
+typedef void(STDMETHODCALLTYPE* H3ProbeDrawIndexedInstancedIndirectFn)(
+    ID3D11DeviceContext*, ID3D11Buffer*, UINT);
+typedef void(STDMETHODCALLTYPE* H3ProbeDrawInstancedIndirectFn)(
+    ID3D11DeviceContext*, ID3D11Buffer*, UINT);
 typedef void(__fastcall* H3ResourceFixupFn)(void*);
 #if HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE
 typedef void(STDMETHODCALLTYPE* DrawIndexedFn)(ID3D11DeviceContext*, UINT, UINT, INT);
@@ -58,6 +68,13 @@ static CreateBufferFn g_origCreateBuffer = nullptr;
 static IASetVertexBuffersFn g_origIASetVertexBuffers = nullptr;
 static IASetIndexBufferFn g_origIASetIndexBuffer = nullptr;
 static DrawIndexedInstancedFn g_origDrawIndexedInstanced = nullptr;
+static H3ProbeDrawIndexedFn g_origH3ProbeDrawIndexed = nullptr;
+static H3ProbeDrawFn g_origH3ProbeDraw = nullptr;
+static H3ProbeDrawInstancedFn g_origH3ProbeDrawInstanced = nullptr;
+static H3ProbeDrawIndexedInstancedIndirectFn
+    g_origH3ProbeDrawIndexedInstancedIndirect = nullptr;
+static H3ProbeDrawInstancedIndirectFn
+    g_origH3ProbeDrawInstancedIndirect = nullptr;
 static H3ResourceFixupFn g_origH3ResourceFixup = nullptr;
 static const uintptr_t* g_h3PackedAddressBaseLocation = nullptr;
 static thread_local void* g_h3CurrentResourceContext = nullptr;
@@ -67,7 +84,7 @@ static std::atomic<unsigned> g_h3DecoratorExactProbeSamples{0};
 static std::atomic<unsigned> g_h3DecoratorBlockProbeSamples{0};
 static std::atomic<bool> g_h3DecoratorLiveBlockScanStarted{false};
 static std::atomic<bool> g_h3DecoratorDrawProbeEnabled{false};
-constexpr bool kEnableH3DecoratorInstancedDrawProbe = false;
+constexpr bool kEnableH3DecoratorDrawFamilyProbe = true;
 #if HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE
 static DrawIndexedFn g_origDrawIndexed = nullptr;
 // The July 26 HUD-discovery detour performed synchronous GPU readback and
@@ -115,6 +132,9 @@ struct H3ProbeDrawRecord
     INT baseVertexLocation = 0;
     UINT startInstanceLocation = 0;
     unsigned placementSlot = UINT_MAX;
+    unsigned kind = 0;
+    ID3D11Buffer* indirectArgsBuffer = nullptr;
+    UINT indirectArgsOffset = 0;
 };
 
 struct H3ProbeDrawSlot
@@ -234,10 +254,10 @@ static void STDMETHODCALLTYPE H3ProbeIASetIndexBufferHook(
     g_origIASetIndexBuffer(context, buffer, format, offset);
 }
 
-static void STDMETHODCALLTYPE H3ProbeDrawIndexedInstancedHook(
-    ID3D11DeviceContext* context, UINT indexCountPerInstance,
-    UINT instanceCount, UINT startIndexLocation, INT baseVertexLocation,
-    UINT startInstanceLocation)
+static void H3ProbeCaptureDraw(
+    unsigned kind, UINT countPerInstance, UINT instanceCount,
+    UINT startLocation, INT baseVertexLocation, UINT startInstanceLocation,
+    ID3D11Buffer* indirectArgsBuffer = nullptr, UINT indirectArgsOffset = 0u)
 {
     unsigned placementSlot = UINT_MAX;
     for (unsigned slot = 0; slot < kH3ProbeVertexSlots; ++slot)
@@ -266,19 +286,84 @@ static void STDMETHODCALLTYPE H3ProbeDrawIndexedInstancedHook(
             record.indexBuffer = g_h3ProbeBoundIndexBuffer;
             record.indexFormat = g_h3ProbeBoundIndexFormat;
             record.indexOffset = g_h3ProbeBoundIndexOffset;
-            record.indexCountPerInstance = indexCountPerInstance;
+            record.indexCountPerInstance = countPerInstance;
             record.instanceCount = instanceCount;
-            record.startIndexLocation = startIndexLocation;
+            record.startIndexLocation = startLocation;
             record.baseVertexLocation = baseVertexLocation;
             record.startInstanceLocation = startInstanceLocation;
             record.placementSlot = placementSlot;
+            record.kind = kind;
+            record.indirectArgsBuffer = indirectArgsBuffer;
+            record.indirectArgsOffset = indirectArgsOffset;
             g_h3ProbeDraws[sample].ready.store(
                 true, std::memory_order_release);
         }
     }
+}
+
+static void STDMETHODCALLTYPE H3ProbeDrawIndexedInstancedHook(
+    ID3D11DeviceContext* context, UINT indexCountPerInstance,
+    UINT instanceCount, UINT startIndexLocation, INT baseVertexLocation,
+    UINT startInstanceLocation)
+{
+    H3ProbeCaptureDraw(
+        0u, indexCountPerInstance, instanceCount, startIndexLocation,
+        baseVertexLocation, startInstanceLocation);
     g_origDrawIndexedInstanced(
         context, indexCountPerInstance, instanceCount, startIndexLocation,
         baseVertexLocation, startInstanceLocation);
+}
+
+static void STDMETHODCALLTYPE H3ProbeDrawIndexedHook(
+    ID3D11DeviceContext* context, UINT indexCount, UINT startIndexLocation,
+    INT baseVertexLocation)
+{
+    H3ProbeCaptureDraw(
+        1u, indexCount, 1u, startIndexLocation, baseVertexLocation, 0u);
+    g_origH3ProbeDrawIndexed(
+        context, indexCount, startIndexLocation, baseVertexLocation);
+}
+
+static void STDMETHODCALLTYPE H3ProbeDrawHook(
+    ID3D11DeviceContext* context, UINT vertexCount, UINT startVertexLocation)
+{
+    H3ProbeCaptureDraw(
+        2u, vertexCount, 1u, startVertexLocation, 0, 0u);
+    g_origH3ProbeDraw(context, vertexCount, startVertexLocation);
+}
+
+static void STDMETHODCALLTYPE H3ProbeDrawInstancedHook(
+    ID3D11DeviceContext* context, UINT vertexCountPerInstance,
+    UINT instanceCount, UINT startVertexLocation, UINT startInstanceLocation)
+{
+    H3ProbeCaptureDraw(
+        3u, vertexCountPerInstance, instanceCount, startVertexLocation, 0,
+        startInstanceLocation);
+    g_origH3ProbeDrawInstanced(
+        context, vertexCountPerInstance, instanceCount, startVertexLocation,
+        startInstanceLocation);
+}
+
+static void STDMETHODCALLTYPE H3ProbeDrawIndexedInstancedIndirectHook(
+    ID3D11DeviceContext* context, ID3D11Buffer* argsBuffer,
+    UINT alignedByteOffsetForArgs)
+{
+    H3ProbeCaptureDraw(
+        4u, 0u, 0u, 0u, 0, 0u, argsBuffer,
+        alignedByteOffsetForArgs);
+    g_origH3ProbeDrawIndexedInstancedIndirect(
+        context, argsBuffer, alignedByteOffsetForArgs);
+}
+
+static void STDMETHODCALLTYPE H3ProbeDrawInstancedIndirectHook(
+    ID3D11DeviceContext* context, ID3D11Buffer* argsBuffer,
+    UINT alignedByteOffsetForArgs)
+{
+    H3ProbeCaptureDraw(
+        5u, 0u, 0u, 0u, 0, 0u, argsBuffer,
+        alignedByteOffsetForArgs);
+    g_origH3ProbeDrawInstancedIndirect(
+        context, argsBuffer, alignedByteOffsetForArgs);
 }
 
 static void H3ProbeLogBuffer(
@@ -333,14 +418,16 @@ static DWORD WINAPI H3ProbeDrawLoggerThread(void*)
             if (!slot.ready.load(std::memory_order_acquire))
                 break;
             const H3ProbeDrawRecord& record = slot.record;
-            LOG("H3DECORDRAW[%u]: indexCount=%u instances=%u startIndex=%u "
+            LOG("H3DECORDRAW[%u]: kind=%u indexCount=%u instances=%u startIndex=%u "
                 "baseVertex=%d startInstance=%u placementSlot=%u "
-                "indexBuffer=%p format=%u indexOffset=%u",
-                next, record.indexCountPerInstance, record.instanceCount,
+                "indexBuffer=%p format=%u indexOffset=%u argsBuffer=%p "
+                "argsOffset=%u",
+                next, record.kind, record.indexCountPerInstance, record.instanceCount,
                 record.startIndexLocation, record.baseVertexLocation,
                 record.startInstanceLocation, record.placementSlot,
                 record.indexBuffer, static_cast<unsigned>(record.indexFormat),
-                record.indexOffset);
+                record.indexOffset, record.indirectArgsBuffer,
+                record.indirectArgsOffset);
             for (unsigned vertexSlot = 0;
                  vertexSlot < kH3ProbeVertexSlots; ++vertexSlot)
             {
@@ -355,6 +442,12 @@ static DWORD WINAPI H3ProbeDrawLoggerThread(void*)
             H3ProbeLogBuffer(
                 next, "IB", UINT_MAX, record.indexBuffer, 0u,
                 record.indexOffset);
+            if (record.indirectArgsBuffer)
+            {
+                H3ProbeLogBuffer(
+                    next, "ARGS", UINT_MAX, record.indirectArgsBuffer, 0u,
+                    record.indirectArgsOffset);
+            }
             ++next;
         }
         Sleep(10u);
@@ -2272,7 +2365,7 @@ bool InstallD3D11Hooks()
             MH_CreateHook(deviceVtbl[3], (void*)&CreateBufferHook,
                           (void**)&g_origCreateBuffer) == MH_OK;
         const bool vertexBindingOk = createBufferOk &&
-            kEnableH3DecoratorInstancedDrawProbe &&
+            kEnableH3DecoratorDrawFamilyProbe &&
             MH_CreateHook(contextVtbl[18],
                           (void*)&H3ProbeIASetVertexBuffersHook,
                           (void**)&g_origIASetVertexBuffers) == MH_OK;
@@ -2280,16 +2373,36 @@ bool InstallD3D11Hooks()
             MH_CreateHook(contextVtbl[19],
                           (void*)&H3ProbeIASetIndexBufferHook,
                           (void**)&g_origIASetIndexBuffer) == MH_OK;
-        const bool instancedDrawOk = indexBindingOk &&
+        const bool drawIndexedOk = indexBindingOk &&
+            MH_CreateHook(contextVtbl[12],
+                          (void*)&H3ProbeDrawIndexedHook,
+                          (void**)&g_origH3ProbeDrawIndexed) == MH_OK;
+        const bool drawOk = drawIndexedOk &&
+            MH_CreateHook(contextVtbl[13],
+                          (void*)&H3ProbeDrawHook,
+                          (void**)&g_origH3ProbeDraw) == MH_OK;
+        const bool indexedInstancedOk = drawOk &&
             MH_CreateHook(contextVtbl[20],
                           (void*)&H3ProbeDrawIndexedInstancedHook,
                           (void**)&g_origDrawIndexedInstanced) == MH_OK;
+        const bool instancedOk = indexedInstancedOk &&
+            MH_CreateHook(contextVtbl[21],
+                          (void*)&H3ProbeDrawInstancedHook,
+                          (void**)&g_origH3ProbeDrawInstanced) == MH_OK;
+        const bool indexedIndirectOk = instancedOk &&
+            MH_CreateHook(contextVtbl[39],
+                          (void*)&H3ProbeDrawIndexedInstancedIndirectHook,
+                          (void**)&g_origH3ProbeDrawIndexedInstancedIndirect) == MH_OK;
+        const bool drawFamilyOk = indexedIndirectOk &&
+            MH_CreateHook(contextVtbl[40],
+                          (void*)&H3ProbeDrawInstancedIndirectHook,
+                          (void**)&g_origH3ProbeDrawInstancedIndirect) == MH_OK;
         if (createBufferOk)
             LOG("H3DECORBUF: initial-data probe installed; resource owner will "
                 "bind after Halo 3 loads (environment-only)");
         else
             LOG("H3DECORBUF: CreateBuffer hook failed; probe disabled");
-        if (instancedDrawOk)
+        if (drawFamilyOk)
         {
             g_h3DecoratorDrawProbeEnabled.store(
                 true, std::memory_order_release);
@@ -2311,8 +2424,7 @@ bool InstallD3D11Hooks()
         }
         else
         {
-            LOG("H3DECORDRAW: DrawIndexedInstanced-only tracer disabled after "
-                "capturing zero Valhalla decorator draws");
+            LOG("H3DECORDRAW: draw-family binding failed; tracer disabled");
         }
     }
 
