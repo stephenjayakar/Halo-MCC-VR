@@ -35,10 +35,17 @@ typedef void(STDMETHODCALLTYPE* OMSetRenderTargetsFn)(ID3D11DeviceContext*, UINT
     ID3D11RenderTargetView* const*, ID3D11DepthStencilView*);
 typedef HRESULT(STDMETHODCALLTYPE* CreateBufferFn)(ID3D11Device*,
     const D3D11_BUFFER_DESC*, const D3D11_SUBRESOURCE_DATA*, ID3D11Buffer**);
+typedef HRESULT(STDMETHODCALLTYPE* CreateInputLayoutFn)(ID3D11Device*,
+    const D3D11_INPUT_ELEMENT_DESC*, UINT, const void*, SIZE_T,
+    ID3D11InputLayout**);
+typedef void(STDMETHODCALLTYPE* IASetInputLayoutFn)(ID3D11DeviceContext*,
+    ID3D11InputLayout*);
 typedef void(STDMETHODCALLTYPE* IASetVertexBuffersFn)(ID3D11DeviceContext*,
     UINT, UINT, ID3D11Buffer* const*, const UINT*, const UINT*);
 typedef void(STDMETHODCALLTYPE* IASetIndexBufferFn)(ID3D11DeviceContext*,
     ID3D11Buffer*, DXGI_FORMAT, UINT);
+typedef void(STDMETHODCALLTYPE* IASetPrimitiveTopologyFn)(ID3D11DeviceContext*,
+    D3D11_PRIMITIVE_TOPOLOGY);
 typedef void(STDMETHODCALLTYPE* DrawIndexedInstancedFn)(ID3D11DeviceContext*,
     UINT, UINT, UINT, INT, UINT);
 typedef void(STDMETHODCALLTYPE* H3ProbeDrawIndexedFn)(ID3D11DeviceContext*,
@@ -65,8 +72,11 @@ static Present1Fn g_origPresent1 = nullptr;
 static ResizeBuffersFn g_origResizeBuffers = nullptr;
 static OMSetRenderTargetsFn g_origOMSetRenderTargets = nullptr;
 static CreateBufferFn g_origCreateBuffer = nullptr;
+static CreateInputLayoutFn g_origCreateInputLayout = nullptr;
+static IASetInputLayoutFn g_origIASetInputLayout = nullptr;
 static IASetVertexBuffersFn g_origIASetVertexBuffers = nullptr;
 static IASetIndexBufferFn g_origIASetIndexBuffer = nullptr;
+static IASetPrimitiveTopologyFn g_origIASetPrimitiveTopology = nullptr;
 static DrawIndexedInstancedFn g_origDrawIndexedInstanced = nullptr;
 static H3ProbeDrawIndexedFn g_origH3ProbeDrawIndexed = nullptr;
 static H3ProbeDrawFn g_origH3ProbeDraw = nullptr;
@@ -106,6 +116,8 @@ constexpr unsigned kH3ProbeVertexSlots =
     D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;
 constexpr unsigned kH3ProbeBufferSlots = 1u << 15u;
 constexpr unsigned kH3ProbeDrawSlots = 512u;
+constexpr unsigned kH3ProbeInputLayoutSlots = 1u << 10u;
+constexpr unsigned kH3ProbeInputElements = 16u;
 
 struct H3ProbeBufferMetadata
 {
@@ -135,6 +147,26 @@ struct H3ProbeDrawRecord
     unsigned kind = 0;
     ID3D11Buffer* indirectArgsBuffer = nullptr;
     UINT indirectArgsOffset = 0;
+    ID3D11InputLayout* inputLayout = nullptr;
+    D3D11_PRIMITIVE_TOPOLOGY topology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+};
+
+struct H3ProbeInputElement
+{
+    char semantic[24]{};
+    UINT semanticIndex = 0;
+    DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+    UINT inputSlot = 0;
+    UINT alignedByteOffset = 0;
+    D3D11_INPUT_CLASSIFICATION inputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+    UINT instanceDataStepRate = 0;
+};
+
+struct H3ProbeInputLayoutMetadata
+{
+    std::atomic<ID3D11InputLayout*> key{nullptr};
+    UINT elementCount = 0;
+    H3ProbeInputElement elements[kH3ProbeInputElements]{};
 };
 
 struct H3ProbeDrawSlot
@@ -144,6 +176,8 @@ struct H3ProbeDrawSlot
 };
 
 static H3ProbeBufferMetadata g_h3ProbeBuffers[kH3ProbeBufferSlots]{};
+static H3ProbeInputLayoutMetadata
+    g_h3ProbeInputLayouts[kH3ProbeInputLayoutSlots]{};
 static H3ProbeDrawSlot g_h3ProbeDraws[kH3ProbeDrawSlots]{};
 static std::atomic<unsigned> g_h3ProbeDrawCount{0};
 static thread_local ID3D11Buffer*
@@ -153,6 +187,9 @@ static thread_local UINT g_h3ProbeBoundVertexOffsets[kH3ProbeVertexSlots]{};
 static thread_local ID3D11Buffer* g_h3ProbeBoundIndexBuffer = nullptr;
 static thread_local DXGI_FORMAT g_h3ProbeBoundIndexFormat = DXGI_FORMAT_UNKNOWN;
 static thread_local UINT g_h3ProbeBoundIndexOffset = 0;
+static thread_local ID3D11InputLayout* g_h3ProbeBoundInputLayout = nullptr;
+static thread_local D3D11_PRIMITIVE_TOPOLOGY g_h3ProbeBoundTopology =
+    D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
 
 static unsigned H3ProbeBufferHash(ID3D11Buffer* buffer)
 {
@@ -212,6 +249,89 @@ static const H3ProbeBufferMetadata* H3ProbeFindBuffer(ID3D11Buffer* buffer)
     return nullptr;
 }
 
+static unsigned H3ProbeInputLayoutHash(ID3D11InputLayout* layout)
+{
+    const uintptr_t value = reinterpret_cast<uintptr_t>(layout);
+    return static_cast<unsigned>((value >> 4u) ^ (value >> 17u)) &
+        (kH3ProbeInputLayoutSlots - 1u);
+}
+
+static void H3ProbeRegisterInputLayout(
+    ID3D11InputLayout* layout, const D3D11_INPUT_ELEMENT_DESC* elements,
+    UINT elementCount)
+{
+    if (!layout || !elements || elementCount == 0u ||
+        elementCount > kH3ProbeInputElements)
+        return;
+    const unsigned first = H3ProbeInputLayoutHash(layout);
+    ID3D11InputLayout* const reserved =
+        reinterpret_cast<ID3D11InputLayout*>(1u);
+    for (unsigned probe = 0; probe < 16u; ++probe)
+    {
+        H3ProbeInputLayoutMetadata& entry = g_h3ProbeInputLayouts[
+            (first + probe) & (kH3ProbeInputLayoutSlots - 1u)];
+        ID3D11InputLayout* expected = nullptr;
+        if (entry.key.compare_exchange_strong(
+                expected, reserved, std::memory_order_acq_rel,
+                std::memory_order_acquire))
+        {
+            entry.elementCount = elementCount;
+            for (UINT i = 0; i < elementCount; ++i)
+            {
+                H3ProbeInputElement& destination = entry.elements[i];
+                const D3D11_INPUT_ELEMENT_DESC& source = elements[i];
+                if (source.SemanticName)
+                {
+                    strncpy_s(destination.semantic, source.SemanticName,
+                              _TRUNCATE);
+                }
+                destination.semanticIndex = source.SemanticIndex;
+                destination.format = source.Format;
+                destination.inputSlot = source.InputSlot;
+                destination.alignedByteOffset = source.AlignedByteOffset;
+                destination.inputSlotClass = source.InputSlotClass;
+                destination.instanceDataStepRate = source.InstanceDataStepRate;
+            }
+            entry.key.store(layout, std::memory_order_release);
+            return;
+        }
+        if (expected == layout)
+            return;
+    }
+}
+
+static const H3ProbeInputLayoutMetadata* H3ProbeFindInputLayout(
+    ID3D11InputLayout* layout)
+{
+    if (!layout)
+        return nullptr;
+    const unsigned first = H3ProbeInputLayoutHash(layout);
+    for (unsigned probe = 0; probe < 16u; ++probe)
+    {
+        const H3ProbeInputLayoutMetadata& entry = g_h3ProbeInputLayouts[
+            (first + probe) & (kH3ProbeInputLayoutSlots - 1u)];
+        ID3D11InputLayout* key = entry.key.load(std::memory_order_acquire);
+        if (key == layout)
+            return &entry;
+        if (!key || key == reinterpret_cast<ID3D11InputLayout*>(1u))
+            return nullptr;
+    }
+    return nullptr;
+}
+
+static HRESULT STDMETHODCALLTYPE H3ProbeCreateInputLayoutHook(
+    ID3D11Device* device, const D3D11_INPUT_ELEMENT_DESC* elements,
+    UINT elementCount, const void* shaderBytecode, SIZE_T bytecodeLength,
+    ID3D11InputLayout** layout)
+{
+    const HRESULT result = g_origCreateInputLayout(
+        device, elements, elementCount, shaderBytecode, bytecodeLength,
+        layout);
+    if (SUCCEEDED(result) && layout && *layout)
+        H3ProbeRegisterInputLayout(*layout, elements, elementCount);
+    return result;
+}
+
 static HRESULT H3ProbeCreateBuffer(
     ID3D11Device* device, const D3D11_BUFFER_DESC* desc,
     const D3D11_SUBRESOURCE_DATA* initialData, ID3D11Buffer** buffer,
@@ -222,6 +342,13 @@ static HRESULT H3ProbeCreateBuffer(
     if (SUCCEEDED(result) && buffer && *buffer)
         H3ProbeRegisterBuffer(*buffer, desc, initialData, decoratorPlacement);
     return result;
+}
+
+static void STDMETHODCALLTYPE H3ProbeIASetInputLayoutHook(
+    ID3D11DeviceContext* context, ID3D11InputLayout* layout)
+{
+    g_h3ProbeBoundInputLayout = layout;
+    g_origIASetInputLayout(context, layout);
 }
 
 static void STDMETHODCALLTYPE H3ProbeIASetVertexBuffersHook(
@@ -252,6 +379,13 @@ static void STDMETHODCALLTYPE H3ProbeIASetIndexBufferHook(
     g_h3ProbeBoundIndexFormat = format;
     g_h3ProbeBoundIndexOffset = offset;
     g_origIASetIndexBuffer(context, buffer, format, offset);
+}
+
+static void STDMETHODCALLTYPE H3ProbeIASetPrimitiveTopologyHook(
+    ID3D11DeviceContext* context, D3D11_PRIMITIVE_TOPOLOGY topology)
+{
+    g_h3ProbeBoundTopology = topology;
+    g_origIASetPrimitiveTopology(context, topology);
 }
 
 static void H3ProbeCaptureDraw(
@@ -295,6 +429,8 @@ static void H3ProbeCaptureDraw(
             record.kind = kind;
             record.indirectArgsBuffer = indirectArgsBuffer;
             record.indirectArgsOffset = indirectArgsOffset;
+            record.inputLayout = g_h3ProbeBoundInputLayout;
+            record.topology = g_h3ProbeBoundTopology;
             g_h3ProbeDraws[sample].ready.store(
                 true, std::memory_order_release);
         }
@@ -421,13 +557,37 @@ static DWORD WINAPI H3ProbeDrawLoggerThread(void*)
             LOG("H3DECORDRAW[%u]: kind=%u indexCount=%u instances=%u startIndex=%u "
                 "baseVertex=%d startInstance=%u placementSlot=%u "
                 "indexBuffer=%p format=%u indexOffset=%u argsBuffer=%p "
-                "argsOffset=%u",
+                "argsOffset=%u topology=%u inputLayout=%p",
                 next, record.kind, record.indexCountPerInstance, record.instanceCount,
                 record.startIndexLocation, record.baseVertexLocation,
                 record.startInstanceLocation, record.placementSlot,
                 record.indexBuffer, static_cast<unsigned>(record.indexFormat),
                 record.indexOffset, record.indirectArgsBuffer,
-                record.indirectArgsOffset);
+                record.indirectArgsOffset,
+                static_cast<unsigned>(record.topology), record.inputLayout);
+            const H3ProbeInputLayoutMetadata* inputLayout =
+                H3ProbeFindInputLayout(record.inputLayout);
+            if (inputLayout)
+            {
+                for (UINT element = 0; element < inputLayout->elementCount;
+                     ++element)
+                {
+                    const H3ProbeInputElement& value =
+                        inputLayout->elements[element];
+                    LOG("H3DECORDRAWLAYOUT[%u]: element=%u semantic=%s%u "
+                        "format=%u slot=%u offset=%u class=%u step=%u",
+                        next, element, value.semantic, value.semanticIndex,
+                        static_cast<unsigned>(value.format), value.inputSlot,
+                        value.alignedByteOffset,
+                        static_cast<unsigned>(value.inputSlotClass),
+                        value.instanceDataStepRate);
+                }
+            }
+            else
+            {
+                LOG("H3DECORDRAWLAYOUT[%u]: layout=%p untracked",
+                    next, record.inputLayout);
+            }
             for (unsigned vertexSlot = 0;
                  vertexSlot < kH3ProbeVertexSlots; ++vertexSlot)
             {
@@ -2364,7 +2524,15 @@ bool InstallD3D11Hooks()
         const bool createBufferOk =
             MH_CreateHook(deviceVtbl[3], (void*)&CreateBufferHook,
                           (void**)&g_origCreateBuffer) == MH_OK;
-        const bool vertexBindingOk = createBufferOk &&
+        const bool createInputLayoutOk = createBufferOk &&
+            MH_CreateHook(deviceVtbl[11],
+                          (void*)&H3ProbeCreateInputLayoutHook,
+                          (void**)&g_origCreateInputLayout) == MH_OK;
+        const bool inputLayoutBindingOk = createInputLayoutOk &&
+            MH_CreateHook(contextVtbl[17],
+                          (void*)&H3ProbeIASetInputLayoutHook,
+                          (void**)&g_origIASetInputLayout) == MH_OK;
+        const bool vertexBindingOk = inputLayoutBindingOk &&
             kEnableH3DecoratorDrawFamilyProbe &&
             MH_CreateHook(contextVtbl[18],
                           (void*)&H3ProbeIASetVertexBuffersHook,
@@ -2373,7 +2541,11 @@ bool InstallD3D11Hooks()
             MH_CreateHook(contextVtbl[19],
                           (void*)&H3ProbeIASetIndexBufferHook,
                           (void**)&g_origIASetIndexBuffer) == MH_OK;
-        const bool drawIndexedOk = indexBindingOk &&
+        const bool topologyBindingOk = indexBindingOk &&
+            MH_CreateHook(contextVtbl[24],
+                          (void*)&H3ProbeIASetPrimitiveTopologyHook,
+                          (void**)&g_origIASetPrimitiveTopology) == MH_OK;
+        const bool drawIndexedOk = topologyBindingOk &&
             MH_CreateHook(contextVtbl[12],
                           (void*)&H3ProbeDrawIndexedHook,
                           (void**)&g_origH3ProbeDrawIndexed) == MH_OK;
