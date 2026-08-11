@@ -50,6 +50,7 @@ static ResizeBuffersFn g_origResizeBuffers = nullptr;
 static OMSetRenderTargetsFn g_origOMSetRenderTargets = nullptr;
 static CreateBufferFn g_origCreateBuffer = nullptr;
 static H3ResourceFixupFn g_origH3ResourceFixup = nullptr;
+static const uintptr_t* g_h3PackedAddressBaseLocation = nullptr;
 static thread_local void* g_h3CurrentResourceContext = nullptr;
 static std::atomic<bool> g_h3ResourceProbeInstallStarted{false};
 static std::atomic<unsigned> g_h3DecoratorBufferProbeSamples{0};
@@ -195,6 +196,11 @@ static void __fastcall H3ResourceFixupHook(void* context)
     {
         __try
         {
+            uintptr_t packedAddressBase = 0;
+            if (g_h3PackedAddressBaseLocation)
+                std::memcpy(&packedAddressBase,
+                            g_h3PackedAddressBaseLocation,
+                            sizeof(packedAddressBase));
             LOG("H3DECOROWNER: context=%p base=%p fixups=%p count=%d",
                 context, resourceBase, fixups, fixupCount);
             for (unsigned i = 0; i < 11u; ++i)
@@ -212,6 +218,39 @@ static void __fastcall H3ResourceFixupHook(void* context)
                     beforeWords[0], beforeWords[1], beforeWords[2],
                     beforeWords[3], afterWords[0], afterWords[1],
                     afterWords[2], afterWords[3]);
+                const uintptr_t resolved = afterWords[1] && packedAddressBase
+                    ? packedAddressBase + static_cast<uintptr_t>(afterWords[1]) * 4u
+                    : 0u;
+                if (resolved)
+                {
+                    uint64_t head[16]{};
+                    std::memcpy(head, reinterpret_cast<const void*>(resolved),
+                                sizeof(head));
+                    LOG("H3DECOROWNERRESOLVED[%u]: packedBase=%p handle=0x%08X "
+                        "pointer=%p head="
+                        "%016llX,%016llX,%016llX,%016llX|"
+                        "%016llX,%016llX,%016llX,%016llX|"
+                        "%016llX,%016llX,%016llX,%016llX|"
+                        "%016llX,%016llX,%016llX,%016llX",
+                        i, reinterpret_cast<const void*>(packedAddressBase),
+                        afterWords[1], reinterpret_cast<const void*>(resolved),
+                        static_cast<unsigned long long>(head[0]),
+                        static_cast<unsigned long long>(head[1]),
+                        static_cast<unsigned long long>(head[2]),
+                        static_cast<unsigned long long>(head[3]),
+                        static_cast<unsigned long long>(head[4]),
+                        static_cast<unsigned long long>(head[5]),
+                        static_cast<unsigned long long>(head[6]),
+                        static_cast<unsigned long long>(head[7]),
+                        static_cast<unsigned long long>(head[8]),
+                        static_cast<unsigned long long>(head[9]),
+                        static_cast<unsigned long long>(head[10]),
+                        static_cast<unsigned long long>(head[11]),
+                        static_cast<unsigned long long>(head[12]),
+                        static_cast<unsigned long long>(head[13]),
+                        static_cast<unsigned long long>(head[14]),
+                        static_cast<unsigned long long>(head[15]));
+                }
             }
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -252,9 +291,22 @@ static void TryInstallH3ResourceFixupProbe()
                       (void**)&g_origH3ResourceFixup) == MH_OK &&
         MH_EnableHook(reinterpret_cast<void*>(fixup)) == MH_OK)
     {
+        const uint8_t* packedBaseInstruction =
+            reinterpret_cast<const uint8_t*>(fixup + 0xE9u);
+        if (packedBaseInstruction[0] == 0x48u &&
+            packedBaseInstruction[1] == 0x2Bu &&
+            packedBaseInstruction[2] == 0x05u)
+        {
+            int32_t displacement = 0;
+            std::memcpy(&displacement, packedBaseInstruction + 3u,
+                        sizeof(displacement));
+            g_h3PackedAddressBaseLocation =
+                reinterpret_cast<const uintptr_t*>(fixup + 0xF0u + displacement);
+        }
         LOG("H3DECORBUF: resource-owner probe installed after Halo 3 load "
-            "(environment-only; owner=+0x%llX)",
-            static_cast<unsigned long long>(fixup - moduleBase));
+            "(environment-only; owner=+0x%llX packedBaseLocation=%p)",
+            static_cast<unsigned long long>(fixup - moduleBase),
+            g_h3PackedAddressBaseLocation);
         return;
     }
     if (fixup)
