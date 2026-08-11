@@ -86,7 +86,13 @@ gets the unit's current weapon, reads the weapon object's first word as the
 definition index, resolves the tag-instance entry at `index * 8 + 4`, and adds
 the stored address in dwords to the loaded-tag-data base. The two RIP-relative
 global slots are decoded from this matched function at builder `+0x94` and
-`+0xAC`; no absolute global address is shipped.
+`+0xAC`; no absolute global address is shipped. The definition-index load is
+the exact `0F B7 11` instruction at builder `+0x9B`, immediately after the
+seven-byte `48 8B 05 disp32` instruction at `+0x94`. The first headset build
+incorrectly checked `+0x9F`, which is four bytes into the following compare;
+its log therefore reported `layout=0` and left this optional feature on stock
+fallback. The corrected install check uses the pinned instruction boundary at
+`+0x9B`.
 
 ### Runtime policy
 

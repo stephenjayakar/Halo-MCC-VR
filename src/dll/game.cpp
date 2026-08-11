@@ -20224,23 +20224,23 @@ namespace
                 fieldHit == queryHit + kHalo3AimAssistFieldSequenceOffset;
             if (layoutConsistent)
             {
-                layoutConsistent =
-                    memcmp(reinterpret_cast<const void*>(queryHit + 0x94),
-                           "\x48\x8B\x05", 3) == 0 &&
-                    memcmp(reinterpret_cast<const void*>(queryHit + 0x9F),
-                           "\x0F\xB7\x11", 3) == 0 &&
-                    memcmp(reinterpret_cast<const void*>(queryHit + 0xAC),
-                           "\x48\x8B\x05", 3) == 0;
+                layoutConsistent = Halo3AimAssistQueryLayoutMatches(
+                    reinterpret_cast<const uint8_t*>(queryHit),
+                    base + size - queryHit);
             }
 
             void** instanceTableSlot = nullptr;
             void** tagDataBaseSlot = nullptr;
             if (layoutConsistent)
             {
-                const uintptr_t instanceAddress = queryHit + 0x9B +
-                    *reinterpret_cast<const int32_t*>(queryHit + 0x97);
-                const uintptr_t tagBaseAddress = queryHit + 0xB3 +
-                    *reinterpret_cast<const int32_t*>(queryHit + 0xAF);
+                const uintptr_t instanceAddress = queryHit +
+                    kHalo3AimAssistTagInstanceLoadOffset + 7 +
+                    *reinterpret_cast<const int32_t*>(queryHit +
+                        kHalo3AimAssistTagInstanceLoadOffset + 3);
+                const uintptr_t tagBaseAddress = queryHit +
+                    kHalo3AimAssistTagDataBaseLoadOffset + 7 +
+                    *reinterpret_cast<const int32_t*>(queryHit +
+                        kHalo3AimAssistTagDataBaseLoadOffset + 3);
                 layoutConsistent = instanceAddress >= base &&
                     instanceAddress + sizeof(void*) <= base + size &&
                     tagBaseAddress >= base &&

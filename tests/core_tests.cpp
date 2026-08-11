@@ -1461,6 +1461,32 @@ int main()
               Halo3VrAimAssistMagnificationLevel(false, -1, 2) == -1,
             "Halo 3 VR uses the first authored scoped auto-aim level only for "
             "an unscoped zoom-capable weapon");
+        {
+            std::array<uint8_t, 0xB3> query{};
+            query[kHalo3AimAssistTagInstanceLoadOffset + 0] = 0x48;
+            query[kHalo3AimAssistTagInstanceLoadOffset + 1] = 0x8B;
+            query[kHalo3AimAssistTagInstanceLoadOffset + 2] = 0x05;
+            query[kHalo3AimAssistDefinitionIndexLoadOffset + 0] = 0x0F;
+            query[kHalo3AimAssistDefinitionIndexLoadOffset + 1] = 0xB7;
+            query[kHalo3AimAssistDefinitionIndexLoadOffset + 2] = 0x11;
+            query[kHalo3AimAssistTagDataBaseLoadOffset + 0] = 0x48;
+            query[kHalo3AimAssistTagDataBaseLoadOffset + 1] = 0x8B;
+            query[kHalo3AimAssistTagDataBaseLoadOffset + 2] = 0x05;
+            Check(Halo3AimAssistQueryLayoutMatches(
+                      query.data(), query.size()) &&
+                  !Halo3AimAssistQueryLayoutMatches(
+                      query.data(), kHalo3AimAssistTagDataBaseLoadOffset + 6),
+                "Halo 3 scoped auto-aim validates all pinned instruction "
+                "boundaries and rejects a truncated query builder");
+            query[kHalo3AimAssistDefinitionIndexLoadOffset] = 0;
+            query[0x9F] = 0x0F;
+            query[0xA0] = 0xB7;
+            query[0xA1] = 0x11;
+            Check(!Halo3AimAssistQueryLayoutMatches(
+                      query.data(), query.size()),
+                "Halo 3 scoped auto-aim rejects the former off-by-four "
+                "definition-index check");
+        }
 
         // R-V25: the trim bank carries one row MORE than the identity list -
         // the unmatched row every unresolved vehicle keys instead of the
