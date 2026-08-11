@@ -1306,6 +1306,34 @@ and `20260810-215644102Z-visible-weapon-gap.log` (SHA-256
 `0092139F3FB2F01D459495FD840B2BC4583CE33A52B59F5CC017F052DCE6FAB9`).
 All are null-driver evidence, not headset acceptance.
 
+### Headset feedback: enemy-only first-contact swing speed
+
+The user tested installed source `b154546` in Halo 3 Campaign and Forge on the
+Steam edition through SteamVR/OpenXR 2.17.7 and the Oculus/Quest streaming
+path. The preserved log is
+`out/test-runs/b154546-headset-feedback-20260810-171722PDT/halo3xr.log`
+(SHA-256
+`D0F30EB72957D2994F1A5E968A766A11D7BB31FEC755DCBDA6B093C08799F83E`).
+The user accepted object interaction and nudging as working well enough, so
+this candidate does not change impulse strength. The same run recorded 5,623
+exact hits, 3,232 impulses, 245 releases, 35 native melee events, and 865
+animated-body hits. The user nevertheless reported that meleeing Campaign
+enemies was too difficult.
+
+The existing classifier measured only first-contact velocity closing into the
+exact target-facing normal. That remains correct for vehicles and props: it is
+what stops a fast tangential shove from becoming melee. Animated enemy body
+normals, however, turn sharply across limbs and can reduce a deliberate weapon
+swing to almost zero normal speed. The next candidate therefore keeps the
+normal rule for every non-enemy kind. On a fresh exact biped, creature, or
+giant contact only, it uses the greater of normal closing speed and tracked
+weapon-point speed. It excludes target velocity, so a moving enemy cannot turn
+a stationary weapon into damage. Existing per-target separation rearming,
+the 250 ms cooldown, the configured 1.50 m/s threshold, and the 8 m/s tracking
+spike rejection remain unchanged. Pure tests cover enemy tangential hits,
+stationary weapons, sustained contact, and unchanged vehicle/prop behavior.
+Headset acceptance remains pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

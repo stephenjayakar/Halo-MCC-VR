@@ -1903,6 +1903,37 @@ inline float PhysicalContactMeleeImpactSpeed(
     return std::isfinite(closing) ? std::max(0.0f, closing) : 0.0f;
 }
 
+inline bool PhysicalContactEnemyMeleeKind(uint8_t kind)
+{
+    // H3 object kinds: biped, creature, giant. Vehicles deliberately retain
+    // the stricter surface-normal impact rule so a shove cannot become melee.
+    return kind == 0 || kind == 12 || kind == 13;
+}
+
+inline float PhysicalContactTargetMeleeImpactSpeed(
+    bool firstContact, uint8_t targetKind,
+    PhysicalContactVec3 relativeVelocityMetersPerSecond,
+    PhysicalContactVec3 weaponVelocityMetersPerSecond,
+    PhysicalContactVec3 targetToWeaponNormal)
+{
+    const float normalImpact = PhysicalContactMeleeImpactSpeed(
+        firstContact, relativeVelocityMetersPerSecond,
+        targetToWeaponNormal);
+    if (!firstContact || !PhysicalContactEnemyMeleeKind(targetKind) ||
+        !PhysicalContactFinite(weaponVelocityMetersPerSecond))
+        return normalImpact;
+
+    // Animated limb normals turn sharply across elbows, shoulders and heads.
+    // For enemies only, a deliberate first-contact weapon-point swing may
+    // melee even when that exact limb normal makes the hit look tangential.
+    // Target motion is excluded so an enemy running into a still weapon cannot
+    // manufacture damage.
+    const float weaponSpeed = PhysicalContactLength(
+        weaponVelocityMetersPerSecond);
+    return std::isfinite(weaponSpeed)
+        ? std::max(normalImpact, weaponSpeed) : normalImpact;
+}
+
 inline PhysicalContactAction PhysicalContactClassify(
     float relativeSpeedMetersPerSecond, float meleeImpactSpeedMetersPerSecond,
     float meleeThresholdMetersPerSecond)

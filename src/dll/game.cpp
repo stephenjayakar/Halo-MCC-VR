@@ -13458,8 +13458,12 @@ namespace
             const float relativeSpeed = PhysicalContactLength(relativeVelocity);
             const float weaponSpeed = PhysicalContactLength(
                 pointVelocity.weaponMetersPerSecond);
-            const float meleeImpactSpeed = PhysicalContactMeleeImpactSpeed(
-                firstContact, relativeVelocity, closest.normal);
+            const uint8_t targetKind =
+                *(closestEntry + kHalo3ObjectEntryKindOffset);
+            const float meleeImpactSpeed =
+                PhysicalContactTargetMeleeImpactSpeed(
+                    firstContact, targetKind, relativeVelocity,
+                    pointVelocity.weaponMetersPerSecond, closest.normal);
             const PhysicalContactVec3 contactDirection =
                 PhysicalContactNormalize(relativeVelocity, movementDirection);
             const PhysicalContactAction action = PhysicalContactClassify(
@@ -13578,8 +13582,7 @@ namespace
             g_halo3ContactTargetHandle.store(
                 closestHandle, std::memory_order_relaxed);
             g_halo3ContactTargetKind.store(
-                *(closestEntry + kHalo3ObjectEntryKindOffset),
-                std::memory_order_relaxed);
+                targetKind, std::memory_order_relaxed);
             if (constraintImpulse.apply)
             {
                 // The controlled Forge split moved the exact same 2.019 kg

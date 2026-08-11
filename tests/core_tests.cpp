@@ -9317,9 +9317,39 @@ int main()
             false, {-6.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f});
         const float invalidNormalImpact = PhysicalContactMeleeImpactSpeed(
             true, {-6.0f, 0.0f, 0.0f}, {});
+        const float enemyTangentialImpact =
+            PhysicalContactTargetMeleeImpactSpeed(
+                true, 0, {0.0f, 6.0f, 0.0f}, {0.0f, 2.1f, 0.0f},
+                {1.0f, 0.0f, 0.0f});
+        const float creatureTangentialImpact =
+            PhysicalContactTargetMeleeImpactSpeed(
+                true, 12, {0.0f, 6.0f, 0.0f}, {0.0f, 1.8f, 0.0f},
+                {1.0f, 0.0f, 0.0f});
+        const float vehicleTangentialImpact =
+            PhysicalContactTargetMeleeImpactSpeed(
+                true, 1, {0.0f, 6.0f, 0.0f}, {0.0f, 2.1f, 0.0f},
+                {1.0f, 0.0f, 0.0f});
+        const float stationaryEnemyImpact =
+            PhysicalContactTargetMeleeImpactSpeed(
+                true, 0, {0.0f, 6.0f, 0.0f}, {},
+                {1.0f, 0.0f, 0.0f});
+        const float continuedEnemyImpact =
+            PhysicalContactTargetMeleeImpactSpeed(
+                false, 0, {0.0f, 6.0f, 0.0f}, {0.0f, 2.1f, 0.0f},
+                {1.0f, 0.0f, 0.0f});
         Check(std::fabs(closingImpact - 2.0f) < 1.0e-6f &&
               tangentialImpact == 0.0f && separatingImpact == 0.0f &&
               continuedContactImpact == 0.0f && invalidNormalImpact == 0.0f &&
+              std::fabs(enemyTangentialImpact - 2.1f) < 1.0e-6f &&
+              std::fabs(creatureTangentialImpact - 1.8f) < 1.0e-6f &&
+              vehicleTangentialImpact == 0.0f &&
+              stationaryEnemyImpact == 0.0f &&
+              continuedEnemyImpact == 0.0f &&
+              PhysicalContactEnemyMeleeKind(0) &&
+              PhysicalContactEnemyMeleeKind(12) &&
+              PhysicalContactEnemyMeleeKind(13) &&
+              !PhysicalContactEnemyMeleeKind(1) &&
+              !PhysicalContactEnemyMeleeKind(2) &&
               PhysicalContactClassify(0.049f, 2.00f, 1.50f) ==
                    PhysicalContactAction::None &&
               PhysicalContactClassify(0.05f, 0.00f, 1.50f) ==
@@ -9344,7 +9374,8 @@ int main()
                   PhysicalContactAction::None,
             "Relative tracking noise and non-finite velocity do nothing, "
             "only first-contact velocity closing into the exact surface can "
-            "melee, tangential or sustained shoving stays physics-only, melee "
+            "melee, enemy limbs accept deliberate tracked weapon-point speed, "
+            "vehicle/prop tangential or sustained shoving stays physics-only, melee "
             "begins exactly at the configured threshold, and implausible "
             "headset spikes remain impulse-only");
 
