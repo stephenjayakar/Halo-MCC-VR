@@ -1479,6 +1479,78 @@ run of that recovery passed the exact visible-weapon gap scenario at
 `B148C42D9F607E3C2D6267EF3DDE11179C8DF0BA34AF13D761DA5A3B6EF2F4AE`).
 The tool change does not alter the installed runtime candidate.
 
+### Retained renderer geometry and cumulative Forge validation
+
+Installed source `bc44c6c229f2ec0ad8e65b100f9259def3200e57` retains the
+renderer-owned decorator placement and geometry buffers in bounded DLL-owned
+storage. Placements use a 4 MiB pool and potential geometry uses a separate
+64 MiB pool. The capture hook remains behind the strict Halo 3 placement
+decoder and physical-contact feature gate. The contact worker copies immutable
+validated data, rejects flat foliage, expands exact triangle strips, culls
+distant placement blocks, and publishes only solid decorator planes. No
+renderer resource or game pointer crosses into the worker.
+
+The exact package is
+`out/package-worktrees/881d012/out/candidates/bc44c6c-h3-physical-contact-20260811-095415663Z`.
+Its installed Steam DLL is
+`205DADDDAA2AB6FED8C1164DCDC8DB691BF4519A1FD608A149A832382181CEAA`
+and its launcher is
+`9D96956573FBF455697AFE3DDE087FCFC496E0FFC11CBC6D06B40A626C8803CC`.
+The Microsoft Store edition was not present on this machine, so only Steam was
+installed. The clean Release build and complete `ctest` suite passed before
+automatic installation.
+
+The environment-gated exact decorator self-test passed in a real Valhalla
+renderer capture. It selected a captured placement block, copied retained
+geometry, decoded a non-flat solid mesh and one placement, then swept the real
+authored weapon triangles through the transformed decorator mesh. The
+preserved log is
+`out/debug-openxr/20260811-095432524Z-decorator-wall.log` (SHA-256
+`130E124FDBBF039B2A5C695060FE43B377C0114F8777EF160FD0FA9773CC1FAC`).
+This closes the previous render-only Valhalla-rock geometry gap without naming
+or hardcoding a map object.
+
+The same installed bytes passed a fresh normal Valhalla wall transaction at
+`out/debug-openxr/20260811-143547087Z-wall.log` (SHA-256
+`9C75780F3EA3C464C5AB1EEE0DDF67B31F77BA9B994D88082AE318B28EC1AA9C`).
+That run independently validated both native type-1 structure walls and
+type-4 placed-object walls. It therefore covers the authored native wall path
+as well as the separately proven decorator path.
+
+Three fresh dynamic-object transactions also passed with the same DLL:
+
+- Loose-object scoop and toss:
+  `out/debug-openxr/20260811-143832244Z-weapon-scoop.log`, SHA-256
+  `EA9C82DA43AC71FAE16F772C6249AC0B4F28C707B91AF39116649A318668826B`.
+  It reached `0.384 m` lift, `0.178 m` carry and `0.354 m/s` release, with
+  150 applied impulses and zero melee.
+- Mongoose nudge:
+  `out/debug-openxr/20260811-144244039Z-vehicle-nudge.log`, SHA-256
+  `DFD2467F15C20EE780F8D4E337296ABE6FCF4A4ABB545FCB56594EDE36C0514E`.
+  It selected the `464.835 kg` vehicle and its 502-triangle authored target
+  mesh, applied gradual point impulses, and produced zero melee events.
+- Native melee:
+  `out/debug-openxr/20260811-144521014Z-melee.log`, SHA-256
+  `4E7BAD2A1B31D070251F07B256C8DD616AF960AD992584A3F4D635E03AE9922F`.
+  It selected the detailed 88-triangle target mesh and invoked the authored
+  damage/effect transaction while preserving the independent physics path.
+
+All five runs used Steam / SteamVR null / Null Model Number and visible
+external menu control. They prove bindings, exact geometry selection, native
+mass use, contact constraints, impulses, and melee routing. They do not prove
+headset alignment or feel.
+
+The current DLL's left-grab regression did not produce a valid feature result.
+One attempt exited during the MCC shell transition; the clean retry reached
+`halo3.dll` but remained in the already documented Halo 3 level-load gate and
+never entered Forge. Both invalid attempts were stopped without treating them
+as pickup failures. SteamVR was restored to the exact normal configuration,
+SHA-256
+`F95C7F261AD27423D1FAE287E2950E3471110C1DA969A4022E8298915801348C`.
+The earlier installed `95047a6` left-grab transaction remains the most recent
+valid null-driver pickup proof; current-build pickup and real-hand alignment
+remain pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
