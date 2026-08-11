@@ -107,8 +107,6 @@ static std::atomic<unsigned> g_h3DecoratorExactProbeSamples{0};
 static std::atomic<unsigned> g_h3DecoratorBlockProbeSamples{0};
 static std::atomic<bool> g_h3DecoratorLiveBlockScanStarted{false};
 static std::atomic<bool> g_h3DecoratorDrawProbeEnabled{false};
-static bool g_h3DecoratorDiagnosticEnabled = false;
-static bool g_h3DecoratorContactCaptureEnabled = false;
 constexpr bool kEnableH3DecoratorDrawFamilyProbe = true;
 // Candidate b223294 proved that copying each bound vertex constant buffer in
 // decorator draw callbacks can make the null-driver wall transaction miss its
@@ -242,34 +240,6 @@ static thread_local ID3D11Resource* g_h3ProbeMappedResource = nullptr;
 static thread_local void* g_h3ProbeMappedData = nullptr;
 static thread_local unsigned g_h3ProbeMappedBytes = 0u;
 
-constexpr unsigned kH3DecoratorFrameDraws = 128u;
-struct H3DecoratorFrameDraw
-{
-    const uint8_t* geometrySource = nullptr;
-    uint32_t geometryBytes = 0;
-    uint32_t startVertex = 0;
-    uint32_t vertexCount = 0;
-    const uint8_t* placementSource = nullptr;
-    uint32_t placementBytes = 0;
-    uint32_t placementOffset = 0;
-    uint32_t instanceCount = 0;
-    PhysicalContactVec3 positionMinimum{};
-    PhysicalContactVec3 positionSize{};
-    PhysicalContactVec3 blockMinimum{};
-    PhysicalContactVec3 blockStep{};
-};
-
-struct H3DecoratorFrame
-{
-    std::atomic<uint32_t> version{0};
-    uint32_t drawCount = 0;
-    H3DecoratorFrameDraw draws[kH3DecoratorFrameDraws]{};
-};
-
-static H3DecoratorFrame g_h3DecoratorFrames[3]{};
-static unsigned g_h3DecoratorWriteFrame = 0;
-static std::atomic<unsigned> g_h3DecoratorPublishedFrame{UINT_MAX};
-
 static unsigned H3ProbeBufferHash(ID3D11Buffer* buffer)
 {
     const uintptr_t value = reinterpret_cast<uintptr_t>(buffer);
@@ -308,9 +278,7 @@ static void H3ProbeRegisterConstantBuffer(
     const D3D11_SUBRESOURCE_DATA* initialData)
 {
     if (!buffer || !desc ||
-        (desc->BindFlags & D3D11_BIND_CONSTANT_BUFFER) == 0u ||
-        (!g_h3DecoratorDiagnosticEnabled &&
-         desc->ByteWidth != 48u && desc->ByteWidth != 96u))
+        (desc->BindFlags & D3D11_BIND_CONSTANT_BUFFER) == 0u)
         return;
     const unsigned first = H3ProbeConstantBufferHash(buffer);
     ID3D11Buffer* const reserved = reinterpret_cast<ID3D11Buffer*>(1u);
@@ -326,9 +294,8 @@ static void H3ProbeRegisterConstantBuffer(
             entry.byteWidth = desc->ByteWidth;
             if (initialData && initialData->pSysMem && desc->ByteWidth > 0u)
             {
-                const unsigned limit = g_h3DecoratorDiagnosticEnabled
-                    ? kH3ProbeConstantBytes : 96u;
-                const unsigned bytes = std::min(desc->ByteWidth, limit);
+                const unsigned bytes = std::min(
+                    desc->ByteWidth, kH3ProbeConstantBytes);
                 std::memcpy(entry.data, initialData->pSysMem, bytes);
                 entry.dataBytes.store(bytes, std::memory_order_relaxed);
                 entry.dataSequence.store(2u, std::memory_order_relaxed);
@@ -403,10 +370,8 @@ static void H3ProbePublishBufferData(
     H3ProbeConstantBufferState* state = H3ProbeFindConstantBuffer(buffer);
     if (!state)
         return;
-    const unsigned limit = g_h3DecoratorDiagnosticEnabled
-        ? kH3ProbeConstantBytes : 96u;
     const unsigned bytes = std::min(
-        std::min(sourceBytes, state->byteWidth), limit);
+        std::min(sourceBytes, state->byteWidth), kH3ProbeConstantBytes);
     if (bytes == 0u)
         return;
     state->dataSequence.fetch_add(1u, std::memory_order_acq_rel);
@@ -448,30 +413,6 @@ static void H3ProbeCaptureConstantSnapshot(
     }
     destination.sequence = 0u;
     destination.dataBytes = 0u;
-}
-
-static bool H3DecoratorCopyConstant(
-    ID3D11Buffer* buffer, void* destination, unsigned requiredBytes)
-{
-    if (!destination || !requiredBytes || requiredBytes > 96u)
-        return false;
-    H3ProbeConstantBufferState* state = H3ProbeFindConstantBuffer(buffer);
-    if (!state || state->byteWidth < requiredBytes)
-        return false;
-    for (unsigned attempt = 0; attempt < 3u; ++attempt)
-    {
-        const unsigned before =
-            state->dataSequence.load(std::memory_order_acquire);
-        if ((before & 1u) != 0u ||
-            state->dataBytes.load(std::memory_order_relaxed) < requiredBytes)
-            continue;
-        std::memcpy(destination, state->data, requiredBytes);
-        const unsigned after =
-            state->dataSequence.load(std::memory_order_acquire);
-        if (before == after && (after & 1u) == 0u)
-            return true;
-    }
-    return false;
 }
 
 static unsigned H3ProbeInputLayoutHash(ID3D11InputLayout* layout)
@@ -716,110 +657,10 @@ static void H3ProbeCaptureDraw(
     }
     if (placementSlot != UINT_MAX)
     {
-        if (g_h3DecoratorContactCaptureEnabled && kind == 3u &&
-            placementSlot != 0u &&
-            g_h3ProbeBoundTopology == D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP &&
-            g_h3ProbeBoundVertexStrides[0] == 20u &&
-            g_h3ProbeBoundVertexStrides[placementSlot] == 16u)
+        const unsigned sample =
+            g_h3ProbeDrawCount.fetch_add(1u, std::memory_order_relaxed);
+        if (sample < kH3ProbeDrawSlots)
         {
-            const H3ProbeBufferMetadata* geometry =
-                H3ProbeFindBuffer(g_h3ProbeBoundVertexBuffers[0]);
-            const H3ProbeBufferMetadata* placements =
-                H3ProbeFindBuffer(
-                    g_h3ProbeBoundVertexBuffers[placementSlot]);
-            float meshConstants[12]{};
-            float blockConstants[24]{};
-            const bool constants = H3DecoratorCopyConstant(
-                    g_h3ProbeBoundVertexConstants[2], meshConstants,
-                    sizeof(meshConstants)) &&
-                H3DecoratorCopyConstant(
-                    g_h3ProbeBoundVertexConstants[4], blockConstants,
-                    sizeof(blockConstants));
-            const uint64_t geometryFirstByte =
-                static_cast<uint64_t>(g_h3ProbeBoundVertexOffsets[0]) +
-                static_cast<uint64_t>(startLocation) * 20u;
-            const uint64_t geometryEndByte = geometryFirstByte +
-                static_cast<uint64_t>(countPerInstance) * 20u;
-            const uint64_t placementFirstByte =
-                static_cast<uint64_t>(
-                    g_h3ProbeBoundVertexOffsets[placementSlot]) +
-                static_cast<uint64_t>(startInstanceLocation) * 16u;
-            const uint64_t placementEndByte = placementFirstByte +
-                static_cast<uint64_t>(instanceCount) * 16u;
-            H3DecoratorFrameDraw candidate{};
-            if (geometry && placements && geometry->source &&
-                placements->source && constants && countPerInstance >= 3u &&
-                countPerInstance <=
-                    PhysicalContactTriangleMesh::kMaximumTriangles + 2u &&
-                instanceCount > 0u && instanceCount <= 4096u &&
-                (g_h3ProbeBoundVertexOffsets[0] % 20u) == 0u &&
-                geometryEndByte <= geometry->byteWidth &&
-                placementEndByte <= placements->byteWidth)
-            {
-                candidate.geometrySource = static_cast<const uint8_t*>(
-                    geometry->source);
-                candidate.geometryBytes = geometry->byteWidth;
-                candidate.startVertex =
-                    g_h3ProbeBoundVertexOffsets[0] / 20u + startLocation;
-                candidate.vertexCount = countPerInstance;
-                candidate.placementSource = static_cast<const uint8_t*>(
-                    placements->source);
-                candidate.placementBytes = placements->byteWidth;
-                candidate.placementOffset =
-                    static_cast<uint32_t>(placementFirstByte);
-                candidate.instanceCount = instanceCount;
-                candidate.positionSize = {
-                    meshConstants[0] * 0.5f,
-                    meshConstants[1] * 0.5f,
-                    meshConstants[2] * 0.5f};
-                candidate.positionMinimum = {
-                    meshConstants[4] * 0.5f,
-                    meshConstants[5] * 0.5f,
-                    meshConstants[6] * 0.5f};
-                candidate.blockMinimum = {
-                    blockConstants[0], blockConstants[1], blockConstants[2]};
-                candidate.blockStep = {
-                    blockConstants[4], blockConstants[5], blockConstants[6]};
-                const bool finite =
-                    PhysicalContactFinite(candidate.positionSize) &&
-                    PhysicalContactFinite(candidate.positionMinimum) &&
-                    PhysicalContactFinite(candidate.blockMinimum) &&
-                    PhysicalContactFinite(candidate.blockStep) &&
-                    candidate.positionSize.x > 0.0f &&
-                    candidate.positionSize.y > 0.0f &&
-                    candidate.positionSize.z > 0.0f &&
-                    candidate.positionSize.x <= 10.0f &&
-                    candidate.positionSize.y <= 10.0f &&
-                    candidate.positionSize.z <= 10.0f &&
-                    candidate.blockStep.x > 0.0f &&
-                    candidate.blockStep.y > 0.0f &&
-                    candidate.blockStep.z > 0.0f;
-                if (finite)
-                {
-                    H3DecoratorFrame& frame =
-                        g_h3DecoratorFrames[g_h3DecoratorWriteFrame];
-                    bool duplicate = false;
-                    for (uint32_t draw = 0; draw < frame.drawCount; ++draw)
-                    {
-                        if (std::memcmp(
-                                &frame.draws[draw], &candidate,
-                                sizeof(candidate)) == 0)
-                        {
-                            duplicate = true;
-                            break;
-                        }
-                    }
-                    if (!duplicate && frame.drawCount < kH3DecoratorFrameDraws)
-                        frame.draws[frame.drawCount++] = candidate;
-                }
-            }
-        }
-        if (g_h3DecoratorDiagnosticEnabled)
-        {
-            const unsigned sample =
-                g_h3ProbeDrawCount.fetch_add(1u, std::memory_order_relaxed);
-            if (sample >= kH3ProbeDrawSlots)
-                return;
             H3ProbeDrawRecord& record = g_h3ProbeDraws[sample].record;
             std::memcpy(record.vertexBuffers, g_h3ProbeBoundVertexBuffers,
                         sizeof(record.vertexBuffers));
@@ -855,206 +696,6 @@ static void H3ProbeCaptureDraw(
                 true, std::memory_order_release);
         }
     }
-}
-
-static void H3DecoratorPublishFrame()
-{
-    if (!g_h3DecoratorContactCaptureEnabled)
-        return;
-    H3DecoratorFrame& published =
-        g_h3DecoratorFrames[g_h3DecoratorWriteFrame];
-    published.version.fetch_add(1u, std::memory_order_release);
-    g_h3DecoratorPublishedFrame.store(
-        g_h3DecoratorWriteFrame, std::memory_order_release);
-    g_h3DecoratorWriteFrame = (g_h3DecoratorWriteFrame + 1u) %
-        static_cast<unsigned>(_countof(g_h3DecoratorFrames));
-    H3DecoratorFrame& next = g_h3DecoratorFrames[g_h3DecoratorWriteFrame];
-    uint32_t version = next.version.load(std::memory_order_relaxed);
-    if ((version & 1u) == 0u)
-        ++version;
-    next.version.store(version, std::memory_order_release);
-    next.drawCount = 0;
-}
-
-static bool H3DecoratorSafeCopy(
-    void* destination, const void* source, size_t bytes)
-{
-    if (!destination || !source || !bytes)
-        return false;
-    __try
-    {
-        std::memcpy(destination, source, bytes);
-        return true;
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER)
-    {
-        return false;
-    }
-}
-
-static float H3DecoratorMeshRadius(const PhysicalContactTriangleMesh& mesh)
-{
-    float radius = 0.0f;
-    for (uint16_t triangle = 0; triangle < mesh.triangleCount; ++triangle)
-        for (const PhysicalContactVec3 point : mesh.triangles[triangle].vertices)
-            radius = std::max(radius, PhysicalContactLength(point));
-    return radius;
-}
-
-static float H3DecoratorPointSegmentDistanceSquared(
-    PhysicalContactVec3 point, PhysicalContactVec3 start,
-    PhysicalContactVec3 end)
-{
-    const PhysicalContactVec3 delta = end - start;
-    const float lengthSquared = PhysicalContactLengthSquared(delta);
-    const float fraction = lengthSquared > 1.0e-10f
-        ? std::clamp(
-              PhysicalContactDot(point - start, delta) / lengthSquared,
-              0.0f, 1.0f)
-        : 0.0f;
-    return PhysicalContactLengthSquared(point - (start + delta * fraction));
-}
-
-size_t D3D_Halo3DecoratorWallPlanes(
-    const PhysicalContactTriangleMesh& weapon,
-    const PhysicalContactTransform& previousWeapon,
-    const PhysicalContactTransform& currentWeapon,
-    float stepWorldUnits, float surfaceRadiusWorldUnits,
-    float clearanceWorldUnits, PhysicalContactWallPlane* planes,
-    size_t planeCapacity, uint32_t* testedInstances, uint32_t* solidDraws)
-{
-    if (testedInstances)
-        *testedInstances = 0;
-    if (solidDraws)
-        *solidDraws = 0;
-    if (!g_h3DecoratorContactCaptureEnabled || !planes || !planeCapacity ||
-        !PhysicalContactTriangleMeshValid(weapon) ||
-        !PhysicalContactTransformFinite(previousWeapon) ||
-        !PhysicalContactTransformFinite(currentWeapon) ||
-        !std::isfinite(stepWorldUnits) || stepWorldUnits <= 0.0f ||
-        !std::isfinite(surfaceRadiusWorldUnits) ||
-        surfaceRadiusWorldUnits < 0.0f ||
-        !std::isfinite(clearanceWorldUnits) || clearanceWorldUnits < 0.0f)
-        return 0;
-
-    std::array<H3DecoratorFrameDraw, kH3DecoratorFrameDraws> draws{};
-    uint32_t drawCount = 0;
-    bool copied = false;
-    for (unsigned attempt = 0; attempt < 3u && !copied; ++attempt)
-    {
-        const unsigned index =
-            g_h3DecoratorPublishedFrame.load(std::memory_order_acquire);
-        if (index >= _countof(g_h3DecoratorFrames))
-            break;
-        const H3DecoratorFrame& frame = g_h3DecoratorFrames[index];
-        const uint32_t before = frame.version.load(std::memory_order_acquire);
-        if ((before & 1u) != 0u)
-            continue;
-        drawCount = std::min(frame.drawCount, kH3DecoratorFrameDraws);
-        std::memcpy(draws.data(), frame.draws,
-                    static_cast<size_t>(drawCount) * sizeof(draws[0]));
-        const uint32_t after = frame.version.load(std::memory_order_acquire);
-        copied = before == after && (after & 1u) == 0u;
-    }
-    if (!copied)
-        return 0;
-
-    constexpr uint32_t kMaximumExactInstances = 16u;
-    constexpr size_t kGeometryBytes =
-        (PhysicalContactTriangleMesh::kMaximumTriangles + 2u) * 20u;
-    std::array<uint8_t, kGeometryBytes> geometryBytes{};
-    const float weaponRadius = H3DecoratorMeshRadius(weapon) *
-        std::max(previousWeapon.scale, currentWeapon.scale);
-    uint32_t exactInstances = 0;
-    size_t planeCount = 0;
-    for (uint32_t drawIndex = 0;
-         drawIndex < drawCount && planeCount < planeCapacity &&
-         exactInstances < kMaximumExactInstances; ++drawIndex)
-    {
-        const H3DecoratorFrameDraw& draw = draws[drawIndex];
-        const size_t geometryOffset =
-            static_cast<size_t>(draw.startVertex) * 20u;
-        const size_t geometrySize =
-            static_cast<size_t>(draw.vertexCount) * 20u;
-        if (!draw.geometrySource || geometrySize > geometryBytes.size() ||
-            geometryOffset > draw.geometryBytes ||
-            geometrySize > draw.geometryBytes - geometryOffset ||
-            !H3DecoratorSafeCopy(
-                geometryBytes.data(), draw.geometrySource + geometryOffset,
-                geometrySize))
-            continue;
-        PhysicalContactTriangleMesh target{};
-        if (!PhysicalContactDecodeH3DecoratorTriangleStrip(
-                geometryBytes.data(), geometrySize, 0u, draw.vertexCount,
-                draw.positionMinimum, draw.positionSize, target) ||
-            !PhysicalContactH3DecoratorMeshIsSolid(target))
-            continue;
-        if (solidDraws)
-            ++*solidDraws;
-
-        for (uint32_t instance = 0;
-             instance < draw.instanceCount && planeCount < planeCapacity &&
-             exactInstances < kMaximumExactInstances; ++instance)
-        {
-            const size_t placementOffset =
-                static_cast<size_t>(draw.placementOffset) +
-                static_cast<size_t>(instance) * 16u;
-            if (!draw.placementSource || placementOffset > draw.placementBytes ||
-                16u > draw.placementBytes - placementOffset)
-                break;
-            uint8_t placementBytes[16]{};
-            if (!H3DecoratorSafeCopy(
-                    placementBytes, draw.placementSource + placementOffset,
-                    sizeof(placementBytes)))
-                break;
-            PhysicalContactTransform targetTransform{};
-            if (!PhysicalContactDecodeH3DecoratorPlacement(
-                    placementBytes, draw.blockMinimum, draw.blockStep,
-                    targetTransform))
-                continue;
-            const float targetRadius = target.groups[0].boundRadius *
-                targetTransform.scale;
-            const float broadphaseRadius = weaponRadius + targetRadius +
-                surfaceRadiusWorldUnits + clearanceWorldUnits;
-            const PhysicalContactVec3 targetCentre =
-                PhysicalContactTransformPoint(
-                    targetTransform, target.groups[0].centre);
-            if (H3DecoratorPointSegmentDistanceSquared(
-                    targetCentre, previousWeapon.position,
-                    currentWeapon.position) >
-                broadphaseRadius * broadphaseRadius)
-                continue;
-
-            ++exactInstances;
-            if (testedInstances)
-                ++*testedInstances;
-            PhysicalContactTriangleMeshHit hit =
-                PhysicalContactSweepTriangleMeshes(
-                    weapon, previousWeapon, currentWeapon, target,
-                    targetTransform, stepWorldUnits,
-                    surfaceRadiusWorldUnits);
-            if (!hit.hit || !PhysicalContactFinite(hit.normal) ||
-                !PhysicalContactFinite(hit.targetPoint))
-                continue;
-            PhysicalContactVec3 normal = PhysicalContactNormalize(
-                hit.normal, previousWeapon.position - hit.targetPoint);
-            if (PhysicalContactDot(
-                    previousWeapon.position - hit.targetPoint, normal) < 0.0f)
-                normal = normal * -1.0f;
-            const PhysicalContactVec3 weaponPoint =
-                PhysicalContactTriangleMeshSupport(
-                    weapon, currentWeapon, normal * -1.0f, 0.0f);
-            const PhysicalContactVec3 targetPoint =
-                PhysicalContactTriangleMeshSupport(
-                    target, targetTransform, normal, 0.0f);
-            if (!PhysicalContactFinite(weaponPoint) ||
-                !PhysicalContactFinite(targetPoint))
-                continue;
-            planes[planeCount++] = {
-                weaponPoint, targetPoint, normal, clearanceWorldUnits};
-        }
-    }
-    return planeCount;
 }
 
 static void STDMETHODCALLTYPE H3ProbeDrawIndexedInstancedHook(
@@ -1908,8 +1549,7 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
     ID3D11Device* device, const D3D11_BUFFER_DESC* desc,
     const D3D11_SUBRESOURCE_DATA* initialData, ID3D11Buffer** buffer)
 {
-    if (g_h3DecoratorDiagnosticEnabled)
-        TryInstallH3ResourceFixupProbe();
+    TryInstallH3ResourceFixupProbe();
     bool decoratorPlacement = false;
     const void* caller = _ReturnAddress();
     const uintptr_t halo3Rva = ProbeModuleRva(
@@ -1917,7 +1557,7 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
     const uintptr_t mccRva = ProbeModuleRva(
         caller, GetModuleHandleW(nullptr));
     if (desc && initialData && initialData->pSysMem &&
-        desc->ByteWidth >= 16u * 4u && (desc->ByteWidth % 16u) == 0)
+        desc->ByteWidth >= 16u * 32u && (desc->ByteWidth % 16u) == 0)
     {
         const uint8_t* bytes = static_cast<const uint8_t*>(initialData->pSysMem);
         const unsigned records = desc->ByteWidth / 16u;
@@ -1933,7 +1573,6 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
             {0x00, 0x02, 0x7E, 0x80, 0xCD, 0xC2, 0xFF, 0xFF, 0xFF, 0x00},
             {0x00, 0x02, 0x09, 0x0F, 0x52, 0x25, 0xFF, 0xFF, 0xFF, 0x00},
         };
-        if (g_h3DecoratorDiagnosticEnabled)
         for (unsigned record = 0; record < records; ++record)
         {
             const uint8_t* suffix = bytes + static_cast<size_t>(record) * 16u + 6u;
@@ -1976,33 +1615,23 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
 
         const unsigned sampledRecords = std::min(records, 4096u);
         unsigned smallPartIndices = 0;
+        unsigned nonzeroPartIndices = 0;
         unsigned nonzeroColors = 0;
-        unsigned validScaledQuaternions = 0;
         for (unsigned i = 0; i < sampledRecords; ++i)
         {
             const size_t offset = static_cast<size_t>(i) * 16u;
-            // The second byte is the decorator-set selector in the packed
-            // runtime stream (Valhalla's proven rock records use 0 and 2).
-            if (bytes[offset + 7u] < 64u)
+            const uint8_t part = bytes[offset + 7u];
+            if (part < 16u)
                 ++smallPartIndices;
+            if (part != 0u)
+                ++nonzeroPartIndices;
             if (bytes[offset + 12u] != 0u && bytes[offset + 13u] != 0u &&
                 bytes[offset + 14u] != 0u)
                 ++nonzeroColors;
-            constexpr float kQuaternionStep = 1.41421356237f / 127.0f;
-            float scale = 0.0f;
-            for (unsigned component = 0; component < 4u; ++component)
-            {
-                const float value =
-                    (static_cast<float>(bytes[offset + 8u + component]) -
-                     127.0f) * kQuaternionStep;
-                scale += value * value;
-            }
-            if (std::isfinite(scale) && scale >= 0.01f && scale <= 2.10f)
-                ++validScaledQuaternions;
         }
-        const bool placementLike = sampledRecords >= 4u &&
+        const bool placementLike = sampledRecords >= 256u &&
             smallPartIndices * 100u >= sampledRecords * 99u &&
-            validScaledQuaternions * 100u >= sampledRecords * 99u &&
+            nonzeroPartIndices * 100u >= sampledRecords &&
             nonzeroColors * 100u >= sampledRecords * 50u;
         if (placementLike)
         {
@@ -2010,18 +1639,18 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
             const unsigned sample =
                 g_h3DecoratorBufferProbeSamples.fetch_add(
                     1, std::memory_order_relaxed) + 1;
-            if (g_h3DecoratorDiagnosticEnabled && sample <= 128u)
+            if (sample <= 128u)
             {
                 char head[16u * 4u * 3u + 1u]{};
                 char stack[512]{};
                 FormatProbeRecords(bytes, desc->ByteWidth, 0u, head, sizeof(head));
                 FormatProbeStack(stack, sizeof(stack));
                 LOG("H3DECORBUF[%u]: bytes=%u records=%u smallPart=%u/%u "
-                    "validQuaternion=%u nonzeroColor=%u usage=%u bind=0x%X cpu=0x%X "
+                    "nonzeroPart=%u nonzeroColor=%u usage=%u bind=0x%X cpu=0x%X "
                     "misc=0x%X stride=%u halo3Rva=0x%llX mccRva=0x%llX "
                     "stack=[%s] head=%s",
                     sample, desc->ByteWidth, records, smallPartIndices,
-                    sampledRecords, validScaledQuaternions, nonzeroColors,
+                    sampledRecords, nonzeroPartIndices, nonzeroColors,
                     static_cast<unsigned>(desc->Usage), desc->BindFlags,
                     desc->CPUAccessFlags, desc->MiscFlags, desc->StructureByteStride,
                     static_cast<unsigned long long>(halo3Rva),
@@ -2032,7 +1661,7 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
         }
     }
 
-    if (g_h3DecoratorDiagnosticEnabled && desc && initialData && initialData->pSysMem &&
+    if (desc && initialData && initialData->pSysMem &&
         desc->ByteWidth >= 0x3Cu * 4u && (desc->ByteWidth % 0x3Cu) == 0)
     {
         const uint8_t* bytes = static_cast<const uint8_t*>(initialData->pSysMem);
@@ -3045,7 +2674,6 @@ static HRESULT STDMETHODCALLTYPE PresentHook(IDXGISwapChain* sc, UINT syncInterv
     LARGE_INTEGER hookStart{};
     if (runVrFrame)
     {
-        H3DecoratorPublishFrame();
         if constexpr (kEnableCoopPresentProbe)
             QueryPerformanceCounter(&hookStart);
         LogSwapchainConfigOnce(sc);
@@ -3077,7 +2705,6 @@ static HRESULT STDMETHODCALLTYPE Present1Hook(IDXGISwapChain1* sc, UINT syncInte
     LARGE_INTEGER hookStart{};
     if (runVrFrame)
     {
-        H3DecoratorPublishFrame();
         if constexpr (kEnableCoopPresentProbe)
             QueryPerformanceCounter(&hookStart);
         LogSwapchainConfigOnce(sc);
@@ -3202,112 +2829,104 @@ bool InstallD3D11Hooks()
 #endif
 
     wchar_t decoratorProbeValue[2]{};
-    g_h3DecoratorDiagnosticEnabled = GetEnvironmentVariableW(
-        L"HALOMCCVR_H3_DECORATOR_BUFFER_PROBE",
-        decoratorProbeValue, 2) > 0;
-    const bool decoratorCaptureRequested =
-        g_config.physical_weapon_contact || g_h3DecoratorDiagnosticEnabled;
-    if (decoratorCaptureRequested)
+    if (GetEnvironmentVariableW(
+            L"HALOMCCVR_H3_DECORATOR_BUFFER_PROBE",
+            decoratorProbeValue, 2) > 0)
     {
         const bool createBufferOk =
             MH_CreateHook(deviceVtbl[3], (void*)&CreateBufferHook,
                           (void**)&g_origCreateBuffer) == MH_OK;
-        const bool vertexConstantBindingOk = createBufferOk &&
-            MH_CreateHook(contextVtbl[7],
+        const bool createInputLayoutOk = createBufferOk &&
+            MH_CreateHook(deviceVtbl[11],
+                          (void*)&H3ProbeCreateInputLayoutHook,
+                          (void**)&g_origCreateInputLayout) == MH_OK;
+        const bool vertexConstantBindingOk = createInputLayoutOk &&
+            (!kEnableH3DecoratorShaderConstantProbe ||
+             MH_CreateHook(contextVtbl[7],
                           (void*)&H3ProbeVSSetConstantBuffersHook,
-                          (void**)&g_origH3ProbeVSSetConstantBuffers) == MH_OK;
+                          (void**)&g_origH3ProbeVSSetConstantBuffers) == MH_OK);
         const bool mapBindingOk = vertexConstantBindingOk &&
-            MH_CreateHook(contextVtbl[14], (void*)&H3ProbeMapHook,
-                          (void**)&g_origH3ProbeMap) == MH_OK;
+            (!kEnableH3DecoratorShaderConstantProbe ||
+             MH_CreateHook(contextVtbl[14], (void*)&H3ProbeMapHook,
+                          (void**)&g_origH3ProbeMap) == MH_OK);
         const bool unmapBindingOk = mapBindingOk &&
-            MH_CreateHook(contextVtbl[15], (void*)&H3ProbeUnmapHook,
-                          (void**)&g_origH3ProbeUnmap) == MH_OK;
+            (!kEnableH3DecoratorShaderConstantProbe ||
+             MH_CreateHook(contextVtbl[15], (void*)&H3ProbeUnmapHook,
+                          (void**)&g_origH3ProbeUnmap) == MH_OK);
         const bool updateBindingOk = unmapBindingOk &&
-            MH_CreateHook(contextVtbl[48],
+            (!kEnableH3DecoratorShaderConstantProbe ||
+             MH_CreateHook(contextVtbl[48],
                           (void*)&H3ProbeUpdateSubresourceHook,
-                          (void**)&g_origH3ProbeUpdateSubresource) == MH_OK;
-        const bool vertexBindingOk = updateBindingOk &&
+                          (void**)&g_origH3ProbeUpdateSubresource) == MH_OK);
+        const bool inputLayoutBindingOk = updateBindingOk &&
+            MH_CreateHook(contextVtbl[17],
+                          (void*)&H3ProbeIASetInputLayoutHook,
+                          (void**)&g_origIASetInputLayout) == MH_OK;
+        const bool vertexBindingOk = inputLayoutBindingOk &&
+            kEnableH3DecoratorDrawFamilyProbe &&
             MH_CreateHook(contextVtbl[18],
                           (void*)&H3ProbeIASetVertexBuffersHook,
                           (void**)&g_origIASetVertexBuffers) == MH_OK;
-        const bool topologyBindingOk = vertexBindingOk &&
+        const bool indexBindingOk = vertexBindingOk &&
+            MH_CreateHook(contextVtbl[19],
+                          (void*)&H3ProbeIASetIndexBufferHook,
+                          (void**)&g_origIASetIndexBuffer) == MH_OK;
+        const bool topologyBindingOk = indexBindingOk &&
             MH_CreateHook(contextVtbl[24],
                           (void*)&H3ProbeIASetPrimitiveTopologyHook,
                           (void**)&g_origIASetPrimitiveTopology) == MH_OK;
-        const bool instancedOk = topologyBindingOk &&
+        const bool drawIndexedOk = topologyBindingOk &&
+            MH_CreateHook(contextVtbl[12],
+                          (void*)&H3ProbeDrawIndexedHook,
+                          (void**)&g_origH3ProbeDrawIndexed) == MH_OK;
+        const bool drawOk = drawIndexedOk &&
+            MH_CreateHook(contextVtbl[13],
+                          (void*)&H3ProbeDrawHook,
+                          (void**)&g_origH3ProbeDraw) == MH_OK;
+        const bool indexedInstancedOk = drawOk &&
+            MH_CreateHook(contextVtbl[20],
+                          (void*)&H3ProbeDrawIndexedInstancedHook,
+                          (void**)&g_origDrawIndexedInstanced) == MH_OK;
+        const bool instancedOk = indexedInstancedOk &&
             MH_CreateHook(contextVtbl[21],
                           (void*)&H3ProbeDrawInstancedHook,
                           (void**)&g_origH3ProbeDrawInstanced) == MH_OK;
-        if (instancedOk)
+        const bool indexedIndirectOk = instancedOk &&
+            MH_CreateHook(contextVtbl[39],
+                          (void*)&H3ProbeDrawIndexedInstancedIndirectHook,
+                          (void**)&g_origH3ProbeDrawIndexedInstancedIndirect) == MH_OK;
+        const bool drawFamilyOk = indexedIndirectOk &&
+            MH_CreateHook(contextVtbl[40],
+                          (void*)&H3ProbeDrawInstancedIndirectHook,
+                          (void**)&g_origH3ProbeDrawInstancedIndirect) == MH_OK;
+        if (createBufferOk)
+            LOG("H3DECORBUF: initial-data probe installed; resource owner will "
+                "bind after Halo 3 loads (environment-only)");
+        else
+            LOG("H3DECORBUF: CreateBuffer hook failed; probe disabled");
+        if (drawFamilyOk)
         {
-            H3DecoratorFrame& first =
-                g_h3DecoratorFrames[g_h3DecoratorWriteFrame];
-            first.version.store(1u, std::memory_order_release);
-            first.drawCount = 0;
-            g_h3DecoratorContactCaptureEnabled =
-                g_config.physical_weapon_contact;
-            LOG("H3 decorator contact capture installed: contact=%u diagnostic=%u",
-                g_h3DecoratorContactCaptureEnabled ? 1u : 0u,
-                g_h3DecoratorDiagnosticEnabled ? 1u : 0u);
+            g_h3DecoratorDrawProbeEnabled.store(
+                true, std::memory_order_release);
+            HANDLE thread = CreateThread(
+                nullptr, 0, &H3ProbeDrawLoggerThread, nullptr, 0, nullptr);
+            if (thread)
+            {
+                CloseHandle(thread);
+                LOG("H3DECORDRAW: fixed-storage draw tracer installed "
+                    "(environment-only; no callback logging or GPU readback)");
+            }
+            else
+            {
+                g_h3DecoratorDrawProbeEnabled.store(
+                    false, std::memory_order_release);
+                LOG("H3DECORDRAW: logger thread creation failed; draw records "
+                    "will remain inert");
+            }
         }
         else
         {
-            g_h3DecoratorContactCaptureEnabled = false;
-            LOG("H3 decorator contact capture binding failed; physical contact "
-                "continues without decorator walls");
-        }
-
-        if (g_h3DecoratorDiagnosticEnabled && instancedOk)
-        {
-            const bool createInputLayoutOk =
-                MH_CreateHook(deviceVtbl[11],
-                              (void*)&H3ProbeCreateInputLayoutHook,
-                              (void**)&g_origCreateInputLayout) == MH_OK;
-            const bool inputLayoutOk = createInputLayoutOk &&
-                MH_CreateHook(contextVtbl[17],
-                              (void*)&H3ProbeIASetInputLayoutHook,
-                              (void**)&g_origIASetInputLayout) == MH_OK;
-            const bool indexOk = inputLayoutOk &&
-                MH_CreateHook(contextVtbl[19],
-                              (void*)&H3ProbeIASetIndexBufferHook,
-                              (void**)&g_origIASetIndexBuffer) == MH_OK;
-            const bool drawIndexedOk = indexOk &&
-                MH_CreateHook(contextVtbl[12],
-                              (void*)&H3ProbeDrawIndexedHook,
-                              (void**)&g_origH3ProbeDrawIndexed) == MH_OK;
-            const bool drawOk = drawIndexedOk &&
-                MH_CreateHook(contextVtbl[13],
-                              (void*)&H3ProbeDrawHook,
-                              (void**)&g_origH3ProbeDraw) == MH_OK;
-            const bool indexedInstancedOk = drawOk &&
-                MH_CreateHook(contextVtbl[20],
-                              (void*)&H3ProbeDrawIndexedInstancedHook,
-                              (void**)&g_origDrawIndexedInstanced) == MH_OK;
-            const bool indexedIndirectOk = indexedInstancedOk &&
-                MH_CreateHook(contextVtbl[39],
-                              (void*)&H3ProbeDrawIndexedInstancedIndirectHook,
-                              (void**)&g_origH3ProbeDrawIndexedInstancedIndirect) == MH_OK;
-            const bool diagnosticOk = indexedIndirectOk &&
-                MH_CreateHook(contextVtbl[40],
-                              (void*)&H3ProbeDrawInstancedIndirectHook,
-                              (void**)&g_origH3ProbeDrawInstancedIndirect) == MH_OK;
-            if (diagnosticOk)
-            {
-                g_h3DecoratorDrawProbeEnabled.store(
-                    true, std::memory_order_release);
-                HANDLE thread = CreateThread(
-                    nullptr, 0, &H3ProbeDrawLoggerThread, nullptr, 0, nullptr);
-                if (thread)
-                {
-                    CloseHandle(thread);
-                    LOG("H3DECORDRAW: diagnostic tracer installed");
-                }
-                else
-                    g_h3DecoratorDrawProbeEnabled.store(
-                        false, std::memory_order_release);
-            }
-            else
-                LOG("H3DECORDRAW: optional diagnostic binding failed");
+            LOG("H3DECORDRAW: draw-family binding failed; tracer disabled");
         }
     }
 

@@ -10,7 +10,6 @@
 #include <vector>
 #include <MinHook.h>
 #include "game.h"
-#include "d3d11_hook.h"
 #include "sigscan.h"
 #include "vr.h"
 #include "ik.h"
@@ -6572,9 +6571,6 @@ namespace
     std::atomic<uint64_t> g_halo3ContactWallObjectPlanes{0};
     std::atomic<uint32_t> g_halo3ContactWallVertices{0};
     std::atomic<uint32_t> g_halo3ContactWallPlanes{0};
-    std::atomic<uint32_t> g_halo3ContactDecoratorSolidDraws{0};
-    std::atomic<uint32_t> g_halo3ContactDecoratorInstances{0};
-    std::atomic<uint32_t> g_halo3ContactDecoratorPlanes{0};
     std::atomic<uint64_t> g_halo3ContactAuthoredShapeHits{0};
     std::atomic<uint64_t> g_halo3ContactAnimatedBodyHits{0};
     std::atomic<uint64_t> g_halo3ContactUnsupportedShapes{0};
@@ -10605,10 +10601,6 @@ namespace
             0.0f, std::memory_order_relaxed);
         g_halo3ContactWallVertices.store(0, std::memory_order_relaxed);
         g_halo3ContactWallPlanes.store(0, std::memory_order_relaxed);
-        g_halo3ContactDecoratorSolidDraws.store(
-            0, std::memory_order_relaxed);
-        g_halo3ContactDecoratorInstances.store(0, std::memory_order_relaxed);
-        g_halo3ContactDecoratorPlanes.store(0, std::memory_order_relaxed);
     }
 
     void Halo3ResetLeftGrab()
@@ -12984,37 +12976,6 @@ namespace
                                 sampledTriangle].centre,
                             triangleClearance);
                     }
-
-                    if (collisionShape &&
-                        PhysicalContactTriangleMeshValid(weaponTriangleMesh) &&
-                        wallPlaneCount < wallPlanes.size())
-                    {
-                        uint32_t testedInstances = 0;
-                        uint32_t solidDraws = 0;
-                        const PhysicalContactTransform& previousDecoratorPose =
-                            previousWallPoseValid
-                                ? g_halo3ContactPreviousWallTransform
-                                : unconstrainedWeaponTransform;
-                        const size_t decoratorPlanes =
-                            D3D_Halo3DecoratorWallPlanes(
-                                weaponTriangleMesh, previousDecoratorPose,
-                                unconstrainedWeaponTransform,
-                                kHalo3ContactTriangleStepMeters * worldScale,
-                                kHalo3ContactTriangleSurfaceRadiusMeters *
-                                    worldScale,
-                                0.005f * worldScale,
-                                wallPlanes.data() + wallPlaneCount,
-                                wallPlanes.size() - wallPlaneCount,
-                                &testedInstances, &solidDraws);
-                        wallPlaneCount += decoratorPlanes;
-                        g_halo3ContactDecoratorSolidDraws.store(
-                            solidDraws, std::memory_order_relaxed);
-                        g_halo3ContactDecoratorInstances.store(
-                            testedInstances, std::memory_order_relaxed);
-                        g_halo3ContactDecoratorPlanes.store(
-                            static_cast<uint32_t>(decoratorPlanes),
-                            std::memory_order_relaxed);
-                    }
                 }
                 g_halo3ContactWallPlanes.store(
                     static_cast<uint32_t>(wallPlaneCount),
@@ -14607,8 +14568,7 @@ namespace
             "bodyConstraints=%llu bodyGapHolds=%llu bodyPeak=%.3fm "
             "wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
-            "wallVertices=%u wallPlanes=%u decoratorSolidDraws=%u "
-            "decoratorInstances=%u decoratorPlanes=%u",
+            "wallVertices=%u wallPlanes=%u",
             stageName,
             g_halo3ContactEligibleObjects.load(std::memory_order_relaxed),
             g_halo3ContactWeaponSpeed.load(std::memory_order_relaxed),
@@ -14723,13 +14683,7 @@ namespace
             (unsigned long long)g_halo3ContactWallObjectPlanes.load(
                 std::memory_order_relaxed),
             g_halo3ContactWallVertices.load(std::memory_order_relaxed),
-            g_halo3ContactWallPlanes.load(std::memory_order_relaxed),
-            g_halo3ContactDecoratorSolidDraws.load(
-                std::memory_order_relaxed),
-            g_halo3ContactDecoratorInstances.load(
-                std::memory_order_relaxed),
-            g_halo3ContactDecoratorPlanes.load(
-                std::memory_order_relaxed));
+            g_halo3ContactWallPlanes.load(std::memory_order_relaxed));
         static constexpr const char* kGrabStageNames[] = {
             "disabled", "base-gate", "motion", "searching", "candidate",
             "holding", "released", "faulted"};
