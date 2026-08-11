@@ -59,10 +59,13 @@ function Stop-SteamVr {
         'vrserver',
         'vrcompositor',
         'vrdashboard',
-        'vrwebhelper'
+        'vrwebhelper',
+        'steamtours'
     )
-    # vrmonitor can spawn vrserver a moment after an apparently clean stop.
-    # Require five continuous seconds with every SteamVR process absent before
+    # vrmonitor can spawn vrserver or SteamVR Home (steamtours) a moment after
+    # an apparently clean stop. Null-driver Home failures also remain alive
+    # after vrserver exits and reserve about 380 MiB each. Require five
+    # continuous seconds with every SteamVR-owned process absent before
     # restoring the user's exact settings file.
     $quietSamples = 0
     for ($attempt = 0; $attempt -lt 60; ++$attempt) {
