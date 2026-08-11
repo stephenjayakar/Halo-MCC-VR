@@ -1,5 +1,10 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+
+#include "../common/physical_contact_logic.h"
+
 // Hooks IDXGISwapChain::Present / Present1 / ResizeBuffers process-wide.
 // Present is the "here's a finished frame" call every D3D11 game makes each
 // frame — our hook is where all VR work happens.
@@ -31,3 +36,15 @@ void D3D_SetForcedClientLie(bool on);
 // builds compile out both Present sampling and this dump; reason names the mode
 // a diagnostic rebuild fell out of.
 void CoopProbe_DumpRunUp(const char* reason);
+
+// Reads only the previous fully-published D3D frame. Renderer callbacks copy
+// bounded binding metadata into fixed storage; this contact-thread query does
+// all mesh decoding and collision work outside those callbacks.
+size_t D3D_Halo3DecoratorWallPlanes(
+    const PhysicalContactTriangleMesh& weapon,
+    const PhysicalContactTransform& previousWeapon,
+    const PhysicalContactTransform& currentWeapon,
+    float stepWorldUnits, float surfaceRadiusWorldUnits,
+    float clearanceWorldUnits, PhysicalContactWallPlane* planes,
+    size_t planeCapacity, uint32_t* testedInstances = nullptr,
+    uint32_t* solidDraws = nullptr);
