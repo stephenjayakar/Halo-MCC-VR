@@ -141,6 +141,7 @@ constexpr unsigned kH3ProbeConstantSlots =
     D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;
 constexpr unsigned kH3ProbeConstantBytes = 512u;
 constexpr unsigned kH3ProbeConstantBufferSlots = 1u << 11u;
+constexpr uint32_t kH3DecoratorOwnedBufferBytes = 16u * 1024u * 1024u;
 
 struct H3ProbeBufferMetadata
 {
@@ -225,6 +226,9 @@ static H3ProbeConstantBufferState
 static H3ProbeInputLayoutMetadata
     g_h3ProbeInputLayouts[kH3ProbeInputLayoutSlots]{};
 static H3ProbeDrawSlot g_h3ProbeDraws[kH3ProbeDrawSlots]{};
+alignas(16) static uint8_t
+    g_h3DecoratorOwnedBuffers[kH3DecoratorOwnedBufferBytes]{};
+static std::atomic<uint32_t> g_h3DecoratorOwnedBufferOffset{0};
 static std::atomic<unsigned> g_h3ProbeDrawCount{0};
 static thread_local ID3D11Buffer*
     g_h3ProbeBoundVertexBuffers[kH3ProbeVertexSlots]{};
@@ -359,7 +363,38 @@ static void H3ProbeRegisterBuffer(
                 expected, reserved, std::memory_order_acq_rel,
                 std::memory_order_acquire))
         {
-            entry.source = initialData ? initialData->pSysMem : nullptr;
+            const void* source = initialData ? initialData->pSysMem : nullptr;
+            const bool halo3VertexBuffer =
+                halo3CreatorRva != UINTPTR_MAX && source &&
+                (desc->BindFlags & D3D11_BIND_VERTEX_BUFFER) != 0u;
+            const bool retainPlacement = halo3VertexBuffer &&
+                decoratorPlacement && desc->ByteWidth <= 256u * 1024u;
+            const bool retainPotentialGeometry = halo3VertexBuffer &&
+                !decoratorPlacement && desc->ByteWidth >= 3u * 20u &&
+                desc->ByteWidth <= 16u * 1024u &&
+                (desc->ByteWidth % 20u) == 0u;
+            if (retainPlacement || retainPotentialGeometry)
+            {
+                const uint32_t reservedBytes =
+                    (desc->ByteWidth + 15u) & ~15u;
+                const uint32_t offset =
+                    g_h3DecoratorOwnedBufferOffset.fetch_add(
+                        reservedBytes, std::memory_order_relaxed);
+                if (offset <= kH3DecoratorOwnedBufferBytes &&
+                    reservedBytes <= kH3DecoratorOwnedBufferBytes - offset)
+                {
+                    std::memcpy(
+                        g_h3DecoratorOwnedBuffers + offset, source,
+                        desc->ByteWidth);
+                    source = g_h3DecoratorOwnedBuffers + offset;
+                }
+                else if (!g_h3DecoratorDiagnosticEnabled)
+                    source = nullptr;
+            }
+            else if (halo3CreatorRva != UINTPTR_MAX &&
+                     !g_h3DecoratorDiagnosticEnabled)
+                source = nullptr;
+            entry.source = source;
             entry.byteWidth = desc->ByteWidth;
             entry.bindFlags = desc->BindFlags;
             entry.miscFlags = desc->MiscFlags;
