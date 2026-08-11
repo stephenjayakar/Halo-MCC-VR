@@ -36,6 +36,7 @@ typedef void(STDMETHODCALLTYPE* OMSetRenderTargetsFn)(ID3D11DeviceContext*, UINT
 typedef HRESULT(STDMETHODCALLTYPE* CreateBufferFn)(ID3D11Device*,
     const D3D11_BUFFER_DESC*, const D3D11_SUBRESOURCE_DATA*, ID3D11Buffer**);
 typedef void(__fastcall* H3ResourceFixupFn)(void*);
+typedef uint8_t(__fastcall* H3VertexFixupFn)(void*);
 #if HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE
 typedef void(STDMETHODCALLTYPE* DrawIndexedFn)(ID3D11DeviceContext*, UINT, UINT, INT);
 #endif
@@ -50,7 +51,10 @@ static ResizeBuffersFn g_origResizeBuffers = nullptr;
 static OMSetRenderTargetsFn g_origOMSetRenderTargets = nullptr;
 static CreateBufferFn g_origCreateBuffer = nullptr;
 static H3ResourceFixupFn g_origH3ResourceFixup = nullptr;
+static H3VertexFixupFn g_origH3VertexFixup = nullptr;
 static thread_local void* g_h3CurrentResourceContext = nullptr;
+static thread_local void* g_h3CurrentVertexFixup = nullptr;
+static uintptr_t g_h3ResourcePackedBaseSlot = 0;
 static std::atomic<bool> g_h3ResourceProbeInstallStarted{false};
 static std::atomic<unsigned> g_h3DecoratorBufferProbeSamples{0};
 static std::atomic<unsigned> g_h3DecoratorExactProbeSamples{0};
@@ -151,6 +155,15 @@ static void __fastcall H3ResourceFixupHook(void* context)
     g_h3CurrentResourceContext = previous;
 }
 
+static uint8_t __fastcall H3VertexFixupHook(void* record)
+{
+    void* previous = g_h3CurrentVertexFixup;
+    g_h3CurrentVertexFixup = record;
+    const uint8_t result = g_origH3VertexFixup(record);
+    g_h3CurrentVertexFixup = previous;
+    return result;
+}
+
 static void TryInstallH3ResourceFixupProbe()
 {
     if (g_origH3ResourceFixup || !GetModuleHandleW(L"halo3.dll"))
@@ -164,10 +177,15 @@ static void TryInstallH3ResourceFixupProbe()
         "48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 "
         "41 56 41 57 48 8D 68 A1 48 81 EC A0 00 00 00 0F 10 41 30 83 "
         "65 FF 00";
+    static constexpr char kH3VertexFixupSignature[] =
+        "48 89 5C 24 08 57 48 83 EC 30 48 8B 15 ?? ?? ?? ?? 45 33 C9 44 "
+        "39 09 75 05 45 8B C1 EB 06 8B 01 4C 8D 04 82 44 39 49 04";
     uintptr_t moduleBase = 0;
     size_t moduleSize = 0;
     uintptr_t fixup = 0;
     uintptr_t secondFixup = 0;
+    uintptr_t vertexFixup = 0;
+    uintptr_t secondVertexFixup = 0;
     if (sig::ModuleRange(L"halo3.dll", moduleBase, moduleSize))
     {
         fixup = sig::Find(moduleBase, moduleSize, kH3ResourceFixupSignature);
@@ -175,21 +193,46 @@ static void TryInstallH3ResourceFixupProbe()
             secondFixup = sig::Find(
                 fixup + 1u, moduleBase + moduleSize - fixup - 1u,
                 kH3ResourceFixupSignature);
+        vertexFixup = sig::Find(
+            moduleBase, moduleSize, kH3VertexFixupSignature);
+        if (vertexFixup && vertexFixup + 1u < moduleBase + moduleSize)
+            secondVertexFixup = sig::Find(
+                vertexFixup + 1u,
+                moduleBase + moduleSize - vertexFixup - 1u,
+                kH3VertexFixupSignature);
     }
-    if (fixup && !secondFixup &&
+    const bool signaturesOk = fixup && !secondFixup &&
+        vertexFixup && !secondVertexFixup;
+    const bool resourceCreated = signaturesOk &&
         MH_CreateHook(reinterpret_cast<void*>(fixup),
                       (void*)&H3ResourceFixupHook,
-                      (void**)&g_origH3ResourceFixup) == MH_OK &&
-        MH_EnableHook(reinterpret_cast<void*>(fixup)) == MH_OK)
+                      (void**)&g_origH3ResourceFixup) == MH_OK;
+    const bool vertexCreated = resourceCreated &&
+        MH_CreateHook(reinterpret_cast<void*>(vertexFixup),
+                      (void*)&H3VertexFixupHook,
+                      (void**)&g_origH3VertexFixup) == MH_OK;
+    const bool resourceEnabled = vertexCreated &&
+        MH_EnableHook(reinterpret_cast<void*>(fixup)) == MH_OK;
+    const bool vertexEnabled = resourceEnabled &&
+        MH_EnableHook(reinterpret_cast<void*>(vertexFixup)) == MH_OK;
+    if (vertexEnabled)
     {
+        g_h3ResourcePackedBaseSlot = sig::RipTarget(
+            vertexFixup + 13u, vertexFixup + 17u);
         LOG("H3DECORBUF: resource-owner probe installed after Halo 3 load "
-            "(environment-only; owner=+0x%llX)",
-            static_cast<unsigned long long>(fixup - moduleBase));
+            "(environment-only; owner=+0x%llX vertex=+0x%llX baseSlot=+0x%llX)",
+            static_cast<unsigned long long>(fixup - moduleBase),
+            static_cast<unsigned long long>(vertexFixup - moduleBase),
+            static_cast<unsigned long long>(
+                g_h3ResourcePackedBaseSlot - moduleBase));
         return;
     }
     if (fixup)
         MH_RemoveHook(reinterpret_cast<void*>(fixup));
+    if (vertexFixup)
+        MH_RemoveHook(reinterpret_cast<void*>(vertexFixup));
     g_origH3ResourceFixup = nullptr;
+    g_origH3VertexFixup = nullptr;
     LOG("H3DECORBUF: resource-owner signature missing, ambiguous, or hook "
         "failed; buffer-only probe remains active");
 }
@@ -231,6 +274,46 @@ static void LogProbeResourceContext(const void* source, unsigned records)
         static_cast<unsigned long long>(sourceInfo.RegionSize),
         static_cast<unsigned>(sourceInfo.Protect), context, fixupCount, fixups,
         head);
+
+    const uint8_t* vertexRecord = static_cast<const uint8_t*>(
+        g_h3CurrentVertexFixup);
+    uintptr_t packedBase = 0;
+    if (g_h3ResourcePackedBaseSlot)
+        std::memcpy(
+            &packedBase,
+            reinterpret_cast<const void*>(g_h3ResourcePackedBaseSlot),
+            sizeof(packedBase));
+    if (vertexRecord && packedBase)
+    {
+        uint32_t descriptorIndex = 0;
+        uint32_t outputIndex = 0;
+        std::memcpy(&descriptorIndex, vertexRecord, sizeof(descriptorIndex));
+        std::memcpy(&outputIndex, vertexRecord + 4u, sizeof(outputIndex));
+        const uint8_t* descriptor = reinterpret_cast<const uint8_t*>(
+            packedBase + static_cast<uintptr_t>(descriptorIndex) * 4u);
+        char descriptorBytes[0x30u * 3u + 1u]{};
+        used = 0;
+        for (unsigned i = 0; i < 0x30u && used + 4u < sizeof(descriptorBytes); ++i)
+        {
+            const int wrote = _snprintf_s(
+                descriptorBytes + used, sizeof(descriptorBytes) - used,
+                _TRUNCATE, "%02X%s", descriptor[i],
+                ((i + 1u) % 16u) ? " " : "|");
+            if (wrote <= 0)
+                break;
+            used += static_cast<size_t>(wrote);
+        }
+        uint32_t dataIndex = 0;
+        std::memcpy(&dataIndex, descriptor + 0x14u, sizeof(dataIndex));
+        LOG("H3DECORVERTEX: records=%u record=%p descriptorIndex=0x%X "
+            "outputIndex=0x%X packedBase=%p descriptor=%p dataIndex=0x%X "
+            "data=%p bytes=%s",
+            records, vertexRecord, descriptorIndex, outputIndex,
+            reinterpret_cast<const void*>(packedBase), descriptor, dataIndex,
+            reinterpret_cast<const void*>(
+                packedBase + static_cast<uintptr_t>(dataIndex) * 4u),
+            descriptorBytes);
+    }
 
     if (fixupCount <= 0 || fixupCount > 4096 || !fixups)
         return;
