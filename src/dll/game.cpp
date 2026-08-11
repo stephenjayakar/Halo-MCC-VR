@@ -14608,7 +14608,7 @@ namespace
             "wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
             "wallVertices=%u wallPlanes=%u decoratorSolidDraws=%u "
-            "decoratorInstances=%u decoratorPlanes=%u",
+            "decoratorInstances=%u decoratorPlanes=%u decoratorSelfTest=%u",
             stageName,
             g_halo3ContactEligibleObjects.load(std::memory_order_relaxed),
             g_halo3ContactWeaponSpeed.load(std::memory_order_relaxed),
@@ -14729,7 +14729,8 @@ namespace
             g_halo3ContactDecoratorInstances.load(
                 std::memory_order_relaxed),
             g_halo3ContactDecoratorPlanes.load(
-                std::memory_order_relaxed));
+                std::memory_order_relaxed),
+            D3D_Halo3DecoratorSelfTestState());
         static constexpr const char* kGrabStageNames[] = {
             "disabled", "base-gate", "motion", "searching", "candidate",
             "holding", "released", "faulted"};
