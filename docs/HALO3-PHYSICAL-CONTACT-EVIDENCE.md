@@ -797,9 +797,13 @@ impulse/release, and zero melee.
 Visible menu capture then found a defect in the old unattended validator: its
 three Right presses in the game-type carousel selected Escalation Slayer. The
 validator now explicitly enters the map carousel, selects Construct 1/27, High
-Ground 4/27, or Valhalla 11/27, confirms the built-in Forge type, accepts Forge
-options, and enters Start. Earlier fixed-sequence results are not Forge
-evidence. With the corrected route, the installed `b154546` DLL passed:
+Ground 4/27, or Valhalla 11/27, and confirms the built-in Forge type. A second
+visible replay on 2026-08-10 proved the final transition exactly: accepting
+Forge options advances directly to Launch Game with its Start row selected,
+and one Enter starts loading. The intervening Right and duplicate Enter could
+leave MCC in the shell without starting Halo 3. Earlier fixed-sequence results
+are not Forge evidence. With the corrected route, the installed `b154546` DLL
+passed:
 
 - Valhalla exact structure and placed-object wall transaction:
   `out/debug-openxr/20260810-231804734Z-wall.log`, SHA-256
@@ -872,8 +876,14 @@ without naming a map or wall. It does not pretend that Valhalla's render-only
 decorator rocks have native collision; those still require the separately
 documented streamed decorator-resource or renderer-instance binding. Pure
 tests cover the fixed budget, complete Assault Rifle sample set, even large-
-mesh sampling, phase rotation, and invalid indices. Runtime performance and
-headset acceptance remain pending.
+mesh sampling, phase rotation, and invalid indices. Source `dc03a63` then
+passed a visible-state Valhalla Forge wall transaction under the SteamVR null
+driver. The assault rifle published all 56 samples, reached 13,660 native wall
+rays, and validated both exact map structure and a fixed Halo object. The
+preserved log is `out/debug-openxr/20260811-015156116Z-wall.log` (SHA-256
+`98E7D648BC21BE9781C646BE150C05EC3CC93CC02A61B959E5F62FE87CC7E6F2`).
+This is binding and regression evidence only; headset acceptance is still
+pending.
 
 Installed candidate `01f9401` extended only the environment-gated validation
 selector so a run can require one Halo object kind. With kind `3` required, the

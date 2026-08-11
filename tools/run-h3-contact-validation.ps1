@@ -508,17 +508,13 @@ public static class HaloMccVrContactInput {
         Start-Sleep -Seconds 3
         Send-Enter
         Start-Sleep -Seconds 3
-        # The Forge confirmation advances to Options. Accept the defaults,
-        # move one tile right to Start, then confirm its bounded two focus
-        # states.
+        # The Forge confirmation advances to Options. Accepting the defaults
+        # advances directly to Launch Game with its Start row selected. A
+        # visible Valhalla replay on 2026-08-10 proved that exactly one Enter
+        # starts loading; the previous Right + Enter + Enter sequence could
+        # leave MCC in the shell instead of starting Halo 3.
         Send-Enter
         Start-Sleep -Seconds 2
-        Send-Right
-        Start-Sleep -Seconds 2
-        Send-Enter
-        Start-Sleep -Seconds 2
-        # Depending on which top-row tile retained focus, the first Enter can
-        # open the Launch Game panel without activating its Start row.
         Send-Enter
         Start-Sleep -Seconds 10
     }
