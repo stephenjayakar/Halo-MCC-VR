@@ -2202,3 +2202,19 @@ the current signed SteamVR `vrclient_x64.dll` imports
 process-local `XR_RUNTIME_JSON` override proved the installed Oculus 1.201.0
 runtime initializes, but no headset was connected, so this is launch evidence
 only and not physical-contact acceptance.
+### 2026-08-12 rotating-body render-follow correction
+
+- Candidate `ad0f1b6` proved that a per-weapon-piece rotation-invariant
+  envelope alone was insufficient. The strict rotating-body replay recorded
+  two confirmed overlaps in 412 palettes (`bodyPeak=1.000m`); preserved log
+  `out/debug-openxr/20260812-172655980Z-rotating-body-gap.log`, SHA-256
+  `6399D97C352EB89E2DE17795DF7DF9B399AD51DFBC8948DB05385136C9B708F8`.
+- The envelope was applied before the render palette's bounded rigid-body
+  follow. That follow translated and rotated every weapon node around Halo's
+  separately reported body centre, so it could invalidate the envelope's
+  rotation-independent separation after approval.
+- The next candidate keeps the same authored per-child envelope but publishes
+  zero angular follow for an envelope-approved root rigid body. Linear follow
+  remains enabled, so target translation between approval and render is still
+  represented. Exact-geometry contact remains unchanged for ordinary bodies;
+  animated actor bodies remain excluded from the invariant-envelope path.

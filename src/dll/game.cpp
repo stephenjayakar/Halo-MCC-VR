@@ -14098,7 +14098,8 @@ namespace
                         g_halo3ContactBodyOffset) <= 1.0e-10f)
                     Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
             };
-            const auto publishBodyFollow = [&] (int32_t targetHandle)
+            const auto publishBodyFollow = [&] (
+                int32_t targetHandle, bool includeAngularVelocity = true)
             {
                 if (targetHandle == -1 || !g_halo3ObjectGetVelocities ||
                     !g_halo3ObjectGetCenter)
@@ -14110,7 +14111,9 @@ namespace
                 const PhysicalContactVec3 linearVelocity{
                     linear[0], linear[1], linear[2]};
                 const PhysicalContactVec3 angularVelocity{
-                    angular[0], angular[1], angular[2]};
+                    includeAngularVelocity ? angular[0] : 0.0f,
+                    includeAngularVelocity ? angular[1] : 0.0f,
+                    includeAngularVelocity ? angular[2] : 0.0f};
                 const PhysicalContactVec3 bodyCenter{
                     center[0], center[1], center[2]};
                 if (PhysicalContactFinite(linearVelocity) &&
@@ -14990,6 +14993,7 @@ namespace
                     kHalo3ContactTriangleSurfaceRadiusMeters +
                         observedSurfaceReserveMeters,
                     worldScale);
+            bool rotationEnvelopeConstrained = false;
             if (closestUsesAuthoredShape)
             {
                 PhysicalContactCompoundShape verifiedTargetShape{};
@@ -15013,6 +15017,42 @@ namespace
                 if (verifiedGeometry &&
                     PhysicalContactTransformFinite(verifiedTargetTransform))
                 {
+                    if (closestTargetShapeSource != 3 &&
+                        g_halo3ObjectGetVelocities)
+                    {
+                        float envelopeLinear[3]{}, envelopeAngular[3]{};
+                        g_halo3ObjectGetVelocities(
+                            closestHandle, envelopeLinear, envelopeAngular);
+                        const PhysicalContactVec3 angularVelocity{
+                            envelopeAngular[0], envelopeAngular[1],
+                            envelopeAngular[2]};
+                        const float targetRadius =
+                            PhysicalContactRotationInvariantRadius(
+                                verifiedTargetShape,
+                                &verifiedTargetMesh) *
+                            verifiedTargetTransform.scale;
+                        const float rotationalSurfaceSpeedMeters =
+                            PhysicalContactLength(angularVelocity) *
+                            targetRadius / worldScale;
+                        if (PhysicalContactFinite(angularVelocity) &&
+                            std::isfinite(rotationalSurfaceSpeedMeters) &&
+                            rotationalSurfaceSpeedMeters >= 0.05f)
+                        {
+                            const PhysicalContactWallConstraint envelope =
+                                PhysicalContactRotationInvariantChildSphereOffset(
+                                    weaponShape, intendedWeaponTransform,
+                                    verifiedTargetTransform.position,
+                                    targetRadius,
+                                    kHalo3ContactVisualGuardClearanceMeters *
+                                        worldScale,
+                                    worldScale);
+                            if (envelope.constrained)
+                            {
+                                bodyConstraint = envelope;
+                                rotationEnvelopeConstrained = true;
+                            }
+                        }
+                    }
                     const auto exactOverlap =
                         [&](const PhysicalContactTransform& candidate) {
                             bool surfaceOverlap = false;
@@ -15081,7 +15121,14 @@ namespace
                                 followedLength;
                         }
                     }
-                    if (followedConstraint.constrained)
+                    if (rotationEnvelopeConstrained)
+                    {
+                        // The approved weapon lies outside a sphere enclosing
+                        // every target orientation. Render follow may translate
+                        // this relation, but must not rotate it about Halo's
+                        // separately reported rigid-body centre.
+                    }
+                    else if (followedConstraint.constrained)
                         bodyConstraint = followedConstraint;
                     else if (verifiedConstraint.constrained)
                     {
@@ -15111,7 +15158,8 @@ namespace
                 g_halo3ContactBodyAnchorHandle = closestHandle;
                 g_halo3ContactBodyAnchorValid = PhysicalContactFinite(
                     g_halo3ContactBodyLocalWeaponAnchor);
-                publishBodyFollow(closestHandle);
+                publishBodyFollow(
+                    closestHandle, !rotationEnvelopeConstrained);
             }
             if (bodyConstraint.constrained &&
                 !visualConstraintUsesFallbackNormal)
