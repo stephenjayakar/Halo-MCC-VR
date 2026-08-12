@@ -2202,18 +2202,3 @@ the current signed SteamVR `vrclient_x64.dll` imports
 process-local `XR_RUNTIME_JSON` override proved the installed Oculus 1.201.0
 runtime initializes, but no headset was connected, so this is launch evidence
 only and not physical-contact acceptance.
-### 2026-08-12 palette-time rotation-invariant envelope
-
-- Candidate `72c2155` still failed after two confirmed overlaps in 415
-  palettes. Its exact-origin translation follow corrected only the target's
-  displacement since worker approval; it did not re-solve separation against
-  the final palette itself. Preserved log:
-  `out/debug-openxr/20260812-181224884Z-rotating-body-gap.log`, SHA-256
-  `C8F6FD9062BDF4529AD37CC45DC7C6E5A50294BA59B02E3D65514A0C9257A434`.
-- This candidate publishes at most 16 tight local weapon-piece spheres plus the
-  target's authored rotation-invariant radius. The existing final-palette hook
-  reads the verified target handle and re-solves the envelope against the exact
-  palette and current target origin immediately before submission.
-- The publication is a bounded atomic seqlock. The hot hook adds no allocation,
-  logging, file I/O, signature scan, COM call, or lock. Stale, recycled,
-  non-finite, ambiguous, or over-1 m corrections fail open for that palette.
