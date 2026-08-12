@@ -943,14 +943,28 @@ namespace
         static constexpr int kMaximumNodes = 16;
         std::atomic<uint32_t> sequence{0};
         std::atomic<uint64_t> sampleMs{0};
+        std::atomic<uint64_t> proposalSerial{0};
         std::atomic<int32_t> weaponHandle{-1};
+        std::atomic<uint32_t> renderTag{0xFFFFu};
         std::atomic<uint32_t> nodeCount{0};
+        std::atomic<uint32_t> corrected{0};
         std::atomic<float> scale{1.0f};
         std::atomic<float> basis[9]{};
         std::atomic<float> position[3]{};
         std::atomic<float> nodes[kMaximumNodes][13]{};
     };
     Halo3VisibleWeaponPosePublication g_halo3VisibleWeaponPose;
+    // The render hook publishes the newest raw palette here before drawing.
+    // The camera/gameplay worker collision-checks it and publishes a corrected
+    // copy to the approval slot. Rendering can then hold the last proven-safe
+    // palette instead of showing a penetrating pose for one reactive frame.
+    Halo3VisibleWeaponPosePublication g_halo3ProposedWeaponPose;
+    Halo3VisibleWeaponPosePublication g_halo3ApprovedWeaponPose;
+    std::atomic<uint64_t> g_halo3VisibleWeaponProposalSerial{0};
+    std::atomic<int32_t> g_halo3ContactActiveWeaponHandle{-1};
+    std::atomic<uint64_t> g_halo3ContactApprovedPalettes{0};
+    std::atomic<uint64_t> g_halo3ContactHeldPalettes{0};
+    extern std::atomic<bool> g_halo3PhysicalContactBindings;
     // Debug-only replay publication. Unlike the older contact rig, this moves
     // the palette Halo actually submits for the visible held weapon. The
     // contact solver then consumes that same final palette on the next sample.
@@ -1078,11 +1092,80 @@ namespace
     // publishing its root; a missing tag binding simply withholds contact.
     unsigned char* Halo3LoadedTagDefinition(uint32_t datum);
 
-    bool Halo3ReadVisibleWeaponPose(
-        float basis[9], float position[3], float& scale, uint64_t& sampleMs,
-        BoneMatrix* nodes = nullptr, uint32_t* nodeCount = nullptr)
+    void Halo3PublishWeaponPose(
+        Halo3VisibleWeaponPosePublication& published,
+        const BoneMatrix* nodes, uint32_t nodeCount, uint16_t renderTag,
+        int32_t weaponHandle, uint64_t proposalSerial, uint64_t sampleMs,
+        bool corrected)
     {
-        auto& published = g_halo3VisibleWeaponPose;
+        if (!nodes || !nodeCount ||
+            nodeCount > Halo3VisibleWeaponPosePublication::kMaximumNodes)
+            return;
+        const BoneMatrix& root = nodes[0];
+        published.sequence.fetch_add(1, std::memory_order_acq_rel);
+        published.sampleMs.store(sampleMs, std::memory_order_relaxed);
+        published.proposalSerial.store(
+            proposalSerial, std::memory_order_relaxed);
+        published.weaponHandle.store(weaponHandle, std::memory_order_relaxed);
+        published.renderTag.store(renderTag, std::memory_order_relaxed);
+        published.nodeCount.store(nodeCount, std::memory_order_relaxed);
+        published.corrected.store(
+            corrected ? 1u : 0u, std::memory_order_relaxed);
+        published.scale.store(root.scale, std::memory_order_relaxed);
+        for (int i = 0; i < 9; ++i)
+            published.basis[i].store(
+                root.rotation[i], std::memory_order_relaxed);
+        for (int i = 0; i < 3; ++i)
+            published.position[i].store(
+                root.translation[i], std::memory_order_relaxed);
+        for (uint32_t node = 0; node < nodeCount; ++node)
+        {
+            const float* values = reinterpret_cast<const float*>(&nodes[node]);
+            for (int value = 0; value < 13; ++value)
+                published.nodes[node][value].store(
+                    values[value], std::memory_order_relaxed);
+        }
+        published.sequence.fetch_add(1, std::memory_order_release);
+    }
+
+    void Halo3ClearWeaponPose(Halo3VisibleWeaponPosePublication& published)
+    {
+        published.sequence.fetch_add(1, std::memory_order_acq_rel);
+        published.sampleMs.store(0, std::memory_order_relaxed);
+        published.proposalSerial.store(0, std::memory_order_relaxed);
+        published.weaponHandle.store(-1, std::memory_order_relaxed);
+        published.renderTag.store(0xFFFFu, std::memory_order_relaxed);
+        published.nodeCount.store(0, std::memory_order_relaxed);
+        published.corrected.store(0, std::memory_order_relaxed);
+        published.sequence.fetch_add(1, std::memory_order_release);
+    }
+
+    void Halo3RefreshApprovedWeaponPose(
+        uint16_t renderTag, int32_t weaponHandle, uint32_t nodeCount,
+        uint64_t sampleMs)
+    {
+        auto& published = g_halo3ApprovedWeaponPose;
+        if (!sampleMs || renderTag == 0xFFFFu || weaponHandle == -1 ||
+            !nodeCount ||
+            nodeCount > Halo3VisibleWeaponPosePublication::kMaximumNodes ||
+            published.sampleMs.load(std::memory_order_acquire) == 0 ||
+            published.renderTag.load(std::memory_order_relaxed) != renderTag ||
+            published.weaponHandle.load(std::memory_order_relaxed) !=
+                weaponHandle ||
+            published.nodeCount.load(std::memory_order_relaxed) != nodeCount)
+            return;
+        published.sequence.fetch_add(1, std::memory_order_acq_rel);
+        published.sampleMs.store(sampleMs, std::memory_order_relaxed);
+        published.sequence.fetch_add(1, std::memory_order_release);
+    }
+
+    bool Halo3ReadWeaponPose(
+        Halo3VisibleWeaponPosePublication& published,
+        float basis[9], float position[3], float& scale, uint64_t& sampleMs,
+        BoneMatrix* nodes = nullptr, uint32_t* nodeCount = nullptr,
+        uint16_t* renderTag = nullptr, int32_t* weaponHandle = nullptr,
+        uint64_t* proposalSerial = nullptr, bool* corrected = nullptr)
+    {
         for (int attempt = 0; attempt < 2; ++attempt)
         {
             const uint32_t before =
@@ -1092,6 +1175,14 @@ namespace
             sampleMs = published.sampleMs.load(std::memory_order_relaxed);
             const uint32_t count = published.nodeCount.load(
                 std::memory_order_relaxed);
+            const uint32_t tag = published.renderTag.load(
+                std::memory_order_relaxed);
+            const int32_t handle = published.weaponHandle.load(
+                std::memory_order_relaxed);
+            const uint64_t serial = published.proposalSerial.load(
+                std::memory_order_relaxed);
+            const bool wasCorrected = published.corrected.load(
+                std::memory_order_relaxed) != 0;
             scale = published.scale.load(std::memory_order_relaxed);
             for (int i = 0; i < 9; ++i)
                 basis[i] = published.basis[i].load(std::memory_order_relaxed);
@@ -1112,10 +1203,27 @@ namespace
                 }
                 *nodeCount = count;
             }
+            if (renderTag)
+                *renderTag = static_cast<uint16_t>(tag);
+            if (weaponHandle)
+                *weaponHandle = handle;
+            if (proposalSerial)
+                *proposalSerial = serial;
+            if (corrected)
+                *corrected = wasCorrected;
             if (published.sequence.load(std::memory_order_acquire) == before)
                 return sampleMs != 0;
         }
         return false;
+    }
+
+    bool Halo3ReadVisibleWeaponPose(
+        float basis[9], float position[3], float& scale, uint64_t& sampleMs,
+        BoneMatrix* nodes = nullptr, uint32_t* nodeCount = nullptr)
+    {
+        return Halo3ReadWeaponPose(
+            g_halo3VisibleWeaponPose, basis, position, scale, sampleMs,
+            nodes, nodeCount);
     }
     static_assert(sizeof(BoneMatrix) == 0x34);
     static_assert(sizeof(BoneMatrix) == sizeof(Halo3Matrix4x3));
@@ -4409,8 +4517,13 @@ namespace
             {
                 // A weapon change must never consume the preceding weapon's
                 // still-fresh final palette while the new one is publishing.
-                g_halo3VisibleWeaponPose.sampleMs.store(
-                    0, std::memory_order_release);
+                Halo3ClearWeaponPose(g_halo3VisibleWeaponPose);
+                Halo3ClearWeaponPose(g_halo3ProposedWeaponPose);
+                // The gameplay worker is the sole writer for the approval
+                // slot. Clearing the active handle invalidates it here; the
+                // worker clears the storage during its normal reset.
+                g_halo3ContactActiveWeaponHandle.store(
+                    -1, std::memory_order_release);
             }
         }
         if (result && outBones && outCount && *outBones)
@@ -5451,6 +5564,7 @@ namespace
                 : boundedWristSubmission;
             if (acceptedSubmission)
             {
+                bool candidateCorrectionApplied = false;
                 if (g_halo3ContactDebugVisibleReplay.load(
                         std::memory_order_acquire))
                 {
@@ -5462,7 +5576,6 @@ namespace
                             desiredRoot, desiredMs, desiredExact) &&
                         nowMs >= desiredMs && nowMs - desiredMs <= 100)
                     {
-                        bool correctionApplied = false;
                         if (desiredExact)
                         {
                             PhysicalContactVec3 correction{};
@@ -5480,7 +5593,7 @@ namespace
                                 desiredRoot.translation[0] += correction.x;
                                 desiredRoot.translation[1] += correction.y;
                                 desiredRoot.translation[2] += correction.z;
-                                correctionApplied = true;
+                                candidateCorrectionApplied = true;
                             }
                         }
                         BoneMatrix inverseRoot{}, delta{};
@@ -5507,36 +5620,75 @@ namespace
                             if (desiredExact)
                                 g_halo3ContactDebugVisibleExactPalettes.fetch_add(
                                     1, std::memory_order_relaxed);
-                            if (correctionApplied)
-                                g_halo3ContactDebugVisibleCorrectedPalettes.fetch_add(
-                                    1, std::memory_order_relaxed);
                         }
                     }
                 }
-                auto& published = g_halo3VisibleWeaponPose;
-                published.sequence.fetch_add(1, std::memory_order_acq_rel);
-                published.sampleMs.store(
-                    GetTickCount64(), std::memory_order_relaxed);
-                published.nodeCount.store(
-                    static_cast<uint32_t>(renderNodeCount),
-                    std::memory_order_relaxed);
-                published.scale.store(
-                    visibleRoot.scale, std::memory_order_relaxed);
-                for (int i = 0; i < 9; ++i)
-                    published.basis[i].store(
-                        visibleRoot.rotation[i], std::memory_order_relaxed);
-                for (int i = 0; i < 3; ++i)
-                    published.position[i].store(
-                        visibleRoot.translation[i], std::memory_order_relaxed);
-                for (int node = 0; node < renderNodeCount; ++node)
+                const uint64_t nowMs = GetTickCount64();
+                uint64_t proposalSerial =
+                    g_halo3VisibleWeaponProposalSerial.fetch_add(
+                        1, std::memory_order_relaxed) + 1;
+                if (!proposalSerial)
+                    proposalSerial =
+                        g_halo3VisibleWeaponProposalSerial.fetch_add(
+                            1, std::memory_order_relaxed) + 1;
+                const int32_t activeWeaponHandle =
+                    g_halo3ContactActiveWeaponHandle.load(
+                        std::memory_order_acquire);
+                Halo3PublishWeaponPose(
+                    g_halo3ProposedWeaponPose, destination,
+                    static_cast<uint32_t>(renderNodeCount), tag,
+                    activeWeaponHandle, proposalSerial, nowMs,
+                    candidateCorrectionApplied);
+
+                std::array<BoneMatrix,
+                           Halo3VisibleWeaponPosePublication::kMaximumNodes>
+                    approvedNodes{};
+                float approvedBasis[9]{}, approvedPosition[3]{};
+                float approvedScale = 1.0f;
+                uint64_t approvedMs = 0;
+                uint64_t approvedSerial = 0;
+                uint32_t approvedNodeCount = 0;
+                uint16_t approvedTag = 0xFFFFu;
+                int32_t approvedWeaponHandle = -1;
+                bool approvedCorrected = false;
+                const bool haveApproval = Halo3ReadWeaponPose(
+                    g_halo3ApprovedWeaponPose, approvedBasis,
+                    approvedPosition, approvedScale, approvedMs,
+                    approvedNodes.data(), &approvedNodeCount, &approvedTag,
+                    &approvedWeaponHandle, &approvedSerial,
+                    &approvedCorrected);
+                const bool useApproval =
+                    g_config.physical_weapon_contact &&
+                    g_halo3RuntimeGeneration.load(std::memory_order_acquire) &&
+                    g_halo3PhysicalContactBindings.load(
+                        std::memory_order_acquire) &&
+                    haveApproval &&
+                    PhysicalContactApprovedPaletteUsable(
+                        tag, approvedTag, activeWeaponHandle,
+                        approvedWeaponHandle,
+                        static_cast<uint32_t>(renderNodeCount),
+                        approvedNodeCount, proposalSerial, approvedSerial,
+                        approvedMs, nowMs);
+                uint64_t displayedSerial = proposalSerial;
+                bool displayedCorrected = false;
+                if (useApproval)
                 {
-                    const float* values = reinterpret_cast<const float*>(
-                        &destination[node]);
-                    for (int value = 0; value < 13; ++value)
-                        published.nodes[node][value].store(
-                            values[value], std::memory_order_relaxed);
+                    memcpy(destination, approvedNodes.data(),
+                           static_cast<size_t>(renderNodeCount) *
+                               sizeof(BoneMatrix));
+                    displayedSerial = approvedSerial;
+                    displayedCorrected = approvedCorrected;
+                    g_halo3ContactHeldPalettes.fetch_add(
+                        1, std::memory_order_relaxed);
                 }
-                published.sequence.fetch_add(1, std::memory_order_release);
+                if (displayedCorrected)
+                    g_halo3ContactDebugVisibleCorrectedPalettes.fetch_add(
+                        1, std::memory_order_relaxed);
+                Halo3PublishWeaponPose(
+                    g_halo3VisibleWeaponPose, destination,
+                    static_cast<uint32_t>(renderNodeCount), tag,
+                    activeWeaponHandle, displayedSerial, nowMs,
+                    displayedCorrected);
             }
         }
 
@@ -10854,6 +11006,9 @@ namespace
             field.store(0, std::memory_order_relaxed);
         g_halo3ContactLastMotionSerial = 0;
         g_halo3ContactWeaponHandle = -1;
+        g_halo3ContactActiveWeaponHandle.store(
+            -1, std::memory_order_release);
+        Halo3ClearWeaponPose(g_halo3ApprovedWeaponPose);
         g_halo3ContactPreviousPoseValid = false;
         g_halo3ContactPreviousPoseMs = 0;
         g_halo3ContactWallOffset = {};
@@ -11799,9 +11954,24 @@ namespace
         float paletteBasis[9]{}, palettePosition[3]{};
         float paletteScale = 1.0f;
         uint64_t palettePoseMs = 0;
-        const bool haveVisiblePalette = Halo3ReadVisibleWeaponPose(
+        uint16_t proposalRenderTag = 0xFFFFu;
+        int32_t proposalWeaponHandle = -1;
+        uint64_t proposalSerial = 0;
+        bool proposalCorrected = false;
+        const bool haveVisiblePalette = Halo3ReadWeaponPose(
+            g_halo3ProposedWeaponPose,
             paletteBasis, palettePosition, paletteScale, palettePoseMs,
-            visibleNodes.data(), &visibleNodeCount);
+            visibleNodes.data(), &visibleNodeCount, &proposalRenderTag,
+            &proposalWeaponHandle, &proposalSerial, &proposalCorrected);
+        std::array<BoneMatrix,
+            Halo3VisibleWeaponPosePublication::kMaximumNodes> displayedNodes{};
+        uint32_t displayedNodeCount = 0;
+        float displayedBasis[9]{}, displayedPosition[3]{};
+        float displayedScale = 1.0f;
+        uint64_t displayedPoseMs = 0;
+        const bool haveDisplayedPalette = Halo3ReadVisibleWeaponPose(
+            displayedBasis, displayedPosition, displayedScale,
+            displayedPoseMs, displayedNodes.data(), &displayedNodeCount);
         bool haveVisiblePose = false;
         if (debugRig && !debugVisibleReplay &&
             g_baseCamValid.load(std::memory_order_acquire))
@@ -12129,7 +12299,7 @@ namespace
                 Halo3ResetPhysicalContact();
                 return;
             }
-            g_halo3VisibleWeaponPose.weaponHandle.store(
+            g_halo3ContactActiveWeaponHandle.store(
                 weaponHandle, std::memory_order_release);
             auto* weaponEntry = entries +
                 static_cast<size_t>(weaponIndex) *
@@ -12156,6 +12326,13 @@ namespace
                 Halo3ResetPhysicalContact();
                 return;
             }
+            // Keep the preceding safe pose fresh while this proposal is being
+            // checked. This is not a new approval: the stored palette and its
+            // source serial remain unchanged. If the worker stops, the refresh
+            // stops and the optional render gate still fails open after 100 ms.
+            if (proposalWeaponHandle == weaponHandle)
+                Halo3RefreshApprovedWeaponPose(
+                    proposalRenderTag, weaponHandle, visibleNodeCount, nowMs);
 
             const float worldScale = g_worldScale.load(std::memory_order_relaxed);
             if (!std::isfinite(worldScale) || worldScale < 0.05f ||
@@ -12567,6 +12744,56 @@ namespace
             }
             if (debugRig && debugExactVisibleReplay && debugAimData)
             {
+                // The worker solves the newest proposal, while this diagnostic
+                // judges what the renderer actually displayed. An approval may
+                // intentionally be one proposal behind, so use the displayed
+                // root for overlap measurement and the proposed root only when
+                // publishing the next replay target.
+                PhysicalContactTransform measuredWeaponTransform =
+                    weaponTransform;
+                const PhysicalContactCompoundShape* measuredWeaponShape =
+                    &weaponShape;
+                const PhysicalContactTriangleMesh* measuredWeaponMesh =
+                    &weaponTriangleMesh;
+                static thread_local PhysicalContactCompoundShape
+                    displayedWeaponShapeScratch{};
+                static thread_local PhysicalContactTriangleMesh
+                    displayedWeaponMeshScratch{};
+                if (haveDisplayedPalette && displayedNodeCount > 0 &&
+                    std::isfinite(displayedScale) && displayedScale > 0.001f)
+                {
+                    PhysicalContactTransform displayedRoot{};
+                    displayedRoot.position = {
+                        displayedPosition[0], displayedPosition[1],
+                        displayedPosition[2]};
+                    displayedRoot.forward = PhysicalContactNormalize({
+                        displayedBasis[0], displayedBasis[1],
+                        displayedBasis[2]});
+                    displayedRoot.up = PhysicalContactNormalize({
+                        displayedBasis[6], displayedBasis[7],
+                        displayedBasis[8]});
+                    displayedRoot.left = PhysicalContactNormalize(
+                        PhysicalContactCross(
+                            displayedRoot.up, displayedRoot.forward),
+                        {displayedBasis[3], displayedBasis[4],
+                         displayedBasis[5]});
+                    displayedRoot.up = PhysicalContactNormalize(
+                        PhysicalContactCross(
+                            displayedRoot.forward, displayedRoot.left),
+                        displayedRoot.up);
+                    displayedRoot.scale = displayedScale;
+                    if (PhysicalContactTransformFinite(displayedRoot) &&
+                        Halo3ContactVisibleCollisionShape(
+                            weaponData, displayedNodes.data(),
+                            displayedNodeCount, displayedRoot,
+                            displayedWeaponShapeScratch, false, nullptr,
+                            &displayedWeaponMeshScratch))
+                    {
+                        measuredWeaponTransform = displayedRoot;
+                        measuredWeaponShape = &displayedWeaponShapeScratch;
+                        measuredWeaponMesh = &displayedWeaponMeshScratch;
+                    }
+                }
                 PhysicalContactCompoundShape debugTargetShape{};
                 PhysicalContactTriangleMesh debugTargetTriangleMesh{};
                 PhysicalContactTransform debugTargetTransform{};
@@ -12591,20 +12818,24 @@ namespace
                 {
                     const PhysicalContactVec3 weaponFront =
                         Halo3ContactCompoundSupport(
-                            weaponShape, weaponTransform, forward);
+                            *measuredWeaponShape, measuredWeaponTransform,
+                            measuredWeaponTransform.forward);
                     const PhysicalContactVec3 targetNear =
                         Halo3ContactCompoundSupport(
                             debugTargetShape, debugTargetTransform,
-                            forward * -1.0f);
+                            measuredWeaponTransform.forward * -1.0f);
                     const float currentGapMeters = PhysicalContactDot(
-                        weaponFront - targetNear, forward) / worldScale;
+                        weaponFront - targetNear,
+                        measuredWeaponTransform.forward) / worldScale;
                     // The replay is consumed once per eye. Do not measure the
                     // original, uncontrolled palette or the half-updated stereo
                     // pair. Four exact palette consumptions cover both eyes and
                     // one complete follow-up pair on the observed retail path.
                     if (g_halo3ContactDebugVisibleExactPalettes.load(
                             std::memory_order_relaxed) >= 4 &&
-                        g_halo3ContactDebugVisibleCorrectedPalettes.load(
+                        g_halo3ContactApprovedPalettes.load(
+                            std::memory_order_relaxed) >= 4 &&
+                        g_halo3ContactHeldPalettes.load(
                             std::memory_order_relaxed) >= 4)
                     {
                         if (!g_halo3ContactDebugVisibleMeasurementStarted.exchange(
@@ -12628,16 +12859,19 @@ namespace
                             PhysicalContactTriangleMeshValid(
                                 debugTargetTriangleMesh)
                             ? PhysicalContactSweepTriangleMeshes(
-                                  weaponTriangleMesh, weaponTransform,
-                                  weaponTransform, debugTargetTriangleMesh,
+                                  *measuredWeaponMesh,
+                                  measuredWeaponTransform,
+                                  measuredWeaponTransform,
+                                  debugTargetTriangleMesh,
                                   debugTargetTransform,
                                   kHalo3ContactTriangleStepMeters *
                                       worldScale,
                                   kHalo3ContactTriangleSurfaceRadiusMeters *
                                       worldScale).hit
                             : PhysicalContactSweepTriangleMeshCompound(
-                                  weaponTriangleMesh, weaponTransform,
-                                  weaponTransform, debugTargetShape,
+                                  *measuredWeaponMesh,
+                                  measuredWeaponTransform,
+                                  measuredWeaponTransform, debugTargetShape,
                                   debugTargetTransform,
                                   kHalo3ContactTriangleStepMeters *
                                       worldScale,
@@ -12649,7 +12883,8 @@ namespace
                             .fetch_add(1, std::memory_order_relaxed);
                         const bool solidHit =
                             PhysicalContactCompoundsIntersect(
-                                weaponShape, weaponTransform,
+                                *measuredWeaponShape,
+                                measuredWeaponTransform,
                                 debugTargetShape, debugTargetTransform);
                         (solidHit
                              ? g_halo3ContactDebugVisibleSolidOverlaps
@@ -12661,8 +12896,12 @@ namespace
                     const float displacement =
                         amplitude * std::sin(debugPhase) -
                         worldScale * 0.02f;
+                    const PhysicalContactVec3 proposedWeaponFront =
+                        Halo3ContactCompoundSupport(
+                            weaponShape, weaponTransform, forward);
                     const PhysicalContactVec3 translation =
-                        targetNear + forward * displacement - weaponFront;
+                        targetNear + forward * displacement -
+                        proposedWeaponFront;
                     BoneMatrix replayRoot = visibleNodes[0];
                     replayRoot.translation[0] += translation.x;
                     replayRoot.translation[1] += translation.y;
@@ -13409,6 +13648,49 @@ namespace
                 intendedGrip = grip + intendedDelta;
                 intendedTip = tip + intendedDelta;
             }
+            const auto publishApprovedVisiblePose = [&]()
+            {
+                if (debugRig && !debugVisibleReplay)
+                    return;
+                if (proposalRenderTag == 0xFFFFu || !proposalSerial ||
+                    proposalWeaponHandle != weaponHandle ||
+                    !visibleNodeCount || visibleNodeCount >
+                        Halo3VisibleWeaponPosePublication::kMaximumNodes)
+                    return;
+                const PhysicalContactVec3 previousOffset =
+                    previouslyAppliedWallOffset +
+                    previouslyAppliedBodyOffset;
+                const PhysicalContactVec3 approvedOffset =
+                    g_halo3ContactWallOffset + g_halo3ContactBodyOffset;
+                const PhysicalContactVec3 delta =
+                    approvedOffset - previousOffset;
+                if (!PhysicalContactFinite(delta))
+                    return;
+                std::array<BoneMatrix,
+                           Halo3VisibleWeaponPosePublication::kMaximumNodes>
+                    approvedNodes = visibleNodes;
+                bool finiteApproval = true;
+                for (uint32_t node = 0; node < visibleNodeCount; ++node)
+                {
+                    approvedNodes[node].translation[0] += delta.x;
+                    approvedNodes[node].translation[1] += delta.y;
+                    approvedNodes[node].translation[2] += delta.z;
+                    const float* values = reinterpret_cast<const float*>(
+                        &approvedNodes[node]);
+                    for (int value = 0; value < 13; ++value)
+                        finiteApproval = finiteApproval &&
+                            std::isfinite(values[value]);
+                }
+                if (!finiteApproval)
+                    return;
+                Halo3PublishWeaponPose(
+                    g_halo3ApprovedWeaponPose, approvedNodes.data(),
+                    visibleNodeCount, proposalRenderTag, weaponHandle,
+                    proposalSerial, nowMs,
+                    PhysicalContactLengthSquared(approvedOffset) > 1.0e-10f);
+                g_halo3ContactApprovedPalettes.fetch_add(
+                    1, std::memory_order_relaxed);
+            };
             const auto updateBodyConstraint = [&] (
                 PhysicalContactDynamicBodyObservation observation,
                 PhysicalContactVec3 requestedOffset,
@@ -13484,7 +13766,6 @@ namespace
                 g_halo3ContactPreviousWeaponTransform = weaponTransform;
                 g_halo3ContactPreviousPoseMs = visiblePoseMs;
                 g_halo3ContactPreviousPoseValid = true;
-                return;
             }
 
             const PhysicalContactVec3 previousGrip =
@@ -13739,6 +14020,26 @@ namespace
                                     targetTriangleMesh.triangles[
                                         meshHit.targetIndex]);
                         }
+                        else if (!requiresNativeConfirmation)
+                        {
+                            // Triangle surfaces do not report a solid that is
+                            // already wholly contained. Admit the exact convex
+                            // overlap for visual separation only; a reliable
+                            // swept plane is still required for native impulse.
+                            const PhysicalContactCompoundHit solidOverlap =
+                                PhysicalContactSweepCompound(
+                                    weaponShape, intendedWeaponTransform,
+                                    intendedWeaponTransform, targetShape,
+                                    authoredTargetTransform);
+                            if (solidOverlap.hit)
+                            {
+                                authored = solidOverlap;
+                                authoredWeaponShape = weaponShape.children[
+                                    solidOverlap.weaponChild];
+                                authoredTargetShape = targetShape.children[
+                                    solidOverlap.targetChild];
+                            }
+                        }
                     }
                     else
                         authored = PhysicalContactSweepCompound(
@@ -13797,6 +14098,22 @@ namespace
                                         meshHit.weaponTriangle]);
                             authoredTargetShape =
                                 targetShape.children[meshHit.targetIndex];
+                        }
+                        else
+                        {
+                            const PhysicalContactCompoundHit solidOverlap =
+                                PhysicalContactSweepCompound(
+                                    weaponShape, intendedWeaponTransform,
+                                    intendedWeaponTransform, targetShape,
+                                    authoredTargetTransform);
+                            if (solidOverlap.hit)
+                            {
+                                authored = solidOverlap;
+                                authoredWeaponShape = weaponShape.children[
+                                    solidOverlap.weaponChild];
+                                authoredTargetShape = targetShape.children[
+                                    solidOverlap.targetChild];
+                            }
                         }
                     }
                     else
@@ -13910,6 +14227,7 @@ namespace
                     g_halo3ContactDebounce.EndSample(nowMs);
                     return;
                 }
+                publishApprovedVisiblePose();
                 const PhysicalContactReleaseCommand release =
                     g_halo3ContactReleaseLatch.TakeIfSeparated(-1, nowMs);
                 if (release.apply)
@@ -14061,18 +14379,127 @@ namespace
                 // material point used to measure rigid weapon velocity.
                 closest.point = targetPoint;
             }
-            const PhysicalContactWallConstraint bodyConstraint =
+            PhysicalContactWallConstraint bodyConstraint =
                 PhysicalContactDynamicBodyOffset(
                     previousWeaponTransform, intendedWeaponTransform,
                     closest.fraction, closest.normal,
                     closestPenetrationMeters,
                     kHalo3ContactTriangleSurfaceRadiusMeters, worldScale);
+            float targetLinear[3]{};
+            float targetAngular[3]{};
+            float targetCenterRaw[3]{};
+            const bool targetMotionSnapshotValid =
+                g_halo3ObjectGetVelocities && g_halo3ObjectGetCenter;
+            float targetPointSpeedMetersPerSecond = NAN;
+            if (targetMotionSnapshotValid)
+            {
+                g_halo3ObjectGetVelocities(
+                    closestHandle, targetLinear, targetAngular);
+                g_halo3ObjectGetCenter(closestHandle, targetCenterRaw);
+                const PhysicalContactVec3 targetLinearWorld{
+                    targetLinear[0], targetLinear[1], targetLinear[2]};
+                const PhysicalContactVec3 targetAngularRadians{
+                    targetAngular[0], targetAngular[1], targetAngular[2]};
+                const PhysicalContactVec3 targetCenter{
+                    targetCenterRaw[0], targetCenterRaw[1],
+                    targetCenterRaw[2]};
+                const PhysicalContactVec3 targetPointVelocityWorld =
+                    targetLinearWorld + PhysicalContactCross(
+                        targetAngularRadians, closest.point - targetCenter);
+                if (PhysicalContactFinite(targetPointVelocityWorld))
+                    targetPointSpeedMetersPerSecond =
+                        PhysicalContactLength(targetPointVelocityWorld) /
+                        worldScale;
+            }
+            const float dynamicVisualClearanceMeters =
+                PhysicalContactDynamicVisualClearanceMeters(
+                    targetPointSpeedMetersPerSecond);
+            if (closestUsesAuthoredShape)
+            {
+                PhysicalContactCompoundShape verifiedTargetShape{};
+                PhysicalContactTriangleMesh verifiedTargetMesh{};
+                PhysicalContactTransform verifiedTargetTransform{};
+                bool verifiedRequiresNativeConfirmation = false;
+                bool verifiedGeometry = closestTargetShapeSource != 3 &&
+                    Halo3ContactDetailedTargetShape(
+                        closestHandle, closestData, verifiedTargetShape,
+                        verifiedTargetTransform,
+                        verifiedRequiresNativeConfirmation,
+                        &verifiedTargetMesh);
+                if (!verifiedGeometry && closestTargetShapeSource != 3)
+                {
+                    verifiedGeometry = Halo3ContactShapeForObject(
+                        closestData, verifiedTargetShape);
+                    if (verifiedGeometry)
+                        verifiedTargetTransform =
+                            Halo3ContactObjectTransform(closestData);
+                }
+                if (verifiedGeometry &&
+                    PhysicalContactTransformFinite(verifiedTargetTransform))
+                {
+                    const auto exactOverlap =
+                        [&](const PhysicalContactTransform& candidate) {
+                            bool surfaceOverlap = false;
+                            if (collisionShape &&
+                                PhysicalContactTriangleMeshValid(
+                                    weaponTriangleMesh) &&
+                                closestTargetShapeSource != 3)
+                            {
+                                surfaceOverlap =
+                                    PhysicalContactTriangleMeshValid(
+                                        verifiedTargetMesh)
+                                    ? PhysicalContactSweepTriangleMeshes(
+                                          weaponTriangleMesh, candidate,
+                                          candidate, verifiedTargetMesh,
+                                          verifiedTargetTransform,
+                                          kHalo3ContactTriangleStepMeters *
+                                              worldScale,
+                                          kHalo3ContactTriangleSurfaceRadiusMeters *
+                                              worldScale).hit
+                                    : PhysicalContactSweepTriangleMeshCompound(
+                                          weaponTriangleMesh, candidate,
+                                          candidate, verifiedTargetShape,
+                                          verifiedTargetTransform,
+                                          kHalo3ContactTriangleStepMeters *
+                                              worldScale,
+                                          kHalo3ContactTriangleSurfaceRadiusMeters *
+                                              worldScale).hit;
+                            }
+                            return surfaceOverlap ||
+                                PhysicalContactCompoundsIntersect(
+                                    weaponShape, candidate,
+                                    verifiedTargetShape,
+                                    verifiedTargetTransform);
+                        };
+                    const PhysicalContactWallConstraint verifiedConstraint =
+                        PhysicalContactVerifiedSeparationOffset(
+                            intendedWeaponTransform, closest.normal,
+                            bodyConstraint.setbackWorldUnits,
+                            dynamicVisualClearanceMeters * worldScale,
+                            worldScale, exactOverlap);
+                    if (verifiedConstraint.constrained)
+                    {
+                        bodyConstraint = verifiedConstraint;
+                    }
+                    else
+                        bodyConstraint = {};
+                }
+                else
+                    bodyConstraint = {};
+            }
             updateBodyConstraint(
                 bodyConstraint.constrained
                     ? PhysicalContactDynamicBodyObservation::Blocked
                     : constrainedBodyObservation,
                 bodyConstraint.offset,
                 bodyConstraint.constrained ? closestHandle : -1);
+            // Publish the exact separated palette with enough clearance for
+            // the target point's measured motion during the worker-to-render
+            // handoff. Render holds this conservative approval until another
+            // exact check succeeds.
+            if (bodyConstraint.constrained &&
+                !visualConstraintUsesFallbackNormal)
+                publishApprovedVisiblePose();
             if (bodyConstraint.constrained &&
                 visualConstraintUsesFallbackNormal)
                 g_halo3ContactBodyFallbackNormalConstraints.fetch_add(
@@ -14085,7 +14512,7 @@ namespace
             }
             if (!previousPoseMs || visiblePoseMs <= previousPoseMs ||
                 visiblePoseMs - previousPoseMs > 100 ||
-                !g_halo3ObjectGetVelocities || !g_halo3ObjectGetCenter)
+                !targetMotionSnapshotValid)
             {
                 g_halo3ContactPoseDeltaRejects.fetch_add(
                     1, std::memory_order_relaxed);
@@ -14094,12 +14521,6 @@ namespace
             }
             const float dt = static_cast<float>(
                 visiblePoseMs - previousPoseMs) * 0.001f;
-            float targetLinear[3]{};
-            float targetAngular[3]{};
-            float targetCenterRaw[3]{};
-            g_halo3ObjectGetVelocities(
-                closestHandle, targetLinear, targetAngular);
-            g_halo3ObjectGetCenter(closestHandle, targetCenterRaw);
             PhysicalContactVec3 weaponLinearMetersPerSecond{};
             PhysicalContactVec3 weaponAngularRadiansPerSecond{};
             bool trackedVelocityValid = true;
@@ -15341,6 +15762,7 @@ namespace
                 LOG("H3 physical contact DEBUG VISIBLE REPLAY: "
                     "palettes=%llu exactPublishes=%llu exactPalettes=%llu "
                     "correctedPalettes=%llu "
+                    "approvedPalettes=%llu heldPalettes=%llu "
                     "directOverlaps=%llu directSeparations=%llu "
                     "solidOverlaps=%llu solidSeparations=%llu "
                     "gapRange=(%.4f %.4f)m",
@@ -15355,6 +15777,12 @@ namespace
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleCorrectedPalettes.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactApprovedPalettes.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactHeldPalettes.load(
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleDirectOverlaps.load(
@@ -20194,6 +20622,10 @@ namespace
         g_halo3ContactDebugVisibleExactPalettes.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleCorrectedPalettes.store(
+            0, std::memory_order_release);
+        g_halo3ContactApprovedPalettes.store(
+            0, std::memory_order_release);
+        g_halo3ContactHeldPalettes.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleMeasurementStarted.store(
             false, std::memory_order_release);

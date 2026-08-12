@@ -322,6 +322,30 @@ inline constexpr bool PhysicalContactVisibleWeaponSubmissionAccepted(
         (wristDescendants & (uint64_t{1} << mappedRoot)) != 0 && finiteRoot;
 }
 
+// A render submission may consume only an approval produced for this exact
+// weapon palette identity. The worker can lag the renderer by a few proposals,
+// but an approval from the future, another weapon, or an old gameplay sample
+// is never valid.
+inline constexpr bool PhysicalContactApprovedPaletteUsable(
+    uint16_t expectedRenderTag, uint16_t approvedRenderTag,
+    int32_t expectedWeaponHandle, int32_t approvedWeaponHandle,
+    uint32_t expectedNodeCount, uint32_t approvedNodeCount,
+    uint64_t currentProposalSerial, uint64_t approvedProposalSerial,
+    uint64_t approvedSampleMs, uint64_t nowMs,
+    uint64_t maximumAgeMs = 100)
+{
+    return expectedRenderTag != 0xFFFFu &&
+        approvedRenderTag == expectedRenderTag &&
+        expectedWeaponHandle != -1 &&
+        approvedWeaponHandle == expectedWeaponHandle &&
+        expectedNodeCount > 0 && expectedNodeCount <= 16 &&
+        approvedNodeCount == expectedNodeCount &&
+        currentProposalSerial != 0 && approvedProposalSerial != 0 &&
+        approvedProposalSerial <= currentProposalSerial &&
+        approvedSampleMs != 0 && nowMs >= approvedSampleMs &&
+        nowMs - approvedSampleMs <= maximumAgeMs;
+}
+
 inline int32_t PhysicalContactCollisionPermutationIndex(
     int32_t permutationCount, bool allowFirstOfMany)
 {
@@ -1960,6 +1984,31 @@ inline bool PhysicalContactDynamicImpulseNormalEligible(
     return sweptNormalReliable || cachedReliableNormal;
 }
 
+// A dynamic target can keep translating or rotating between the gameplay
+// worker's exact collision check and the render hook consuming the approved
+// weapon palette. Reserve enough normal clearance for that measured point
+// motion, while keeping the gap small for a target that is already still.
+inline float PhysicalContactDynamicVisualClearanceMeters(
+    float targetPointSpeedMetersPerSecond,
+    float baseClearanceMeters = 0.008f,
+    float predictionSeconds = 0.060f,
+    float maximumClearanceMeters = 0.035f)
+{
+    if (!std::isfinite(baseClearanceMeters) ||
+        baseClearanceMeters < 0.0f ||
+        !std::isfinite(predictionSeconds) || predictionSeconds < 0.0f ||
+        !std::isfinite(maximumClearanceMeters) ||
+        maximumClearanceMeters < baseClearanceMeters)
+        return 0.0f;
+    if (!std::isfinite(targetPointSpeedMetersPerSecond) ||
+        targetPointSpeedMetersPerSecond < 0.0f)
+        return maximumClearanceMeters;
+    return std::clamp(
+        baseClearanceMeters +
+            targetPointSpeedMetersPerSecond * predictionSeconds,
+        baseClearanceMeters, maximumClearanceMeters);
+}
+
 inline PhysicalContactVec3 PhysicalContactUpdateDynamicBodyOffset(
     PhysicalContactVec3 currentOffset, PhysicalContactVec3 requestedOffset,
     PhysicalContactDynamicBodyObservation observation, float elapsedSeconds,
@@ -1978,8 +2027,11 @@ inline PhysicalContactVec3 PhysicalContactUpdateDynamicBodyOffset(
         return currentOffset;
     if (observation != PhysicalContactDynamicBodyObservation::Separated)
         return {};
-    return PhysicalContactUpdateWallOffset(
-        currentOffset, {}, false, elapsedSeconds, worldUnitsPerMeter);
+    // Separation here is not a weak absence. The caller proved that the exact
+    // previously constrained target was removed or that its geometry is clear.
+    // A smoothed intermediate offset can cross back through that same target;
+    // release directly to the checked controller pose.
+    return {};
 }
 
 // Keep the rendered kinematic weapon on the target-facing side of an exact
@@ -2028,6 +2080,99 @@ inline PhysicalContactWallConstraint PhysicalContactDynamicBodyOffset(
 
     result.offset = outward * setback;
     result.setbackWorldUnits = setback;
+    result.constrained = PhysicalContactFinite(result.offset);
+    return result;
+}
+
+// Validate a proposed visual setback against the complete caller-supplied
+// geometry predicate. This covers both a swept surface hit whose final pose is
+// outside and an end pose already contained in a closed body. The fixed search
+// count keeps the callback bounded; no correction is returned unless its final
+// pose is directly proven clear.
+template <typename IntersectsAt>
+inline PhysicalContactWallConstraint PhysicalContactVerifiedSeparationOffset(
+    const PhysicalContactTransform& intendedWeaponTransform,
+    PhysicalContactVec3 outwardDirection,
+    float proposedOffsetWorldUnits,
+    float clearanceWorldUnits,
+    float maximumOffsetWorldUnits,
+    IntersectsAt intersectsAt)
+{
+    PhysicalContactWallConstraint result{};
+    if (!PhysicalContactTransformFinite(intendedWeaponTransform) ||
+        !PhysicalContactFinite(outwardDirection) ||
+        !std::isfinite(proposedOffsetWorldUnits) ||
+        proposedOffsetWorldUnits < 0.0f ||
+        !std::isfinite(clearanceWorldUnits) || clearanceWorldUnits < 0.0f ||
+        !std::isfinite(maximumOffsetWorldUnits) ||
+        maximumOffsetWorldUnits <= 0.0f ||
+        clearanceWorldUnits > maximumOffsetWorldUnits)
+        return result;
+    const PhysicalContactVec3 outward = PhysicalContactNormalize(
+        outwardDirection, {});
+    if (PhysicalContactLengthSquared(outward) <= 1.0e-12f)
+        return result;
+
+    const auto overlapsAtDistance = [&](float distance) {
+        PhysicalContactTransform candidate = intendedWeaponTransform;
+        candidate.position = candidate.position + outward * distance;
+        return intersectsAt(candidate);
+    };
+    const bool intendedOverlaps = overlapsAtDistance(0.0f);
+    if (!intendedOverlaps && proposedOffsetWorldUnits <= 1.0e-5f)
+        return result;
+
+    float low = intendedOverlaps ? 0.0f : std::clamp(
+        proposedOffsetWorldUnits, 1.0e-5f, maximumOffsetWorldUnits);
+    float high = std::clamp(
+        std::max(proposedOffsetWorldUnits, clearanceWorldUnits),
+        1.0e-5f, maximumOffsetWorldUnits);
+    bool highIsClear = !overlapsAtDistance(high);
+    if (highIsClear && intendedOverlaps)
+    {
+        low = 0.0f;
+    }
+    else if (!highIsClear)
+    {
+        low = high;
+        for (int expansion = 0; expansion < 7 && !highIsClear; ++expansion)
+        {
+            const float expanded = std::min(
+                maximumOffsetWorldUnits,
+                std::max(high * 2.0f, high + clearanceWorldUnits));
+            if (expanded <= high + 1.0e-6f)
+                break;
+            high = expanded;
+            highIsClear = !overlapsAtDistance(high);
+            if (!highIsClear)
+                low = high;
+        }
+    }
+    if (!highIsClear)
+        return result;
+
+    // Only an overlapping low endpoint supports a monotonic boundary search.
+    // A tunnelling sweep can end clear on the far side; its already-clear
+    // proposed setback must be preserved rather than bisected through space.
+    if (overlapsAtDistance(low))
+    {
+        for (int iteration = 0; iteration < 10; ++iteration)
+        {
+            const float middle = (low + high) * 0.5f;
+            if (overlapsAtDistance(middle))
+                low = middle;
+            else
+                high = middle;
+        }
+    }
+    const float padded = std::min(
+        maximumOffsetWorldUnits, high + clearanceWorldUnits);
+    if (padded > high && !overlapsAtDistance(padded))
+        high = padded;
+    if (overlapsAtDistance(high))
+        return result;
+    result.offset = outward * high;
+    result.setbackWorldUnits = high;
     result.constrained = PhysicalContactFinite(result.offset);
     return result;
 }
