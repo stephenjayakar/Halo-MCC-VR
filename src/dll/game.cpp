@@ -986,8 +986,6 @@ namespace
     std::atomic<bool> g_halo3ContactDebugVisibleMeasurementStarted{false};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectSeparations{0};
-    std::atomic<uint64_t> g_halo3ContactDebugVisibleGeometryOverlaps{0};
-    std::atomic<uint64_t> g_halo3ContactDebugVisibleGeometrySeparations{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidSeparations{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
@@ -11213,16 +11211,12 @@ namespace
             std::memory_order_relaxed);
     }
 
-    void Halo3ProcessPhysicalWeaponContact(uint64_t nowMs);
-
     // Authoritative Halo 3 simulation thread. H3EK's objects_update body owns
     // the object_update_absolute_index transaction; the unique retail homolog
     // at +0x34067C carries the same object-list/update-loop invariants. Native
     // melee stays before Halo's update. Sustained whole-body velocity is
     // applied immediately after it so a floor-loaded body cannot overwrite the
-    // correction in the same tick. The visual/contact solver then observes the
-    // final post-physics transforms before approving a palette for rendering.
-    // The original always runs after a failure.
+    // correction in the same tick. The original always runs after a failure.
     void __fastcall Halo3ObjectsUpdateHook()
     {
         bool deferredWorldVelocity = false;
@@ -11857,13 +11851,10 @@ namespace
         // right-weapon contact this tick. This ordering prevents the nudge
         // response from knocking an actively held prop out of the palm.
         Halo3ConsumeLeftGrabCommand();
-        if (g_halo3RuntimeGeneration.load(std::memory_order_acquire))
-            Halo3ProcessPhysicalWeaponContact(GetTickCount64());
     }
 
-    // Simulation-thread-only, immediately after Halo's authoritative object
-    // update. Native writes are reached only after the same validated Halo 3
-    // TLS/object-table path used by the vehicle sampler.
+    // Camera-thread-only. Native writes are reached only after the same
+    // validated Halo 3 TLS/object-table path used by the vehicle sampler.
     void Halo3ProcessPhysicalWeaponContact(uint64_t nowMs)
     {
         const uint32_t generation =
@@ -12859,10 +12850,6 @@ namespace
                                 0, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleDirectSeparations.store(
                                 0, std::memory_order_relaxed);
-                            g_halo3ContactDebugVisibleGeometryOverlaps.store(
-                                0, std::memory_order_relaxed);
-                            g_halo3ContactDebugVisibleGeometrySeparations.store(
-                                0, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleSolidOverlaps.store(
                                 0, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleSolidSeparations.store(
@@ -12898,31 +12885,6 @@ namespace
                         (directHit
                              ? g_halo3ContactDebugVisibleDirectOverlaps
                              : g_halo3ContactDebugVisibleDirectSeparations)
-                            .fetch_add(1, std::memory_order_relaxed);
-                        // The physical query intentionally includes its
-                        // 1.25 mm contact skin. A zero-radius query separates
-                        // legitimate near-touching from triangle intersection.
-                        const bool geometryHit =
-                            PhysicalContactTriangleMeshValid(
-                                debugTargetTriangleMesh)
-                            ? PhysicalContactSweepTriangleMeshes(
-                                  *measuredWeaponMesh,
-                                  measuredWeaponTransform,
-                                  measuredWeaponTransform,
-                                  debugTargetTriangleMesh,
-                                  debugTargetTransform,
-                                  kHalo3ContactTriangleStepMeters * worldScale,
-                                  0.0f).hit
-                            : PhysicalContactSweepTriangleMeshCompound(
-                                  *measuredWeaponMesh,
-                                  measuredWeaponTransform,
-                                  measuredWeaponTransform, debugTargetShape,
-                                  debugTargetTransform,
-                                  kHalo3ContactTriangleStepMeters * worldScale,
-                                  0.0f).hit;
-                        (geometryHit
-                             ? g_halo3ContactDebugVisibleGeometryOverlaps
-                             : g_halo3ContactDebugVisibleGeometrySeparations)
                             .fetch_add(1, std::memory_order_relaxed);
                         const bool solidHit =
                             PhysicalContactCompoundsIntersect(
@@ -15935,7 +15897,6 @@ namespace
                     "correctedPalettes=%llu "
                     "approvedPalettes=%llu heldPalettes=%llu "
                     "directOverlaps=%llu directSeparations=%llu "
-                    "geometryOverlaps=%llu geometrySeparations=%llu "
                     "solidOverlaps=%llu solidSeparations=%llu "
                     "gapRange=(%.4f %.4f)m",
                     (unsigned long long)
@@ -15961,12 +15922,6 @@ namespace
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleDirectSeparations.load(
-                            std::memory_order_relaxed),
-                    (unsigned long long)
-                        g_halo3ContactDebugVisibleGeometryOverlaps.load(
-                            std::memory_order_relaxed),
-                    (unsigned long long)
-                        g_halo3ContactDebugVisibleGeometrySeparations.load(
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleSolidOverlaps.load(
@@ -16024,6 +15979,7 @@ namespace
             TitleAdapter_PublishHeartbeat(
                 GameTitle::Halo3, runtimeGeneration, cameraNowMs);
             Halo3SampleVehicleState(cameraNowMs);
+            Halo3ProcessPhysicalWeaponContact(cameraNowMs);
             Halo3ProcessLeftHandGrab(cameraNowMs);
         }
         // Low-frequency timing proof paired with vr.cpp's HMD sample-rate log.
@@ -20809,10 +20765,6 @@ namespace
         g_halo3ContactDebugVisibleDirectOverlaps.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleDirectSeparations.store(
-            0, std::memory_order_release);
-        g_halo3ContactDebugVisibleGeometryOverlaps.store(
-            0, std::memory_order_release);
-        g_halo3ContactDebugVisibleGeometrySeparations.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleMinimumGap.store(
             FLT_MAX, std::memory_order_release);

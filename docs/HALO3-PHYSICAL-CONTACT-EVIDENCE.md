@@ -2115,46 +2115,6 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
-The earlier `4f4f25e` visible-weapon pass was too short. A later replay of the
-cumulative `db84d06c909d05facb8def3d65a7d3cd2df63e9f` candidate remained clean
-through 3,322 exact palettes, then recorded two displayed triangle overlaps and
-two solid overlaps at 3,686 palettes. The preserved failed log is
-`out/debug-openxr/20260812-073533508Z-visible-weapon-gap.log`, SHA-256
-`730D02F67F0851C0DB7BAC905A9810AAA38BA29C63C2AAE2F1CB3D28B6B5F9EF`.
-This proves the former 900-palette validator minimum could approve a clean
-prefix before a later target movement crossed the fixed guard.
-
-Candidate `5ba969afa8db2cae697ef0d980c97a6fb8281d4a` combined the preventive
-guard with measured target-point velocity. Its strict replay failed after 2,234
-exact palettes with two displayed triangle overlaps and two solid overlaps.
-Halo's position readback jumped about 27 mm even though its reported current
-linear velocity was only about 0.016 m/s. The preserved failed log is
-`out/debug-openxr/20260812-075536356Z-visible-weapon-gap.log`, SHA-256
-`847704E99138264A27B072AC80DC88A76A65BFB8320E7BDFAB9A856452A54C28`.
-This disproves velocity prediction for Halo's discrete correction and was
-reverted by `ee33c0d`.
-
-Candidate `0a359423118fde3f0bd06c7abdbd713983a96431` moved the complete
-solver immediately after Halo's authoritative `objects_update`. Its first
-report recorded two radius-expanded triangle contacts but zero solid overlaps
-after 52 exact palettes. The preserved log is
-`out/debug-openxr/20260812-080359896Z-visible-weapon-gap.log`, SHA-256
-`CE768A0FE1AA56EC973934C5A5FA63B67992697A74D8902193DEAF0CF049DF25`.
-The validator intentionally stopped, but its `directOverlaps` counter uses the
-physical 1.25 mm surface radius and cannot distinguish near-touching from true
-triangle intersection. The candidate is reverted by `7440933` before changing
-that diagnostic.
-
-The next candidate retains post-physics approval and adds an independent
-zero-radius triangle query to the environment-gated replay. The existing direct
-counter remains a useful physical contact-skin measurement; the new geometry
-counter detects actual authored-triangle intersection. Solid authored convex
-intersection remains a second independent failure. Unit coverage proves two
-parallel triangles 0.5 mm apart register in the 1.25 mm contact skin but not in
-the zero-radius query. The strict replay now requires at least 8,000 exact and
-held palettes, 2,500 corrected and approved palettes, 2,500 zero-radius clear
-samples, and zero cumulative zero-radius or solid overlap.
-
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

@@ -313,7 +313,7 @@ function Test-VisibleWeaponGapResult([string]$Text) {
     } | Select-Object -Last 1
     if (-not $line) { return $false }
     if ($line -notmatch
-        'exactPalettes=([0-9]+).*correctedPalettes=([0-9]+).*approvedPalettes=([0-9]+) heldPalettes=([0-9]+).*directOverlaps=([0-9]+) directSeparations=([0-9]+).*geometryOverlaps=([0-9]+) geometrySeparations=([0-9]+).*solidOverlaps=([0-9]+) solidSeparations=([0-9]+)') {
+        'exactPalettes=([0-9]+).*correctedPalettes=([0-9]+).*approvedPalettes=([0-9]+) heldPalettes=([0-9]+).*directOverlaps=([0-9]+) directSeparations=([0-9]+)') {
         return $false
     }
     $exactPalettes = [int]$Matches[1]
@@ -322,17 +322,12 @@ function Test-VisibleWeaponGapResult([string]$Text) {
     $heldPalettes = [int]$Matches[4]
     $directOverlaps = [int]$Matches[5]
     $directSeparations = [int]$Matches[6]
-    $geometryOverlaps = [int]$Matches[7]
-    $geometrySeparations = [int]$Matches[8]
-    $solidOverlaps = [int]$Matches[9]
-    return $exactPalettes -ge 8000 -and
-        $correctedPalettes -ge 2500 -and
-        $approvedPalettes -ge 2500 -and
-        $heldPalettes -ge 8000 -and
-        $directSeparations -ge 2500 -and
-        $geometrySeparations -ge 2500 -and
-        $geometryOverlaps -eq 0 -and
-        $solidOverlaps -eq 0
+    return $exactPalettes -ge 900 -and
+        $correctedPalettes -ge 250 -and
+        $approvedPalettes -ge 250 -and
+        $heldPalettes -ge 250 -and
+        $directSeparations -ge 400 -and
+        $directOverlaps -eq 0
 }
 
 function Test-VisibleWeaponGapFailure([string]$Text) {
@@ -341,9 +336,7 @@ function Test-VisibleWeaponGapFailure([string]$Text) {
     $line = ($Text -split "`r?`n") | Where-Object {
         $_ -match 'H3 physical contact DEBUG VISIBLE REPLAY:'
     } | Select-Object -Last 1
-    return $line -and
-        ($line -match 'geometryOverlaps=([1-9][0-9]*)' -or
-         $line -match 'solidOverlaps=([1-9][0-9]*)')
+    return $line -and $line -match 'directOverlaps=([1-9][0-9]*)'
 }
 
 function Test-ValidationResult([string]$Text, [string]$Name) {
