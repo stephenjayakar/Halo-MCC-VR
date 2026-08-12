@@ -1938,26 +1938,6 @@ must use a lock-free render proposal and worker approval, while keeping all
 collision work outside the render hook. Normal SteamVR settings were restored
 with the byte-identical hash above.
 
-The next candidate implements that render-boundary ownership change. The final
-primary-weapon palette is first published as a bounded lock-free proposal. The
-camera/gameplay worker retains all tag reads, object-table access, geometry
-construction, triangle/convex collision, and native physics work. It publishes
-a full corrected 16-node-or-smaller palette only after the final pose has been
-proven clear against both the rendered triangle surface and authored solid
-children. The render hook performs only bounded atomic reads and a fixed-size
-matrix copy: while a newer proposal is unchecked or blocked, it displays the
-last fresh approval for the exact same weapon handle, render tag, and node
-count. Weapon changes, tracking loss, runtime teardown, stale timestamps, and
-identity mismatches invalidate approval rather than crossing feature state.
-Animated multi-body targets hold the preceding safe pose during overlap because
-one struck limb is insufficient proof that the whole moving body is clear.
-
-Unit coverage now rejects stale, future, wrong-tag, wrong-handle, and wrong-node
-approvals, and confirms that the bounded exact-separation search returns only a
-directly clear final pose. Release build and full `ctest` pass. Runtime replay,
-artifact identity, and headset acceptance remain pending until this paragraph
-is updated with the committed candidate and preserved log.
-
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
