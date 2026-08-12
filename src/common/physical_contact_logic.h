@@ -1553,6 +1553,19 @@ struct PhysicalContactTriangleMeshHit : PhysicalContactConvexHit
     uint16_t targetIndex = 0;
 };
 
+// A zero-radius triangle test can report a coplanar/touching edge that the
+// strictly enclosing contact-skin query rejects because of floating-point
+// branch differences. Real surface penetration must be present in both nested
+// queries at the same pose. A tiny outward probe must also remain in both
+// surfaces before this is called penetration instead of exact touching.
+inline bool PhysicalContactConfirmedSurfacePenetration(
+    bool contactSkinHit, bool zeroRadiusHit,
+    bool outwardContactSkinHit, bool outwardZeroRadiusHit)
+{
+    return contactSkinHit && zeroRadiusHit &&
+        outwardContactSkinHit && outwardZeroRadiusHit;
+}
+
 template <typename IntersectAt, typename IntersectPairAt,
           typename TargetSupport>
 inline PhysicalContactTriangleMeshHit PhysicalContactSweepTriangleMeshInternal(
