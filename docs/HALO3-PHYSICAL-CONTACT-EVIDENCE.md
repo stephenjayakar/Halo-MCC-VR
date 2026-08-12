@@ -2115,6 +2115,43 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
+The earlier `4f4f25e` visible-weapon pass was too short. A later replay of the
+cumulative `db84d06c909d05facb8def3d65a7d3cd2df63e9f` candidate remained clean
+through 3,322 exact palettes, then recorded two displayed triangle overlaps and
+two solid overlaps at 3,686 palettes. The preserved failed log is
+`out/debug-openxr/20260812-073533508Z-visible-weapon-gap.log`, SHA-256
+`730D02F67F0851C0DB7BAC905A9810AAA38BA29C63C2AAE2F1CB3D28B6B5F9EF`.
+This proves the former 900-palette validator minimum could approve a clean
+prefix before a later target movement crossed the fixed guard.
+
+Candidate `5ba969afa8db2cae697ef0d980c97a6fb8281d4a` combined the preventive
+guard with clearance based on the exact target point's measured linear and
+angular velocity. It was installed from
+`out/candidates/5ba969a-h3-physical-contact-20260812-074834469Z`; its DLL
+SHA-256 was
+`7C05960196580A8F1FCE096B6B86E77B89C42EAECE188C3A004170932B7FB9D0`.
+The strict replay failed again after 2,234 exact palettes with two displayed
+triangle overlaps and two solid overlaps. Halo's position readback jumped about
+27 mm during the preceding two seconds even though its reported current linear
+velocity was only about 0.016 m/s. The preserved failed log is
+`out/debug-openxr/20260812-075536356Z-visible-weapon-gap.log`, SHA-256
+`847704E99138264A27B072AC80DC88A76A65BFB8320E7BDFAB9A856452A54C28`.
+This disproves velocity prediction as a complete model for Halo's discrete
+physics correction. The behavior is rejected and reverted by `ee33c0d`.
+
+The next candidate changes ownership timing instead of adding a visible gap.
+Halo's evidenced `objects_update` transaction advances every rigid body, then
+applies the already validated deferred whole-body response. The complete exact
+weapon-contact solver now runs immediately after those operations on the same
+authoritative simulation thread. It therefore approves a rendered palette
+against the target's final transform for that tick. A newer controller proposal
+continues to wait behind the lock-free approval gate, so the renderer cannot
+show it before the next post-physics exact check. Native impulse and melee
+commands remain queued for the following authoritative update and native melee
+still executes before Halo's original update. The strict replay requires at
+least 8,000 exact and held palettes, 2,500 corrected and approved palettes, and
+2,500 measured clear samples with zero cumulative overlap.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

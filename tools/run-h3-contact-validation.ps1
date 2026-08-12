@@ -322,11 +322,11 @@ function Test-VisibleWeaponGapResult([string]$Text) {
     $heldPalettes = [int]$Matches[4]
     $directOverlaps = [int]$Matches[5]
     $directSeparations = [int]$Matches[6]
-    return $exactPalettes -ge 900 -and
-        $correctedPalettes -ge 250 -and
-        $approvedPalettes -ge 250 -and
-        $heldPalettes -ge 250 -and
-        $directSeparations -ge 400 -and
+    return $exactPalettes -ge 8000 -and
+        $correctedPalettes -ge 2500 -and
+        $approvedPalettes -ge 2500 -and
+        $heldPalettes -ge 8000 -and
+        $directSeparations -ge 2500 -and
         $directOverlaps -eq 0
 }
 
