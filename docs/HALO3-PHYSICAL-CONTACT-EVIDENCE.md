@@ -2177,29 +2177,6 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
-### 2026-08-12 rotation-invariant body clearance
-
-Candidate `d618af9cf7fff5ad82e02c8a2cca5272f15ed094` moved the approved
-weapon palette by the root object's exact transform delta in the existing
-render hook.  It still recorded five displayed triangle overlaps, including
-three geometry/confirmed penetrations, because Halo's visible loose object is
-render-interpolated beyond that simulation-root sample.  Its preserved log is
-`out/debug-openxr/20260812-165254991Z-rotating-body-gap.log`, SHA-256
-`EC406AB8ADA48923D064C28393324AD71BE1EDC760AC492C3C8E916D10F6C607`.
-That behavior is rejected and reverted by `bfe92b3`.
-
-The remaining candidate uses a transform-independent proof only when the
-contacted root body's angular surface speed is at least the fixed 0.05 m/s
-tracking noise floor.  It derives the maximum radius around the real object
-origin from the authored target triangle mesh and convex children, derives the
-held weapon radius from its authored convex children, and moves the weapon
-outside their combined sphere plus the existing 4 mm guard clearance.  That
-sphere contains every target orientation, including an unseen interpolated
-render pose.  Ordinary low-rotation nudging keeps exact surface geometry and
-does not pay this conservative clearance.  Animated actors keep their existing
-per-body path.  No new hook, signature, render-time engine read, allocation,
-lock, logging, file I/O, or game-state write is introduced.
-
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

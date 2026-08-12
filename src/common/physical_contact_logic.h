@@ -813,20 +813,6 @@ inline float PhysicalContactTriangleMeshBoundRadius(
     return radius;
 }
 
-// Bound authored geometry around the object origin. Unlike a world AABB this
-// sphere remains valid for every possible body rotation, so a weapon proven
-// outside it cannot be crossed by a rotating target between worker and render.
-inline float PhysicalContactRotationInvariantRadius(
-    const PhysicalContactCompoundShape& shape,
-    const PhysicalContactTriangleMesh* mesh = nullptr)
-{
-    const float compoundRadius = PhysicalContactCompoundValid(shape)
-        ? PhysicalContactCompoundBoundRadius(shape) : 0.0f;
-    const float meshRadius = mesh && PhysicalContactTriangleMeshValid(*mesh)
-        ? PhysicalContactTriangleMeshBoundRadius(*mesh) : 0.0f;
-    return std::max(compoundRadius, meshRadius);
-}
-
 inline PhysicalContactVec3 PhysicalContactConvexSupport(
     const PhysicalContactConvexShape& shape,
     const PhysicalContactTransform& transform,
@@ -1927,46 +1913,6 @@ struct PhysicalContactWallConstraint
     float setbackWorldUnits = 0.0f;
     PhysicalContactVec3 offset{};
 };
-
-inline PhysicalContactWallConstraint
-PhysicalContactRotationInvariantSphereOffset(
-    const PhysicalContactCompoundShape& weaponShape,
-    const PhysicalContactTransform& intendedWeaponTransform,
-    PhysicalContactVec3 targetOrigin, float targetRadiusWorldUnits,
-    float clearanceWorldUnits, float maximumOffsetWorldUnits)
-{
-    PhysicalContactWallConstraint result{};
-    if (!PhysicalContactCompoundValid(weaponShape) ||
-        !PhysicalContactTransformFinite(intendedWeaponTransform) ||
-        !PhysicalContactFinite(targetOrigin) ||
-        !std::isfinite(targetRadiusWorldUnits) ||
-        targetRadiusWorldUnits <= 0.0f ||
-        !std::isfinite(clearanceWorldUnits) || clearanceWorldUnits < 0.0f ||
-        !std::isfinite(maximumOffsetWorldUnits) ||
-        maximumOffsetWorldUnits <= 0.0f)
-        return result;
-    const PhysicalContactVec3 weaponCentre =
-        PhysicalContactCompoundWorldCentroid(
-            weaponShape, intendedWeaponTransform);
-    const PhysicalContactVec3 outward = PhysicalContactNormalize(
-        weaponCentre - targetOrigin,
-        intendedWeaponTransform.forward * -1.0f);
-    const float weaponRadius =
-        PhysicalContactCompoundBoundRadius(weaponShape) *
-        intendedWeaponTransform.scale;
-    const float requiredDistance = targetRadiusWorldUnits + weaponRadius +
-        clearanceWorldUnits;
-    const float currentDistance = PhysicalContactDot(
-        weaponCentre - targetOrigin, outward);
-    const float requiredSetback = requiredDistance - currentDistance;
-    if (!std::isfinite(requiredSetback) || requiredSetback <= 1.0e-5f ||
-        requiredSetback > maximumOffsetWorldUnits)
-        return result;
-    result.offset = outward * requiredSetback;
-    result.setbackWorldUnits = requiredSetback;
-    result.constrained = PhysicalContactFinite(result.offset);
-    return result;
-}
 
 struct PhysicalContactWallPlane
 {
