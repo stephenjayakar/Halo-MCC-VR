@@ -984,11 +984,8 @@ namespace
     std::atomic<uint64_t> g_halo3ContactDebugVisibleExactPalettes{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleCorrectedPalettes{0};
     std::atomic<bool> g_halo3ContactDebugVisibleMeasurementStarted{false};
-    std::atomic<uint64_t> g_halo3ContactDebugVisibleActiveStartMs{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectSeparations{0};
-    std::atomic<uint64_t> g_halo3ContactDebugVisibleGeometryOverlaps{0};
-    std::atomic<uint64_t> g_halo3ContactDebugVisibleGeometrySeparations{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidSeparations{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
@@ -12824,23 +12821,6 @@ namespace
                 if (haveDebugTargetShape &&
                     PhysicalContactTransformFinite(debugTargetTransform))
                 {
-                    uint64_t activeReplayStartMs =
-                        g_halo3ContactDebugVisibleActiveStartMs.load(
-                            std::memory_order_relaxed);
-                    if (!activeReplayStartMs &&
-                        g_halo3ContactHeldPalettes.load(
-                            std::memory_order_relaxed) >= 120)
-                    {
-                        uint64_t expected = 0;
-                        g_halo3ContactDebugVisibleActiveStartMs
-                            .compare_exchange_strong(
-                                expected, nowMs, std::memory_order_relaxed);
-                        activeReplayStartMs =
-                            g_halo3ContactDebugVisibleActiveStartMs.load(
-                                std::memory_order_relaxed);
-                    }
-                    const bool activeReplay = activeReplayStartMs != 0 &&
-                        nowMs >= activeReplayStartMs;
                     const PhysicalContactVec3 weaponFront =
                         Halo3ContactCompoundSupport(
                             *measuredWeaponShape, measuredWeaponTransform,
@@ -12856,8 +12836,7 @@ namespace
                     // original, uncontrolled palette or the half-updated stereo
                     // pair. Four exact palette consumptions cover both eyes and
                     // one complete follow-up pair on the observed retail path.
-                    if (activeReplay &&
-                        g_halo3ContactDebugVisibleExactPalettes.load(
+                    if (g_halo3ContactDebugVisibleExactPalettes.load(
                             std::memory_order_relaxed) >= 4 &&
                         g_halo3ContactApprovedPalettes.load(
                             std::memory_order_relaxed) >= 4 &&
@@ -12870,10 +12849,6 @@ namespace
                             g_halo3ContactDebugVisibleDirectOverlaps.store(
                                 0, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleDirectSeparations.store(
-                                0, std::memory_order_relaxed);
-                            g_halo3ContactDebugVisibleGeometryOverlaps.store(
-                                0, std::memory_order_relaxed);
-                            g_halo3ContactDebugVisibleGeometrySeparations.store(
                                 0, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleSolidOverlaps.store(
                                 0, std::memory_order_relaxed);
@@ -12911,31 +12886,6 @@ namespace
                              ? g_halo3ContactDebugVisibleDirectOverlaps
                              : g_halo3ContactDebugVisibleDirectSeparations)
                             .fetch_add(1, std::memory_order_relaxed);
-                        // The physical query intentionally includes its
-                        // 1.25 mm contact skin. A zero-radius query separates
-                        // legitimate near-touching from triangle intersection.
-                        const bool geometryHit =
-                            PhysicalContactTriangleMeshValid(
-                                debugTargetTriangleMesh)
-                            ? PhysicalContactSweepTriangleMeshes(
-                                  *measuredWeaponMesh,
-                                  measuredWeaponTransform,
-                                  measuredWeaponTransform,
-                                  debugTargetTriangleMesh,
-                                  debugTargetTransform,
-                                  kHalo3ContactTriangleStepMeters * worldScale,
-                                  0.0f).hit
-                            : PhysicalContactSweepTriangleMeshCompound(
-                                  *measuredWeaponMesh,
-                                  measuredWeaponTransform,
-                                  measuredWeaponTransform, debugTargetShape,
-                                  debugTargetTransform,
-                                  kHalo3ContactTriangleStepMeters * worldScale,
-                                  0.0f).hit;
-                        (geometryHit
-                             ? g_halo3ContactDebugVisibleGeometryOverlaps
-                             : g_halo3ContactDebugVisibleGeometrySeparations)
-                            .fetch_add(1, std::memory_order_relaxed);
                         const bool solidHit =
                             PhysicalContactCompoundsIntersect(
                                 *measuredWeaponShape,
@@ -12948,15 +12898,9 @@ namespace
                     }
                     const float amplitude =
                         worldScale * debugMaxSpeed / kDebugAngularRate;
-                    const float activePhase = activeReplay
-                        ? static_cast<float>(
-                              (nowMs - activeReplayStartMs) % 1000u) *
-                              0.00628318530718f
-                        : 0.0f;
-                    const float displacement = activeReplay
-                        ? amplitude * std::sin(activePhase) -
-                              worldScale * 0.02f
-                        : worldScale * 0.10f;
+                    const float displacement =
+                        amplitude * std::sin(debugPhase) -
+                        worldScale * 0.02f;
                     const PhysicalContactVec3 proposedWeaponFront =
                         Halo3ContactCompoundSupport(
                             weaponShape, weaponTransform, forward);
@@ -15953,7 +15897,6 @@ namespace
                     "correctedPalettes=%llu "
                     "approvedPalettes=%llu heldPalettes=%llu "
                     "directOverlaps=%llu directSeparations=%llu "
-                    "geometryOverlaps=%llu geometrySeparations=%llu "
                     "solidOverlaps=%llu solidSeparations=%llu "
                     "gapRange=(%.4f %.4f)m",
                     (unsigned long long)
@@ -15979,12 +15922,6 @@ namespace
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleDirectSeparations.load(
-                            std::memory_order_relaxed),
-                    (unsigned long long)
-                        g_halo3ContactDebugVisibleGeometryOverlaps.load(
-                            std::memory_order_relaxed),
-                    (unsigned long long)
-                        g_halo3ContactDebugVisibleGeometrySeparations.load(
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleSolidOverlaps.load(
@@ -20825,19 +20762,9 @@ namespace
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleMeasurementStarted.store(
             false, std::memory_order_release);
-        g_halo3ContactDebugVisibleActiveStartMs.store(
-            0, std::memory_order_release);
         g_halo3ContactDebugVisibleDirectOverlaps.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleDirectSeparations.store(
-            0, std::memory_order_release);
-        g_halo3ContactDebugVisibleGeometryOverlaps.store(
-            0, std::memory_order_release);
-        g_halo3ContactDebugVisibleGeometrySeparations.store(
-            0, std::memory_order_release);
-        g_halo3ContactDebugVisibleSolidOverlaps.store(
-            0, std::memory_order_release);
-        g_halo3ContactDebugVisibleSolidSeparations.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleMinimumGap.store(
             FLT_MAX, std::memory_order_release);
