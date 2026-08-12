@@ -1921,15 +1921,22 @@ unchecked release can cross the target surface. The candidate is rejected and
 reverted. Normal SteamVR settings were restored with the byte-identical hash
 above.
 
-The replacement retains the same measured union for blocked poses and applies
-it to release as well. Triangle sweeps still select the exact contact point and
-reliable impulse normal. Closed-solid containment stays visual-only. A new
-blocked correction is published only when its final pose is clear in both
-representations. When the controller-intended pose becomes clear in both, the
-dynamic-body offset drops directly to zero instead of easing through unchecked
-intermediate poses. If exact geometry is missing or the intended pose is not
-clear, the last proven correction is held. Multi-node animated enemy contact
-keeps its separate native melee path.
+Candidate `2df47e5772693a967ffdfc4451dc8f121d093a9e` added direct release
+after the same combined triangle-and-solid proof. Its package was
+`out/candidates/2df47e5-h3-physical-contact-20260812-042842233Z`, with DLL
+SHA-256 `23E5DE9CC2E9F7E0C97905B6CCDA1DDDE44E048710C544AF8002B2D020EB3391`.
+The strict Valhalla replay failed before the first reporting interval. Its
+preserved log is
+`out/debug-openxr/20260812-042938323Z-visible-weapon-gap.log`, SHA-256
+`9F90C94455B67F8CF272CA00D0071A7DCFB4FB3F2EB575246F03DFC168EBC613`.
+It recorded seven direct triangle overlaps and five solid overlaps after 25
+palettes, including ten corrected palettes. Therefore unchecked release alone
+does not explain the defect. Worker-side correction remains reactive: the
+renderer can display a newly proposed palette before that same pose has been
+checked and corrected. This behavior is rejected and reverted. The next path
+must use a lock-free render proposal and worker approval, while keeping all
+collision work outside the render hook. Normal SteamVR settings were restored
+with the byte-identical hash above.
 
 ## Verification boundary
 
