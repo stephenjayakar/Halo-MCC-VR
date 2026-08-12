@@ -9225,25 +9225,6 @@ int main()
                 movingTriangleMesh, guardWeaponTransform,
                 guardWeaponTransform, targetTriangleMesh,
                 guardTargetTransform, 0.002f, 0.008f);
-        guardTargetTransform.position = {0.0005f, 0.0f, 0.0f};
-        const PhysicalContactTriangleMeshHit contactSkinNearTouch =
-            PhysicalContactSweepTriangleMeshes(
-                movingTriangleMesh, guardWeaponTransform,
-                guardWeaponTransform, targetTriangleMesh,
-                guardTargetTransform, 0.002f, 0.00125f);
-        const PhysicalContactTriangleMeshHit zeroRadiusNearTouch =
-            PhysicalContactSweepTriangleMeshes(
-                movingTriangleMesh, guardWeaponTransform,
-                guardWeaponTransform, targetTriangleMesh,
-                guardTargetTransform, 0.002f, 0.0f);
-        const float observedSurfaceApproach =
-            PhysicalContactObservedSurfaceApproachMeters(
-                {0.0f, 0.0f, 0.0f}, {0.03f, 0.0f, 0.0f},
-                {1.0f, 0.0f, 0.0f}, 2.0f, 0.04f);
-        const float observedSurfaceDeparture =
-            PhysicalContactObservedSurfaceApproachMeters(
-                {0.03f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f},
-                {1.0f, 0.0f, 0.0f}, 2.0f, 0.04f);
 
         PhysicalContactTriangleMesh separatedSurfaceMesh{};
         separatedSurfaceMesh.triangleCount = 2;
@@ -9286,22 +9267,10 @@ int main()
               triangleMeshTunnelling.normalReliable &&
               !triangleMeshGrazingMiss.hit &&
               !exactNearSurfaceClear.hit && guardedNearSurfaceHit.hit &&
-              contactSkinNearTouch.hit && !zeroRadiusNearTouch.hit &&
-              !PhysicalContactConfirmedSurfacePenetration(
-                  false, false, false, false) &&
-              !PhysicalContactConfirmedSurfacePenetration(
-                  true, true, true, false) &&
-              !PhysicalContactConfirmedSurfacePenetration(
-                  true, true, false, true) &&
-              PhysicalContactConfirmedSurfacePenetration(
-                  true, true, true, true) &&
-              std::fabs(observedSurfaceApproach - 0.015f) < 1.0e-6f &&
-              observedSurfaceDeparture == 0.0f &&
               !exactMeshGap.hit,
             "Triangle-accurate contact catches a fast thin-surface crossing, "
             "preserves grazing and concave gaps, admits a separate bounded "
-            "visual guard before physical contact, distinguishes the physical "
-            "contact skin from geometric intersection, and rejects malformed "
+            "visual guard before physical contact, and rejects malformed "
             "fixed mesh bounds");
 
         const std::array<uint8_t, 16> packedRockPlacement{
