@@ -15116,13 +15116,8 @@ namespace
                     g_halo3ContactBodyLocalWeaponAnchor);
                 publishBodyFollow(closestHandle);
             }
-            // A fallback normal is not authoritative enough for a native
-            // rigid-body impulse, but the visual constraint above is accepted
-            // only after the complete authored geometry proves its final pose
-            // clear. Publish that verified kinematic pose so a single
-            // unreliable-normal sample cannot expose the uncorrected weapon
-            // inside the target.
-            if (bodyConstraint.constrained)
+            if (bodyConstraint.constrained &&
+                !visualConstraintUsesFallbackNormal)
                 publishApprovedVisiblePose();
             if (bodyConstraint.constrained &&
                 visualConstraintUsesFallbackNormal)
