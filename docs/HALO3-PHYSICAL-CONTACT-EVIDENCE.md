@@ -1905,15 +1905,21 @@ pose is safe only when both the complete triangle surface and every authored
 solid child report separation. SteamVR was restored to the normal settings
 hash above.
 
-The replacement uses that measured union as its final proof. Triangle sweeps
-still select the exact contact point and reliable impulse normal. A closed-
-solid containment hit is admitted only as a visual contact and cannot drive an
-impulse or melee. For a selected rigid target, a bounded outward search tests
-each candidate pose against both the complete visible weapon/target triangle
-surfaces and the complete authored solid compounds. It publishes a correction
-only after both are clear; failure holds the prior constraint instead of
-falling back to an approximate plane. Multi-node animated enemy contact keeps
-its separate native melee path.
+Candidate `413719253eb27a0e65206548b65886cd580ee8ab` tested both the exact
+triangle surfaces and solid compounds before accepting each new blocked pose.
+Its package was
+`out/candidates/4137192-h3-physical-contact-20260812-041955039Z`, with DLL
+SHA-256 `C76405BC6FC9378C8CA719BDEB5C0AB8C9A1B5C642386E7AC27EC95E2C514E3E`.
+The strict Valhalla replay still failed; its preserved log is
+`out/debug-openxr/20260812-042049214Z-visible-weapon-gap.log`, SHA-256
+`5C9D83387EEC9914927076DA826963933303E89DD9C908C701DB7D04863E2459`.
+It recorded three direct surface overlaps after only 26 palettes and 13
+corrected palettes, while the solid counter remained zero. The accepted blocked
+poses were checked, but the separate dynamic-body release path still eased the
+published offset toward zero without checking each intermediate pose. That
+unchecked release can cross the target surface. The candidate is rejected and
+reverted. Normal SteamVR settings were restored with the byte-identical hash
+above.
 
 ## Verification boundary
 

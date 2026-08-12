@@ -10363,21 +10363,6 @@ int main()
                 1.0f / 120.0f, 0.5f);
         PhysicalContactTransform bodyPrevious{};
         PhysicalContactTransform bodyIntended{};
-        PhysicalContactTransform verifiedIntended{};
-        const auto overlappingUntil = [](const PhysicalContactTransform& pose) {
-            return pose.position.x < 0.35f;
-        };
-        const PhysicalContactWallConstraint verifiedSeparation =
-            PhysicalContactVerifiedSeparationOffset(
-                verifiedIntended, {1.0f, 0.0f, 0.0f},
-                0.02f, 0.005f, 1.0f, overlappingUntil);
-        PhysicalContactTransform verifiedClear = verifiedIntended;
-        verifiedClear.position =
-            verifiedClear.position + verifiedSeparation.offset;
-        const PhysicalContactWallConstraint verifiedWrongDirection =
-            PhysicalContactVerifiedSeparationOffset(
-                verifiedIntended, {-1.0f, 0.0f, 0.0f},
-                0.02f, 0.005f, 0.50f, overlappingUntil);
         bodyIntended.position = {1.0f, 0.0f, 0.0f};
         const PhysicalContactWallConstraint bodyTunnel =
             PhysicalContactDynamicBodyOffset(
@@ -10442,10 +10427,6 @@ int main()
               std::fabs(bodyReblocked.x + 0.35f) < 1.0e-6f &&
               PhysicalContactLengthSquared(bodyInvalidObservation) <
                   1.0e-10f &&
-              verifiedSeparation.constrained &&
-              !overlappingUntil(verifiedClear) &&
-              verifiedSeparation.setbackWorldUnits > 0.35f &&
-              !verifiedWrongDirection.constrained &&
               bodyTunnel.constrained &&
               std::fabs(bodyTunnel.offset.x + 0.51f) < 1.0e-6f &&
               std::fabs(bodyTunnel.offset.y) < 1.0e-6f &&
@@ -10477,8 +10458,7 @@ int main()
             "vertices, while larger meshes rotate an evenly spread bounded "
             "face-centre sample set; "
             "dynamic bodies reject only inward travel while preserving slides, "
-            "hold exact correction across an unresolved query gap, accept only "
-            "a directly verified clear final pose, then release");
+            "hold exact correction across an unresolved query gap, then release");
 
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&
