@@ -193,6 +193,40 @@ inline PhysicalContactVec3 PhysicalContactInverseTransformPoint(
     return PhysicalContactInverseTransformVector(t, world - t.position);
 }
 
+// Advance a body-relative contact point across the short gap between the
+// simulation approval and the palette that consumes it. This is not a physics
+// prediction: it only prevents a fast target from entering a one-frame-old
+// safe weapon pose. Age and distance are both bounded.
+inline PhysicalContactVec3 PhysicalContactBodyFollowDelta(
+    PhysicalContactVec3 pointVelocityWorldUnitsPerSecond,
+    uint64_t sampleMs, uint64_t nowMs, float worldUnitsPerMeter,
+    float maximumAgeSeconds = 0.05f,
+    float maximumDistanceMeters = 0.25f)
+{
+    if (!PhysicalContactFinite(pointVelocityWorldUnitsPerSecond) ||
+        !sampleMs || nowMs < sampleMs ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f ||
+        !std::isfinite(maximumAgeSeconds) || maximumAgeSeconds <= 0.0f ||
+        maximumAgeSeconds > 0.1f ||
+        !std::isfinite(maximumDistanceMeters) ||
+        maximumDistanceMeters <= 0.0f || maximumDistanceMeters > 1.0f)
+        return {};
+    const float elapsedSeconds =
+        static_cast<float>(nowMs - sampleMs) * 0.001f;
+    if (!std::isfinite(elapsedSeconds) ||
+        elapsedSeconds > maximumAgeSeconds)
+        return {};
+    PhysicalContactVec3 delta =
+        pointVelocityWorldUnitsPerSecond * elapsedSeconds;
+    const float maximumDistance = maximumDistanceMeters * worldUnitsPerMeter;
+    const float distance = PhysicalContactLength(delta);
+    if (!PhysicalContactFinite(delta) || !std::isfinite(distance))
+        return {};
+    if (distance > maximumDistance)
+        delta = delta * (maximumDistance / distance);
+    return PhysicalContactFinite(delta) ? delta : PhysicalContactVec3{};
+}
+
 inline bool PhysicalContactSegmentIntersectsExpandedAabb(
     PhysicalContactVec3 start, PhysicalContactVec3 end,
     PhysicalContactVec3 minimum, PhysicalContactVec3 maximum,

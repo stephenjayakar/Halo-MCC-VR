@@ -1057,6 +1057,55 @@ namespace
         std::atomic<float> offset[3]{};
     };
     Halo3WeaponWallPublication g_halo3WeaponWall;
+    struct Halo3WeaponBodyFollowPublication
+    {
+        std::atomic<uint32_t> sequence{0};
+        std::atomic<uint64_t> sampleMs{0};
+        std::atomic<uint64_t> poseSerial{0};
+        std::atomic<float> pointVelocity[3]{};
+    };
+    Halo3WeaponBodyFollowPublication g_halo3WeaponBodyFollow;
+
+    void Halo3PublishWeaponBodyFollow(
+        PhysicalContactVec3 pointVelocity, uint64_t sampleMs,
+        uint64_t poseSerial)
+    {
+        auto& published = g_halo3WeaponBodyFollow;
+        published.sequence.fetch_add(1, std::memory_order_acq_rel);
+        published.sampleMs.store(sampleMs, std::memory_order_relaxed);
+        published.poseSerial.store(poseSerial, std::memory_order_relaxed);
+        published.pointVelocity[0].store(
+            pointVelocity.x, std::memory_order_relaxed);
+        published.pointVelocity[1].store(
+            pointVelocity.y, std::memory_order_relaxed);
+        published.pointVelocity[2].store(
+            pointVelocity.z, std::memory_order_relaxed);
+        published.sequence.fetch_add(1, std::memory_order_release);
+    }
+
+    bool Halo3ReadWeaponBodyFollow(
+        PhysicalContactVec3& pointVelocity, uint64_t& sampleMs,
+        uint64_t& poseSerial)
+    {
+        auto& published = g_halo3WeaponBodyFollow;
+        for (int attempt = 0; attempt < 2; ++attempt)
+        {
+            const uint32_t before = published.sequence.load(
+                std::memory_order_acquire);
+            if (before & 1u)
+                continue;
+            sampleMs = published.sampleMs.load(std::memory_order_relaxed);
+            poseSerial = published.poseSerial.load(std::memory_order_relaxed);
+            pointVelocity = {
+                published.pointVelocity[0].load(std::memory_order_relaxed),
+                published.pointVelocity[1].load(std::memory_order_relaxed),
+                published.pointVelocity[2].load(std::memory_order_relaxed)};
+            if (published.sequence.load(std::memory_order_acquire) == before)
+                return sampleMs != 0 && poseSerial != 0 &&
+                    PhysicalContactFinite(pointVelocity);
+        }
+        return false;
+    }
 
     void Halo3PublishWeaponWallOffset(
         PhysicalContactVec3 offset, uint64_t sampleMs)
@@ -5681,6 +5730,32 @@ namespace
                     memcpy(destination, approvedNodes.data(),
                            static_cast<size_t>(renderNodeCount) *
                                sizeof(BoneMatrix));
+                    PhysicalContactVec3 bodyPointVelocity{};
+                    uint64_t bodyFollowMs = 0;
+                    uint64_t bodyFollowSerial = 0;
+                    const float worldScale =
+                        g_worldScale.load(std::memory_order_relaxed);
+                    if (approvedCorrected && std::isfinite(worldScale) &&
+                        worldScale >= 0.05f && worldScale <= 2.0f &&
+                        Halo3ReadWeaponBodyFollow(
+                            bodyPointVelocity, bodyFollowMs,
+                            bodyFollowSerial) &&
+                        bodyFollowSerial == approvedSerial)
+                    {
+                        const PhysicalContactVec3 bodyFollowDelta =
+                            PhysicalContactBodyFollowDelta(
+                                bodyPointVelocity, bodyFollowMs, nowMs,
+                                worldScale);
+                        for (int node = 0; node < renderNodeCount; ++node)
+                        {
+                            destination[node].translation[0] +=
+                                bodyFollowDelta.x;
+                            destination[node].translation[1] +=
+                                bodyFollowDelta.y;
+                            destination[node].translation[2] +=
+                                bodyFollowDelta.z;
+                        }
+                    }
                     displayedSerial = approvedSerial;
                     displayedCorrected = approvedCorrected;
                     g_halo3ContactHeldPalettes.fetch_add(
@@ -11062,6 +11137,7 @@ namespace
         g_halo3ContactBodyLocalWeaponAnchor = {};
         g_halo3ContactBodyAnchorHandle = -1;
         g_halo3ContactBodyAnchorValid = false;
+        Halo3PublishWeaponBodyFollow({}, 0, 0);
         g_halo3ContactPreviousWallTransform = {};
         g_halo3ContactWallWeaponHandle = -1;
         g_halo3ContactPreviousWallPoseValid = false;
@@ -13907,6 +13983,34 @@ namespace
                 }
                 Halo3PublishWeaponWallOffset(
                     g_halo3ContactWallOffset + g_halo3ContactBodyOffset, nowMs);
+                if (observation ==
+                        PhysicalContactDynamicBodyObservation::Separated &&
+                    PhysicalContactLengthSquared(
+                        g_halo3ContactBodyOffset) <= 1.0e-10f)
+                    Halo3PublishWeaponBodyFollow({}, 0, 0);
+            };
+            const auto publishBodyFollow = [&] (
+                int32_t targetHandle,
+                const PhysicalContactTransform& targetTransform,
+                PhysicalContactVec3 correctedWeaponPosition)
+            {
+                if (targetHandle == -1 || !g_halo3ObjectGetVelocities ||
+                    !PhysicalContactTransformFinite(targetTransform) ||
+                    !PhysicalContactFinite(correctedWeaponPosition))
+                    return;
+                float linear[3]{}, angular[3]{};
+                g_halo3ObjectGetVelocities(targetHandle, linear, angular);
+                const PhysicalContactVec3 linearVelocity{
+                    linear[0], linear[1], linear[2]};
+                const PhysicalContactVec3 angularVelocity{
+                    angular[0], angular[1], angular[2]};
+                const PhysicalContactVec3 pointVelocity = linearVelocity +
+                    PhysicalContactCross(
+                        angularVelocity,
+                        correctedWeaponPosition - targetTransform.position);
+                if (PhysicalContactFinite(pointVelocity))
+                    Halo3PublishWeaponBodyFollow(
+                        pointVelocity, nowMs, proposalSerial);
             };
             if (weaponHandle != g_halo3ContactWeaponHandle)
             {
@@ -13923,6 +14027,7 @@ namespace
                 g_halo3ContactBodySetbackMeters.store(
                     0.0f, std::memory_order_relaxed);
                 Halo3PublishWeaponWallOffset(g_halo3ContactWallOffset, nowMs);
+                Halo3PublishWeaponBodyFollow({}, 0, 0);
             }
             if (!g_halo3ContactPreviousPoseValid)
             {
@@ -14447,6 +14552,12 @@ namespace
                     updateBodyConstraint(
                         PhysicalContactDynamicBodyObservation::Blocked,
                         followedOffset, constrainedBodyTargetHandle);
+                    publishBodyFollow(
+                        constrainedBodyTargetHandle,
+                        constrainedBodyTargetTransform,
+                        intendedWeaponTransform.position +
+                            g_halo3ContactWallOffset +
+                            g_halo3ContactBodyOffset);
                     publishApprovedVisiblePose();
                     g_halo3ContactDebounce.EndSample(nowMs);
                     return;
@@ -14553,6 +14664,12 @@ namespace
                                         Blocked,
                                     verifiedGuard.offset,
                                     closestVisualGuardHandle);
+                                publishBodyFollow(
+                                    closestVisualGuardHandle,
+                                    guardTargetTransform,
+                                    intendedWeaponTransform.position +
+                                        g_halo3ContactWallOffset +
+                                        g_halo3ContactBodyOffset);
                                 publishApprovedVisiblePose();
                                 g_halo3ContactDebounce.EndSample(nowMs);
                                 return;
@@ -14894,6 +15011,9 @@ namespace
                 g_halo3ContactBodyAnchorHandle = closestHandle;
                 g_halo3ContactBodyAnchorValid = PhysicalContactFinite(
                     g_halo3ContactBodyLocalWeaponAnchor);
+                publishBodyFollow(
+                    closestHandle, closestTargetTransform,
+                    correctedWeaponPosition);
             }
             if (bodyConstraint.constrained &&
                 !visualConstraintUsesFallbackNormal)
