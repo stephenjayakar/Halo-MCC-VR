@@ -323,7 +323,7 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
         'visible-weapon-gap' {
             return (Test-DetailedTargetGeometrySeen $Text) -and
                 $Text -match
-                    'H3 physical contact DEBUG VISIBLE REPLAY:.*exactPalettes=([1-9][0-9]*).*directOverlaps=([1-9][0-9]*).*directSeparations=([1-9][0-9]*).*gapRange=\((-0\.0[4-9][0-9]*|-0\.[1-9][0-9]*) (0\.0[0-9]*|0\.[1-9][0-9]*)\)m'
+                    'H3 physical contact DEBUG VISIBLE REPLAY:.*exactPalettes=([1-9][0-9]*).*correctedPalettes=([1-9][0-9]*).*directOverlaps=0 directSeparations=([1-9][0-9]*)'
         }
         'wall' {
             return $Text -match

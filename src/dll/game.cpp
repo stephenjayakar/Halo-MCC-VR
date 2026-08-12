@@ -968,6 +968,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactDebugVisiblePalettes{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleExactPublishes{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleExactPalettes{0};
+    std::atomic<uint64_t> g_halo3ContactDebugVisibleCorrectedPalettes{0};
     std::atomic<bool> g_halo3ContactDebugVisibleMeasurementStarted{false};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectSeparations{0};
@@ -5459,6 +5460,27 @@ namespace
                             desiredRoot, desiredMs, desiredExact) &&
                         nowMs >= desiredMs && nowMs - desiredMs <= 100)
                     {
+                        bool correctionApplied = false;
+                        if (desiredExact)
+                        {
+                            PhysicalContactVec3 correction{};
+                            uint64_t correctionMs = 0;
+                            const float worldScale =
+                                g_worldScale.load(std::memory_order_relaxed);
+                            if (Halo3ReadWeaponWallOffset(
+                                    correction, correctionMs) &&
+                                PhysicalContactPublishedOffsetUsable(
+                                    correction, correctionMs, nowMs,
+                                    worldScale) &&
+                                PhysicalContactLengthSquared(correction) >
+                                    1.0e-10f)
+                            {
+                                desiredRoot.translation[0] += correction.x;
+                                desiredRoot.translation[1] += correction.y;
+                                desiredRoot.translation[2] += correction.z;
+                                correctionApplied = true;
+                            }
+                        }
                         BoneMatrix inverseRoot{}, delta{};
                         std::array<BoneMatrix,
                                    Halo3VisibleWeaponPosePublication::
@@ -5482,6 +5504,9 @@ namespace
                                 1, std::memory_order_relaxed);
                             if (desiredExact)
                                 g_halo3ContactDebugVisibleExactPalettes.fetch_add(
+                                    1, std::memory_order_relaxed);
+                            if (correctionApplied)
+                                g_halo3ContactDebugVisibleCorrectedPalettes.fetch_add(
                                     1, std::memory_order_relaxed);
                         }
                     }
@@ -5782,8 +5807,8 @@ namespace
             uint64_t wallSampleMs = 0;
             const uint64_t nowMs = GetTickCount64();
             if (Halo3ReadWeaponWallOffset(wallOffset, wallSampleMs) &&
-                nowMs >= wallSampleMs && nowMs - wallSampleMs <= 100 &&
-                PhysicalContactLengthSquared(wallOffset) <= s * s)
+                PhysicalContactPublishedOffsetUsable(
+                    wallOffset, wallSampleMs, nowMs, s))
             {
                 pos[0] += wallOffset.x;
                 pos[1] += wallOffset.y;
@@ -12576,6 +12601,8 @@ namespace
                     // pair. Four exact palette consumptions cover both eyes and
                     // one complete follow-up pair on the observed retail path.
                     if (g_halo3ContactDebugVisibleExactPalettes.load(
+                            std::memory_order_relaxed) >= 4 &&
+                        g_halo3ContactDebugVisibleCorrectedPalettes.load(
                             std::memory_order_relaxed) >= 4)
                     {
                         if (!g_halo3ContactDebugVisibleMeasurementStarted.exchange(
@@ -13354,7 +13381,7 @@ namespace
             PhysicalContactTransform intendedWeaponTransform = weaponTransform;
             PhysicalContactVec3 intendedGrip = grip;
             PhysicalContactVec3 intendedTip = tip;
-            if (!debugRig)
+            if (!debugRig || debugExactVisibleReplay)
             {
                 // The rendered palette contains the previous frame's visual
                 // wall/body correction. Recover the controller-intended pose,
@@ -15299,6 +15326,7 @@ namespace
             {
                 LOG("H3 physical contact DEBUG VISIBLE REPLAY: "
                     "palettes=%llu exactPublishes=%llu exactPalettes=%llu "
+                    "correctedPalettes=%llu "
                     "directOverlaps=%llu directSeparations=%llu "
                     "gapRange=(%.4f %.4f)m",
                     (unsigned long long)
@@ -15309,6 +15337,9 @@ namespace
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleExactPalettes.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugVisibleCorrectedPalettes.load(
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleDirectOverlaps.load(
@@ -20140,6 +20171,8 @@ namespace
         g_halo3ContactDebugVisibleExactPublishes.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleExactPalettes.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugVisibleCorrectedPalettes.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleMeasurementStarted.store(
             false, std::memory_order_release);

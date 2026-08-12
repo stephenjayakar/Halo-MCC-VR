@@ -1897,6 +1897,20 @@ inline PhysicalContactVec3 PhysicalContactUpdateWallOffset(
     return currentOffset * ((currentLength - release) / currentLength);
 }
 
+inline bool PhysicalContactPublishedOffsetUsable(
+    PhysicalContactVec3 offset, uint64_t sampleMs, uint64_t nowMs,
+    float worldUnitsPerMeter, float maximumMeters = 1.0f)
+{
+    if (!PhysicalContactFinite(offset) || !sampleMs || nowMs < sampleMs ||
+        nowMs - sampleMs > 100 || !std::isfinite(worldUnitsPerMeter) ||
+        worldUnitsPerMeter <= 0.0f || !std::isfinite(maximumMeters) ||
+        maximumMeters <= 0.0f)
+        return false;
+    const float maximumWorldUnits = maximumMeters * worldUnitsPerMeter;
+    return PhysicalContactLengthSquared(offset) <=
+        maximumWorldUnits * maximumWorldUnits;
+}
+
 enum class PhysicalContactDynamicBodyObservation : uint8_t
 {
     Separated,

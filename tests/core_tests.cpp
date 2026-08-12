@@ -10305,6 +10305,22 @@ int main()
         const PhysicalContactVec3 wallBadTiming =
             PhysicalContactUpdateWallOffset(
                 {-0.40f, 0, 0}, {}, false, 0.20f, 0.5f);
+        const bool publishedOffsetFresh =
+            PhysicalContactPublishedOffsetUsable(
+                {-0.49f, 0, 0}, 1000, 1100, 0.5f);
+        const bool publishedOffsetStale =
+            PhysicalContactPublishedOffsetUsable(
+                {-0.49f, 0, 0}, 1000, 1101, 0.5f);
+        const bool publishedOffsetFuture =
+            PhysicalContactPublishedOffsetUsable(
+                {-0.49f, 0, 0}, 1101, 1100, 0.5f);
+        const bool publishedOffsetTooLarge =
+            PhysicalContactPublishedOffsetUsable(
+                {-0.51f, 0, 0}, 1000, 1100, 0.5f);
+        const bool publishedOffsetNonFinite =
+            PhysicalContactPublishedOffsetUsable(
+                {std::numeric_limits<float>::quiet_NaN(), 0, 0},
+                1000, 1100, 0.5f);
         const auto bodyNoTargetObservation =
             PhysicalContactDynamicBodyObservationForTarget(
                 -1, false, false, false);
@@ -10391,6 +10407,9 @@ int main()
               std::fabs(wallRelease.x + 0.325f) < 1.0e-6f &&
               PhysicalContactLengthSquared(wallReleased) < 1.0e-10f &&
               PhysicalContactLengthSquared(wallBadTiming) < 1.0e-10f &&
+              publishedOffsetFresh && !publishedOffsetStale &&
+              !publishedOffsetFuture && !publishedOffsetTooLarge &&
+              !publishedOffsetNonFinite &&
               bodyNoTargetObservation ==
                   PhysicalContactDynamicBodyObservation::Separated &&
               bodyRemovedObservation ==
