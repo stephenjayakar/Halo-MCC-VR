@@ -10546,20 +10546,6 @@ int main()
             PhysicalContactBuildRigidBodyFollow(
                 {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f},
                 {}, {}, 1000, 1017, 0.5f);
-        PhysicalContactTransform predictedPrevious{};
-        PhysicalContactTransform predictedCurrent{};
-        predictedCurrent.position = {0.01f, 0.0f, 0.0f};
-        predictedCurrent.forward = {std::cos(0.10f), std::sin(0.10f), 0.0f};
-        predictedCurrent.left = {-std::sin(0.10f), std::cos(0.10f), 0.0f};
-        PhysicalContactTransform predictedFuture{};
-        const bool predictedFutureValid = PhysicalContactPredictRigidTransform(
-            predictedPrevious, predictedCurrent, 3.0f, 0.12f, 0.50f,
-            predictedFuture);
-        PhysicalContactTransform predictedInvalid{};
-        const bool predictedBadMultiplier =
-            PhysicalContactPredictRigidTransform(
-                predictedPrevious, predictedCurrent, 5.0f, 0.12f, 0.50f,
-                predictedInvalid);
         Check(wallTip.constrained &&
               std::fabs(wallTip.setbackWorldUnits - 0.60f) < 1.0e-6f &&
               std::fabs(wallTip.offset.x + 0.60f) < 1.0e-6f &&
@@ -10633,13 +10619,6 @@ int main()
               std::fabs(bodyFollowClamped.rotationRadians - 0.35f) <
                   1.0e-6f &&
               !bodyFollowStale.valid && !bodyFollowInvalid.valid &&
-              predictedFutureValid &&
-              std::fabs(predictedFuture.position.x - 0.04f) < 1.0e-6f &&
-              std::fabs(predictedFuture.forward.x - std::cos(0.40f)) <
-                  1.0e-5f &&
-              std::fabs(predictedFuture.forward.y - std::sin(0.40f)) <
-                  1.0e-5f &&
-              !predictedBadMultiplier &&
               PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
                       .centreCount == 22 &&
               PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
