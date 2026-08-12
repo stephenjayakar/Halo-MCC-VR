@@ -6942,6 +6942,7 @@ namespace
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
+    constexpr float kHalo3ContactMaximumMotionGuardMeters = 0.128f;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<uint32_t> g_halo3ContactTargetMotionType{0};
@@ -14178,6 +14179,10 @@ namespace
             int32_t closestHandle = -1;
             int32_t closestVisualGuardHandle = -1;
             uint32_t closestVisualGuardShapeSource = 0;
+            float closestVisualGuardRadiusMeters =
+                kHalo3ContactVisualGuardRadiusMeters;
+            float closestTargetGuardRadiusMeters =
+                kHalo3ContactVisualGuardRadiusMeters;
             uint16_t closestMaterial = 0;
             int32_t nativeMaterialHandle = -1;
             uint16_t nativeMaterial = 0;
@@ -14341,7 +14346,8 @@ namespace
                 const PhysicalContactHit proxy = PhysicalContactSweepPoint(
                     previousWeaponTransform.position,
                     intendedWeaponTransform.position, targetCenter,
-                    weaponBroadRadius + radius);
+                    weaponBroadRadius + radius +
+                        kHalo3ContactMaximumMotionGuardMeters * worldScale);
                 if (!proxy.hit)
                 {
                     if (isConstrainedBodyTarget)
@@ -14363,6 +14369,27 @@ namespace
                     if (isConstrainedBodyTarget)
                         constrainedBodyTargetGeometryResolved = true;
                     continue;
+                }
+                float targetVisualGuardRadiusMeters =
+                    kHalo3ContactVisualGuardRadiusMeters;
+                if (g_halo3ObjectGetVelocities)
+                {
+                    float targetLinear[3]{}, targetAngular[3]{};
+                    g_halo3ObjectGetVelocities(
+                        handle, targetLinear, targetAngular);
+                    const float maximumReserveMeters = std::clamp(
+                        0.05f / worldScale -
+                            kHalo3ContactVisualGuardRadiusMeters,
+                        0.0f, 0.12f);
+                    targetVisualGuardRadiusMeters =
+                        PhysicalContactMovingTargetGuardRadiusMeters(
+                            kHalo3ContactVisualGuardRadiusMeters,
+                            {targetLinear[0], targetLinear[1],
+                             targetLinear[2]},
+                            {targetAngular[0], targetAngular[1],
+                             targetAngular[2]},
+                            radius, worldScale, 0.10f,
+                            maximumReserveMeters);
                 }
                 PhysicalContactCompoundHit authored{};
                 PhysicalContactCompoundHit authoredVisualGuard{};
@@ -14406,7 +14433,7 @@ namespace
                                 intendedWeaponTransform,
                                 targetTriangleMesh, authoredTargetTransform,
                                 kHalo3ContactTriangleStepMeters * worldScale,
-                                kHalo3ContactVisualGuardRadiusMeters *
+                                targetVisualGuardRadiusMeters *
                                     worldScale);
                         static_cast<PhysicalContactConvexHit&>(authored) =
                             meshHit;
@@ -14498,7 +14525,7 @@ namespace
                                 intendedWeaponTransform,
                                 targetShape, authoredTargetTransform,
                                 kHalo3ContactTriangleStepMeters * worldScale,
-                                kHalo3ContactVisualGuardRadiusMeters *
+                                targetVisualGuardRadiusMeters *
                                     worldScale);
                         static_cast<PhysicalContactConvexHit&>(authored) =
                             meshHit;
@@ -14587,6 +14614,8 @@ namespace
                     closestVisualGuard = authoredVisualGuard;
                     closestVisualGuardHandle = handle;
                     closestVisualGuardShapeSource = targetShapeSource;
+                    closestVisualGuardRadiusMeters =
+                        targetVisualGuardRadiusMeters;
                 }
                 if (!authored.hit ||
                     (closest.hit &&
@@ -14609,6 +14638,8 @@ namespace
                 closestTargetShapeSource = targetShapeSource;
                 closestTargetTriangleCount = targetTriangleCount;
                 closestTargetBodyIndex = targetBodyIndex;
+                closestTargetGuardRadiusMeters =
+                    targetVisualGuardRadiusMeters;
                 if (targetShapeSource == 3)
                     g_halo3ContactAnimatedBodyHits.fetch_add(
                         1, std::memory_order_relaxed);
@@ -14735,7 +14766,7 @@ namespace
                                                  guardTargetTransform,
                                                  kHalo3ContactTriangleStepMeters *
                                                      worldScale,
-                                                 kHalo3ContactVisualGuardRadiusMeters *
+                                                 closestVisualGuardRadiusMeters *
                                                      worldScale).hit
                                            : PhysicalContactSweepTriangleMeshCompound(
                                                  weaponTriangleMesh,
@@ -14744,7 +14775,7 @@ namespace
                                                  guardTargetTransform,
                                                  kHalo3ContactTriangleStepMeters *
                                                      worldScale,
-                                                 kHalo3ContactVisualGuardRadiusMeters *
+                                                 closestVisualGuardRadiusMeters *
                                                      worldScale).hit)
                                     : false;
                                 return surfaceOverlap ||
@@ -14759,7 +14790,7 @@ namespace
                                     intendedWeaponTransform,
                                     closestVisualGuard.fraction,
                                     closestVisualGuard.normal, 0.0f,
-                                    kHalo3ContactVisualGuardRadiusMeters,
+                                    closestVisualGuardRadiusMeters,
                                     worldScale);
                             const PhysicalContactWallConstraint verifiedGuard =
                                 PhysicalContactVerifiedSeparationOffset(
@@ -15038,7 +15069,7 @@ namespace
                                           verifiedTargetTransform,
                                           kHalo3ContactTriangleStepMeters *
                                               worldScale,
-                                          kHalo3ContactVisualGuardRadiusMeters *
+                                          closestTargetGuardRadiusMeters *
                                               worldScale).hit
                                     : PhysicalContactSweepTriangleMeshCompound(
                                           weaponTriangleMesh, candidate,
@@ -15046,7 +15077,7 @@ namespace
                                           verifiedTargetTransform,
                                           kHalo3ContactTriangleStepMeters *
                                               worldScale,
-                                          kHalo3ContactVisualGuardRadiusMeters *
+                                          closestTargetGuardRadiusMeters *
                                               worldScale).hit;
                             }
                             return surfaceOverlap ||
