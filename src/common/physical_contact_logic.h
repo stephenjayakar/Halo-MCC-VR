@@ -1978,8 +1978,10 @@ inline PhysicalContactVec3 PhysicalContactUpdateDynamicBodyOffset(
         return currentOffset;
     if (observation != PhysicalContactDynamicBodyObservation::Separated)
         return {};
-    return PhysicalContactUpdateWallOffset(
-        currentOffset, {}, false, elapsedSeconds, worldUnitsPerMeter);
+    // Separated is emitted only after the tracked target is gone or its exact
+    // current triangle and solid geometry are both clear. Interpolating toward
+    // zero creates untested intermediate poses that can cross the target.
+    return {};
 }
 
 // Keep the rendered kinematic weapon on the target-facing side of an exact
@@ -2028,6 +2030,99 @@ inline PhysicalContactWallConstraint PhysicalContactDynamicBodyOffset(
 
     result.offset = outward * setback;
     result.setbackWorldUnits = setback;
+    result.constrained = PhysicalContactFinite(result.offset);
+    return result;
+}
+
+// Validate a proposed visual setback against the complete caller-supplied
+// geometry predicate. This covers both a swept surface hit whose final pose is
+// outside and an end pose already contained in a closed body. The fixed search
+// count keeps the callback bounded; no correction is returned unless its final
+// pose is directly proven clear.
+template <typename IntersectsAt>
+inline PhysicalContactWallConstraint PhysicalContactVerifiedSeparationOffset(
+    const PhysicalContactTransform& intendedWeaponTransform,
+    PhysicalContactVec3 outwardDirection,
+    float proposedOffsetWorldUnits,
+    float clearanceWorldUnits,
+    float maximumOffsetWorldUnits,
+    IntersectsAt intersectsAt)
+{
+    PhysicalContactWallConstraint result{};
+    if (!PhysicalContactTransformFinite(intendedWeaponTransform) ||
+        !PhysicalContactFinite(outwardDirection) ||
+        !std::isfinite(proposedOffsetWorldUnits) ||
+        proposedOffsetWorldUnits < 0.0f ||
+        !std::isfinite(clearanceWorldUnits) || clearanceWorldUnits < 0.0f ||
+        !std::isfinite(maximumOffsetWorldUnits) ||
+        maximumOffsetWorldUnits <= 0.0f ||
+        clearanceWorldUnits > maximumOffsetWorldUnits)
+        return result;
+    const PhysicalContactVec3 outward = PhysicalContactNormalize(
+        outwardDirection, {});
+    if (PhysicalContactLengthSquared(outward) <= 1.0e-12f)
+        return result;
+
+    const auto overlapsAtDistance = [&](float distance) {
+        PhysicalContactTransform candidate = intendedWeaponTransform;
+        candidate.position = candidate.position + outward * distance;
+        return intersectsAt(candidate);
+    };
+    const bool intendedOverlaps = overlapsAtDistance(0.0f);
+    if (!intendedOverlaps && proposedOffsetWorldUnits <= 1.0e-5f)
+        return result;
+
+    float low = intendedOverlaps ? 0.0f : std::clamp(
+        proposedOffsetWorldUnits, 1.0e-5f, maximumOffsetWorldUnits);
+    float high = std::clamp(
+        std::max(proposedOffsetWorldUnits, clearanceWorldUnits),
+        1.0e-5f, maximumOffsetWorldUnits);
+    bool highIsClear = !overlapsAtDistance(high);
+    if (highIsClear && intendedOverlaps)
+    {
+        low = 0.0f;
+    }
+    else if (!highIsClear)
+    {
+        low = high;
+        for (int expansion = 0; expansion < 7 && !highIsClear; ++expansion)
+        {
+            const float expanded = std::min(
+                maximumOffsetWorldUnits,
+                std::max(high * 2.0f, high + clearanceWorldUnits));
+            if (expanded <= high + 1.0e-6f)
+                break;
+            high = expanded;
+            highIsClear = !overlapsAtDistance(high);
+            if (!highIsClear)
+                low = high;
+        }
+    }
+    if (!highIsClear)
+        return result;
+
+    // Only an overlapping low endpoint supports a monotonic boundary search.
+    // A tunnelling sweep can end clear on the far side; its already-clear
+    // proposed setback must be preserved rather than bisected through space.
+    if (overlapsAtDistance(low))
+    {
+        for (int iteration = 0; iteration < 10; ++iteration)
+        {
+            const float middle = (low + high) * 0.5f;
+            if (overlapsAtDistance(middle))
+                low = middle;
+            else
+                high = middle;
+        }
+    }
+    const float padded = std::min(
+        maximumOffsetWorldUnits, high + clearanceWorldUnits);
+    if (padded > high && !overlapsAtDistance(padded))
+        high = padded;
+    if (overlapsAtDistance(high))
+        return result;
+    result.offset = outward * high;
+    result.setbackWorldUnits = high;
     result.constrained = PhysicalContactFinite(result.offset);
     return result;
 }

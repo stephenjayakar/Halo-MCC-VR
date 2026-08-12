@@ -1921,6 +1921,16 @@ unchecked release can cross the target surface. The candidate is rejected and
 reverted. Normal SteamVR settings were restored with the byte-identical hash
 above.
 
+The replacement retains the same measured union for blocked poses and applies
+it to release as well. Triangle sweeps still select the exact contact point and
+reliable impulse normal. Closed-solid containment stays visual-only. A new
+blocked correction is published only when its final pose is clear in both
+representations. When the controller-intended pose becomes clear in both, the
+dynamic-body offset drops directly to zero instead of easing through unchecked
+intermediate poses. If exact geometry is missing or the intended pose is not
+clear, the last proven correction is held. Multi-node animated enemy contact
+keeps its separate native melee path.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
