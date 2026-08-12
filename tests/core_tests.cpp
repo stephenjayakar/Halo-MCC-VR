@@ -9680,10 +9680,25 @@ int main()
         const bool resetRearmed = first && target && target->meleeArmed &&
             !target->contactNormalValid;
         debounce.EndSample(1200);
-        Check(initial && held && gapHeld && rearmed && resetRearmed,
+        PhysicalContactDebounce uncertainDebounce;
+        uncertainDebounce.BeginSample();
+        target = uncertainDebounce.Touch(0x12340008, 2000, &first);
+        target->meleeArmed = false;
+        uncertainDebounce.EndSample(2000);
+        uncertainDebounce.BeginSample();
+        const bool uncertainPreserved =
+            uncertainDebounce.PreserveUncertainContact(0x12340008, 2200);
+        uncertainDebounce.EndSample(2200);
+        uncertainDebounce.BeginSample();
+        target = uncertainDebounce.Touch(0x12340008, 2201, &first);
+        const bool uncertainDidNotRearm = !first && target &&
+            !target->meleeArmed;
+        uncertainDebounce.EndSample(2201);
+        Check(initial && held && gapHeld && rearmed && resetRearmed &&
+              uncertainPreserved && uncertainDidNotRearm,
             "Per-target contact preserves the swept surface normal during "
-            "overlap and one-frame gaps, then rearms after 100 ms of real "
-            "separation or an explicit reset");
+            "overlap and uncertain geometry samples, then rearms only after "
+            "100 ms of confirmed separation or an explicit reset");
 
         PhysicalContactDebounce enemySwingDebounce;
         enemySwingDebounce.BeginSample();
@@ -10268,25 +10283,45 @@ int main()
         const PhysicalContactVec3 wallBadTiming =
             PhysicalContactUpdateWallOffset(
                 {-0.40f, 0, 0}, {}, false, 0.20f, 0.5f);
-        const PhysicalContactVec3 bodyGapHeld =
+        const auto bodyNoTargetObservation =
+            PhysicalContactDynamicBodyObservationForTarget(
+                -1, false, false, false);
+        const auto bodyRemovedObservation =
+            PhysicalContactDynamicBodyObservationForTarget(
+                0x12340001, false, false, false);
+        const auto bodyClearObservation =
+            PhysicalContactDynamicBodyObservationForTarget(
+                0x12340001, true, true, false);
+        const auto bodyUnresolvedObservation =
+            PhysicalContactDynamicBodyObservationForTarget(
+                0x12340001, true, false, false);
+        const auto bodyHitObservation =
+            PhysicalContactDynamicBodyObservationForTarget(
+                0x12340001, true, true, true);
+        const PhysicalContactVec3 bodyUncertainHeld =
             PhysicalContactUpdateDynamicBodyOffset(
-                {-0.20f, 0, 0}, {}, false, 1049, 1000,
+                {-0.20f, 0, 0}, {},
+                PhysicalContactDynamicBodyObservation::Uncertain,
                 1.0f / 120.0f, 0.5f);
-        const PhysicalContactVec3 bodyGapEdgeHeld =
+        const PhysicalContactVec3 bodyUncertainStillHeld =
             PhysicalContactUpdateDynamicBodyOffset(
-                {-0.20f, 0, 0}, {}, false, 1050, 1000,
+                {-0.20f, 0, 0}, {},
+                PhysicalContactDynamicBodyObservation::Uncertain,
                 1.0f / 120.0f, 0.5f);
-        const PhysicalContactVec3 bodyGapReleased =
+        const PhysicalContactVec3 bodySeparated =
             PhysicalContactUpdateDynamicBodyOffset(
-                {-0.20f, 0, 0}, {}, false, 1051, 1000,
+                {-0.20f, 0, 0}, {},
+                PhysicalContactDynamicBodyObservation::Separated,
                 1.0f / 120.0f, 0.5f);
-        const PhysicalContactVec3 bodyGapReblocked =
+        const PhysicalContactVec3 bodyReblocked =
             PhysicalContactUpdateDynamicBodyOffset(
-                {-0.20f, 0, 0}, {-0.35f, 0, 0}, true, 1051, 1000,
+                {-0.20f, 0, 0}, {-0.35f, 0, 0},
+                PhysicalContactDynamicBodyObservation::Blocked,
                 1.0f / 120.0f, 0.5f);
-        const PhysicalContactVec3 bodyGapInvalidClock =
+        const PhysicalContactVec3 bodyInvalidObservation =
             PhysicalContactUpdateDynamicBodyOffset(
-                {-0.20f, 0, 0}, {}, false, 999, 1000,
+                {-0.20f, 0, 0}, {},
+                static_cast<PhysicalContactDynamicBodyObservation>(99),
                 1.0f / 120.0f, 0.5f);
         PhysicalContactTransform bodyPrevious{};
         PhysicalContactTransform bodyIntended{};
@@ -10334,12 +10369,23 @@ int main()
               std::fabs(wallRelease.x + 0.325f) < 1.0e-6f &&
               PhysicalContactLengthSquared(wallReleased) < 1.0e-10f &&
               PhysicalContactLengthSquared(wallBadTiming) < 1.0e-10f &&
-              std::fabs(bodyGapHeld.x + 0.20f) < 1.0e-6f &&
-              std::fabs(bodyGapEdgeHeld.x + 0.20f) < 1.0e-6f &&
-              bodyGapReleased.x > -0.20f &&
-              bodyGapReleased.x < -0.18f &&
-              std::fabs(bodyGapReblocked.x + 0.35f) < 1.0e-6f &&
-              PhysicalContactLengthSquared(bodyGapInvalidClock) < 1.0e-10f &&
+              bodyNoTargetObservation ==
+                  PhysicalContactDynamicBodyObservation::Separated &&
+              bodyRemovedObservation ==
+                  PhysicalContactDynamicBodyObservation::Separated &&
+              bodyClearObservation ==
+                  PhysicalContactDynamicBodyObservation::Separated &&
+              bodyUnresolvedObservation ==
+                  PhysicalContactDynamicBodyObservation::Uncertain &&
+              bodyHitObservation ==
+                  PhysicalContactDynamicBodyObservation::Uncertain &&
+              std::fabs(bodyUncertainHeld.x + 0.20f) < 1.0e-6f &&
+              std::fabs(bodyUncertainStillHeld.x + 0.20f) < 1.0e-6f &&
+              bodySeparated.x > -0.20f &&
+              bodySeparated.x < -0.18f &&
+              std::fabs(bodyReblocked.x + 0.35f) < 1.0e-6f &&
+              PhysicalContactLengthSquared(bodyInvalidObservation) <
+                  1.0e-10f &&
               bodyTunnel.constrained &&
               std::fabs(bodyTunnel.offset.x + 0.51f) < 1.0e-6f &&
               std::fabs(bodyTunnel.offset.y) < 1.0e-6f &&

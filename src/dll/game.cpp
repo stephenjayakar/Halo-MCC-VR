@@ -6556,7 +6556,7 @@ namespace
     PhysicalContactVec3 g_halo3ContactBodyOffset{};
     uint64_t g_halo3ContactWallUpdateMs = 0;
     uint64_t g_halo3ContactBodyUpdateMs = 0;
-    uint64_t g_halo3ContactBodyLastContactMs = 0;
+    int32_t g_halo3ContactBodyTargetHandle = -1;
     PhysicalContactTransform g_halo3ContactPreviousWallTransform{};
     int32_t g_halo3ContactWallWeaponHandle = -1;
     bool g_halo3ContactPreviousWallPoseValid = false;
@@ -6591,7 +6591,7 @@ namespace
     std::atomic<float> g_halo3ContactWallSetbackMeters{0.0f};
     std::atomic<float> g_halo3ContactBodySetbackMeters{0.0f};
     std::atomic<uint64_t> g_halo3ContactBodyConstraints{0};
-    std::atomic<uint64_t> g_halo3ContactBodyGapHolds{0};
+    std::atomic<uint64_t> g_halo3ContactBodyUncertainHolds{0};
     std::atomic<float> g_halo3ContactBodyPeakSetbackMeters{0.0f};
     std::atomic<uint64_t> g_halo3ContactWallRays{0};
     std::atomic<uint64_t> g_halo3ContactWallMotionRays{0};
@@ -10832,7 +10832,7 @@ namespace
         g_halo3ContactBodyOffset = {};
         g_halo3ContactWallUpdateMs = 0;
         g_halo3ContactBodyUpdateMs = 0;
-        g_halo3ContactBodyLastContactMs = 0;
+        g_halo3ContactBodyTargetHandle = -1;
         g_halo3ContactPreviousWallTransform = {};
         g_halo3ContactWallWeaponHandle = -1;
         g_halo3ContactPreviousWallPoseValid = false;
@@ -10868,7 +10868,8 @@ namespace
         g_halo3ContactBodySetbackMeters.store(0.0f,
                                                std::memory_order_relaxed);
         g_halo3ContactBodyConstraints.store(0, std::memory_order_relaxed);
-        g_halo3ContactBodyGapHolds.store(0, std::memory_order_relaxed);
+        g_halo3ContactBodyUncertainHolds.store(
+            0, std::memory_order_relaxed);
         g_halo3ContactBodyPeakSetbackMeters.store(
             0.0f, std::memory_order_relaxed);
         g_halo3ContactWallVertices.store(0, std::memory_order_relaxed);
@@ -13365,7 +13366,9 @@ namespace
                 intendedTip = tip + intendedDelta;
             }
             const auto updateBodyConstraint = [&] (
-                bool constrained, PhysicalContactVec3 requestedOffset)
+                PhysicalContactDynamicBodyObservation observation,
+                PhysicalContactVec3 requestedOffset,
+                int32_t blockedTargetHandle = -1)
             {
                 const float bodyDt = g_halo3ContactBodyUpdateMs &&
                         nowMs > g_halo3ContactBodyUpdateMs
@@ -13374,23 +13377,24 @@ namespace
                               nowMs - g_halo3ContactBodyUpdateMs) * 0.001f,
                           0.1f)
                     : 0.0f;
-                if (constrained)
-                    g_halo3ContactBodyLastContactMs = nowMs;
-                const bool gapHeld = !constrained &&
-                    g_halo3ContactBodyLastContactMs &&
-                    nowMs >= g_halo3ContactBodyLastContactMs &&
-                    nowMs - g_halo3ContactBodyLastContactMs <=
-                        kPhysicalContactDynamicBodyGapHoldMs &&
+                const bool uncertainHeld = observation ==
+                        PhysicalContactDynamicBodyObservation::Uncertain &&
                     PhysicalContactLengthSquared(
                         g_halo3ContactBodyOffset) > 1.0e-10f;
                 g_halo3ContactBodyOffset =
                     PhysicalContactUpdateDynamicBodyOffset(
                         g_halo3ContactBodyOffset, requestedOffset,
-                        constrained, nowMs,
-                        g_halo3ContactBodyLastContactMs,
-                        bodyDt, worldScale);
-                if (gapHeld)
-                    g_halo3ContactBodyGapHolds.fetch_add(
+                        observation, bodyDt, worldScale);
+                if (observation ==
+                        PhysicalContactDynamicBodyObservation::Blocked)
+                    g_halo3ContactBodyTargetHandle = blockedTargetHandle;
+                else if (observation ==
+                             PhysicalContactDynamicBodyObservation::Separated &&
+                         PhysicalContactLengthSquared(
+                             g_halo3ContactBodyOffset) <= 1.0e-10f)
+                    g_halo3ContactBodyTargetHandle = -1;
+                if (uncertainHeld)
+                    g_halo3ContactBodyUncertainHolds.fetch_add(
                         1, std::memory_order_relaxed);
                 g_halo3ContactBodyUpdateMs = nowMs;
                 const float setbackMeters = PhysicalContactLength(
@@ -13398,7 +13402,9 @@ namespace
                 g_halo3ContactBodySetbackMeters.store(
                     std::isfinite(setbackMeters) ? setbackMeters : 0.0f,
                     std::memory_order_relaxed);
-                if (constrained && std::isfinite(setbackMeters) &&
+                if (observation ==
+                        PhysicalContactDynamicBodyObservation::Blocked &&
+                    std::isfinite(setbackMeters) &&
                     setbackMeters > 0.0f)
                 {
                     g_halo3ContactBodyConstraints.fetch_add(
@@ -13422,7 +13428,7 @@ namespace
                 g_halo3ContactPreviousPoseValid = false;
                 g_halo3ContactBodyOffset = {};
                 g_halo3ContactBodyUpdateMs = nowMs;
-                g_halo3ContactBodyLastContactMs = 0;
+                g_halo3ContactBodyTargetHandle = -1;
                 g_halo3ContactBodySetbackMeters.store(
                     0.0f, std::memory_order_relaxed);
                 Halo3PublishWeaponWallOffset(g_halo3ContactWallOffset, nowMs);
@@ -13477,6 +13483,11 @@ namespace
             uint32_t detailedTargetCandidates = 0;
             uint32_t fallbackTargetCandidates = 0;
             uint32_t targetConfirmationRejects = 0;
+            const int32_t constrainedBodyTargetHandle =
+                g_halo3ContactBodyTargetHandle;
+            bool constrainedBodyTargetFound = false;
+            bool constrainedBodyTargetGeometryResolved = false;
+            bool constrainedBodyTargetHit = false;
             // collision_flags: structure; object_flags: object-query enable
             // plus every object type. H3EK's generated +0x14060 initializer
             // proves the type mask is 0x7FFE, while the official assertion in
@@ -13581,14 +13592,26 @@ namespace
                 const int32_t handle = static_cast<int32_t>(
                     (uint32_t{identifier} << 16) | index);
                 const uint8_t kind = *(entry + kHalo3ObjectEntryKindOffset);
+                const bool isConstrainedBodyTarget =
+                    handle == constrainedBodyTargetHandle;
+                if (isConstrainedBodyTarget)
+                    constrainedBodyTargetFound = true;
                 if (handle == unitHandle || handle == weaponHandle ||
                     (debugRig && handle != debugAimTarget))
+                {
+                    if (isConstrainedBodyTarget)
+                        constrainedBodyTargetGeometryResolved = true;
                     continue;
+                }
                 auto* data = *reinterpret_cast<unsigned char**>(
                     entry + kHalo3ObjectEntryDataOffset);
                 if (!data || *reinterpret_cast<const int32_t*>(
                                  data + kHalo3ObjectParentOffset) != -1)
+                {
+                    if (isConstrainedBodyTarget && data)
+                        constrainedBodyTargetGeometryResolved = true;
                     continue;
+                }
                 const auto* center = reinterpret_cast<const float*>(
                     data + kHalo3ObjectBoundingCenterOffset);
                 const float radius =
@@ -13604,7 +13627,11 @@ namespace
                     intendedWeaponTransform.position, targetCenter,
                     weaponBroadRadius + radius);
                 if (!proxy.hit)
+                {
+                    if (isConstrainedBodyTarget)
+                        constrainedBodyTargetGeometryResolved = true;
                     continue;
+                }
                 void* candidateComponent = nullptr;
                 int32_t candidateBodyIndex = -1;
                 float candidateMass = 0.0f;
@@ -13616,7 +13643,11 @@ namespace
                 if (!PhysicalContactObjectReceivesImpulse(
                         true, false, candidateBodyResolved,
                         candidateMotionType))
+                {
+                    if (isConstrainedBodyTarget)
+                        constrainedBodyTargetGeometryResolved = true;
                     continue;
+                }
                 PhysicalContactCompoundHit authored{};
                 PhysicalContactConvexShape authoredWeaponShape{};
                 PhysicalContactConvexShape authoredTargetShape{};
@@ -13627,6 +13658,7 @@ namespace
                 PhysicalContactTriangleMesh targetTriangleMesh{};
                 uint32_t targetTriangleCount = 0;
                 bool requiresNativeConfirmation = false;
+                bool targetGeometryResolved = false;
                 const bool hasDetailedTarget =
                     Halo3ContactDetailedTargetShape(
                         handle, data, targetShape,
@@ -13635,6 +13667,7 @@ namespace
                         &targetTriangleMesh);
                 if (hasDetailedTarget)
                 {
+                    targetGeometryResolved = true;
                     targetTriangleCount = targetTriangleMesh.triangleCount;
                     ++detailedTargetCandidates;
                     targetShapeSource = 1;
@@ -13691,6 +13724,7 @@ namespace
                 }
                 else if (Halo3ContactShapeForObject(data, targetShape))
                 {
+                    targetGeometryResolved = true;
                     ++fallbackTargetCandidates;
                     targetShapeSource = 2;
                     authoredTargetTransform =
@@ -13747,12 +13781,19 @@ namespace
                                 worldScale,
                             animated))
                         continue;
+                    targetGeometryResolved = true;
                     ++fallbackTargetCandidates;
                     authored = animated.hit;
                     authoredWeaponShape = animated.weaponShape;
                     authoredTargetShape = animated.targetShape;
                     authoredTargetTransform = animated.targetTransform;
                     targetBodyIndex = animated.rigidBodyIndex;
+                }
+                if (isConstrainedBodyTarget)
+                {
+                    constrainedBodyTargetGeometryResolved =
+                        targetGeometryResolved;
+                    constrainedBodyTargetHit = authored.hit;
                 }
                 ++eligibleObjects;
                 if (!authored.hit ||
@@ -13783,6 +13824,13 @@ namespace
                 // not per face. Zero selects the authored default material.
                 closestMaterial = authoredMaterial;
             }
+            const PhysicalContactDynamicBodyObservation
+                constrainedBodyObservation =
+                    PhysicalContactDynamicBodyObservationForTarget(
+                        constrainedBodyTargetHandle,
+                        constrainedBodyTargetFound,
+                        constrainedBodyTargetGeometryResolved,
+                        constrainedBodyTargetHit);
             g_halo3ContactPreviousGrip = grip;
             g_halo3ContactPreviousTip = tip;
             g_halo3ContactPreviousWeaponTransform = weaponTransform;
@@ -13804,9 +13852,20 @@ namespace
                 static_cast<uint32_t>(Halo3PhysicalContactStage::Sweeping),
                 std::memory_order_relaxed);
             g_halo3ContactDebounce.BeginSample();
+            if (constrainedBodyObservation ==
+                    PhysicalContactDynamicBodyObservation::Uncertain &&
+                constrainedBodyTargetHandle != -1)
+                g_halo3ContactDebounce.PreserveUncertainContact(
+                    constrainedBodyTargetHandle, nowMs);
             if (!closest.hit)
             {
-                updateBodyConstraint(false, {});
+                updateBodyConstraint(constrainedBodyObservation, {});
+                if (constrainedBodyObservation ==
+                    PhysicalContactDynamicBodyObservation::Uncertain)
+                {
+                    g_halo3ContactDebounce.EndSample(nowMs);
+                    return;
+                }
                 const PhysicalContactReleaseCommand release =
                     g_halo3ContactReleaseLatch.TakeIfSeparated(-1, nowMs);
                 if (release.apply)
@@ -13861,7 +13920,7 @@ namespace
                     1, std::memory_order_relaxed);
             if (closestType != 4 || closestHandle == -1)
             {
-                updateBodyConstraint(false, {});
+                updateBodyConstraint(constrainedBodyObservation, {});
                 g_halo3ContactCandidateHandle.store(
                     -1, std::memory_order_relaxed);
                 g_halo3ContactCandidateNormalReliable.store(
@@ -13883,7 +13942,7 @@ namespace
             if (closestHandle == unitHandle || closestHandle == weaponHandle ||
                 closestIndex >= header.maximumCount)
             {
-                updateBodyConstraint(false, {});
+                updateBodyConstraint(constrainedBodyObservation, {});
                 g_halo3ContactDebounce.EndSample(nowMs);
                 return;
             }
@@ -13893,7 +13952,7 @@ namespace
                 static_cast<uint16_t>(
                     static_cast<uint32_t>(closestHandle) >> 16))
             {
-                updateBodyConstraint(false, {});
+                updateBodyConstraint(constrainedBodyObservation, {});
                 g_halo3ContactDebounce.EndSample(nowMs);
                 return;
             }
@@ -13902,7 +13961,7 @@ namespace
             if (!closestData || *reinterpret_cast<const int32_t*>(
                                     closestData + kHalo3ObjectParentOffset) != -1)
             {
-                updateBodyConstraint(false, {});
+                updateBodyConstraint(constrainedBodyObservation, {});
                 g_halo3ContactDebounce.EndSample(nowMs);
                 return;
             }
@@ -13933,7 +13992,7 @@ namespace
                     // inventing a center-to-center force direction.
                     g_halo3ContactUnreliableNormalRejects.fetch_add(
                         1, std::memory_order_relaxed);
-                    updateBodyConstraint(false, {});
+                    updateBodyConstraint(constrainedBodyObservation, {});
                     g_halo3ContactDebounce.EndSample(nowMs);
                     return;
                 }
@@ -13967,7 +14026,11 @@ namespace
                       closestPenetrationMeters,
                       kHalo3ContactTriangleSurfaceRadiusMeters, worldScale);
             updateBodyConstraint(
-                bodyConstraint.constrained, bodyConstraint.offset);
+                bodyConstraint.constrained
+                    ? PhysicalContactDynamicBodyObservation::Blocked
+                    : constrainedBodyObservation,
+                bodyConstraint.offset,
+                bodyConstraint.constrained ? closestHandle : -1);
             if (!previousPoseMs || visiblePoseMs <= previousPoseMs ||
                 visiblePoseMs - previousPoseMs > 100 ||
                 !g_halo3ObjectGetVelocities || !g_halo3ObjectGetCenter)
@@ -14923,7 +14986,7 @@ namespace
             "targetTriangles=%u targetDetailed=%u "
             "targetFallback=%u targetConfirmRejects=%u nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm bodySetback=%.3fm "
-            "bodyConstraints=%llu bodyGapHolds=%llu bodyPeak=%.3fm "
+            "bodyConstraints=%llu bodyUncertainHolds=%llu bodyPeak=%.3fm "
             "wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
             "wallVertices=%u wallPlanes=%u decoratorSolidDraws=%u "
@@ -15035,7 +15098,7 @@ namespace
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactBodyConstraints.load(
                 std::memory_order_relaxed),
-            (unsigned long long)g_halo3ContactBodyGapHolds.load(
+            (unsigned long long)g_halo3ContactBodyUncertainHolds.load(
                 std::memory_order_relaxed),
             g_halo3ContactBodyPeakSetbackMeters.load(
                 std::memory_order_relaxed),

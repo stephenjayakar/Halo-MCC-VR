@@ -1897,30 +1897,47 @@ inline PhysicalContactVec3 PhysicalContactUpdateWallOffset(
     return currentOffset * ((currentLength - release) / currentLength);
 }
 
-// A moving rigid body can advance between Halo's camera query and physics
-// update. That produces an isolated clear sample even though the visible
-// weapon and body are still in continuous contact. Keep the last exact body
-// correction through a short two-to-six-frame query gap, then use the normal
-// bounded release. Tracking loss and feature teardown reset the caller's
-// timestamp, so this cannot preserve an offset across invalid gameplay state.
-inline constexpr uint64_t kPhysicalContactDynamicBodyGapHoldMs = 50;
+enum class PhysicalContactDynamicBodyObservation : uint8_t
+{
+    Separated,
+    Uncertain,
+    Blocked,
+};
+
+// A missing collision is proof of separation only when the previously
+// constrained object was either removed or its exact geometry was resolved and
+// found clear. A live object with temporarily unavailable geometry remains
+// uncertain. This distinction prevents a bad query sample from draining the
+// visible weapon correction while the weapon is still inside the object.
+inline PhysicalContactDynamicBodyObservation
+PhysicalContactDynamicBodyObservationForTarget(
+    int32_t constrainedTargetHandle, bool targetFound,
+    bool targetGeometryResolved, bool targetHit)
+{
+    if (constrainedTargetHandle == -1 || !targetFound ||
+        (targetGeometryResolved && !targetHit))
+        return PhysicalContactDynamicBodyObservation::Separated;
+    return PhysicalContactDynamicBodyObservation::Uncertain;
+}
 
 inline PhysicalContactVec3 PhysicalContactUpdateDynamicBodyOffset(
     PhysicalContactVec3 currentOffset, PhysicalContactVec3 requestedOffset,
-    bool bodyBlocked, uint64_t nowMs, uint64_t lastBodyContactMs,
-    float elapsedSeconds, float worldUnitsPerMeter)
+    PhysicalContactDynamicBodyObservation observation, float elapsedSeconds,
+    float worldUnitsPerMeter)
 {
     if (!PhysicalContactFinite(currentOffset) ||
-        !PhysicalContactFinite(requestedOffset) || nowMs < lastBodyContactMs ||
+        !PhysicalContactFinite(requestedOffset) ||
         !std::isfinite(elapsedSeconds) || elapsedSeconds < 0.0f ||
         elapsedSeconds > 0.1f || !std::isfinite(worldUnitsPerMeter) ||
         worldUnitsPerMeter <= 0.0f)
         return {};
-    if (bodyBlocked)
+
+    if (observation == PhysicalContactDynamicBodyObservation::Blocked)
         return requestedOffset;
-    if (lastBodyContactMs &&
-        nowMs - lastBodyContactMs <= kPhysicalContactDynamicBodyGapHoldMs)
+    if (observation == PhysicalContactDynamicBodyObservation::Uncertain)
         return currentOffset;
+    if (observation != PhysicalContactDynamicBodyObservation::Separated)
+        return {};
     return PhysicalContactUpdateWallOffset(
         currentOffset, {}, false, elapsedSeconds, worldUnitsPerMeter);
 }
@@ -2902,6 +2919,19 @@ public:
         if (firstContact)
             *firstContact = true;
         return empty;
+    }
+
+    bool PreserveUncertainContact(int32_t handle, uint64_t nowMs)
+    {
+        for (auto& slot : slots_)
+        {
+            if (slot.handle != handle)
+                continue;
+            slot.overlapping = true;
+            slot.lastOverlapMs = nowMs;
+            return true;
+        }
+        return false;
     }
 
     void EndSample(uint64_t nowMs)

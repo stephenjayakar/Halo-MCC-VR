@@ -1737,6 +1737,36 @@ cooldown remains intact. Runtime counters distinguish later-sample admissions
 (`enemySustainedMelees`) and no-plane admissions
 (`enemyFallbackNormalMelees`). Headset acceptance remains pending.
 
+### Dynamic-body separation diagnosis
+
+The same preserved Quest headset session proves that the old fixed 50 ms body
+gap was not a safe separation rule. At `16:11:21`, target `0xE2FC008D` had a
+`0.408 m` visible setback after 63 exact constraints. At `16:11:23`, the same
+target and candidate remained reported with `0.4653 m` penetration and no
+current reliable normal, but the setback had already drained to `0.021 m`.
+The run had reached the `1.000 m` correction cap and counted only 13 short gap
+holds. By `16:11:25` the correction was zero. This matches the headset report
+that a weapon could clip through a body after initially nudging it.
+
+The pending separation candidate removes elapsed time as proof of clearance.
+It remembers the exact constrained target and classifies each later scan as:
+
+- blocked: a new exact constraint replaces the correction immediately;
+- uncertain: the live target remains in the weapon broad phase but its exact
+  geometry or separating normal is temporarily unavailable, so the last safe
+  correction and contact latch are preserved;
+- separated: the target was removed, fell outside the conservative broad
+  phase, or resolved exact geometry was found clear, so the correction may use
+  the existing bounded release.
+
+Title, weapon, tracking, and gameplay-state resets still clear the correction
+immediately. Runtime telemetry records `bodyUncertainHolds`; the analyzer also
+accepts historical `bodyGapHolds` logs. Regression coverage proves indefinite
+uncertain retention, confirmed-clear release, removed-target release, immediate
+reblocking, invalid-state rejection, and no melee rearm during uncertainty.
+This candidate does not change impulse strength, geometry, or melee rules.
+Headset acceptance remains pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
