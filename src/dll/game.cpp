@@ -12331,11 +12331,13 @@ namespace
                 Halo3ResetPhysicalContact();
                 return;
             }
-            // Keep the preceding safe pose fresh while this proposal is being
-            // checked. This is not a new approval: the stored palette and its
-            // source serial remain unchanged. If the worker stops, the refresh
-            // stops and the optional render gate still fails open after 100 ms.
-            if (proposalWeaponHandle == weaponHandle)
+            // Retained inert after long replay proved that refreshing an old
+            // approval lets a moving target consume its original clearance.
+            // A palette now keeps its proof timestamp and the dynamic guard
+            // below reserves exactly that bounded lifetime.
+            constexpr bool kRefreshUncheckedApproval = false;
+            if (kRefreshUncheckedApproval &&
+                proposalWeaponHandle == weaponHandle)
                 Halo3RefreshApprovedWeaponPose(
                     proposalRenderTag, weaponHandle, visibleNodeCount, nowMs);
 
@@ -13752,6 +13754,50 @@ namespace
                 Halo3PublishWeaponWallOffset(
                     g_halo3ContactWallOffset + g_halo3ContactBodyOffset, nowMs);
             };
+            const auto dynamicVisualClearanceMeters = [&] (
+                int32_t targetHandle, PhysicalContactVec3 targetPoint,
+                PhysicalContactVec3 weaponOutwardNormal)
+            {
+                float inwardSpeedMetersPerSecond = -1.0f;
+                if (targetHandle != -1 && g_halo3ObjectGetVelocities &&
+                    g_halo3ObjectGetCenter &&
+                    PhysicalContactFinite(targetPoint) &&
+                    PhysicalContactFinite(weaponOutwardNormal))
+                {
+                    float targetLinear[3]{};
+                    float targetAngular[3]{};
+                    float targetCenterRaw[3]{};
+                    g_halo3ObjectGetVelocities(
+                        targetHandle, targetLinear, targetAngular);
+                    g_halo3ObjectGetCenter(targetHandle, targetCenterRaw);
+                    const PhysicalContactVec3 linear{
+                        targetLinear[0], targetLinear[1], targetLinear[2]};
+                    const PhysicalContactVec3 angular{
+                        targetAngular[0], targetAngular[1], targetAngular[2]};
+                    const PhysicalContactVec3 center{
+                        targetCenterRaw[0], targetCenterRaw[1],
+                        targetCenterRaw[2]};
+                    if (PhysicalContactFinite(linear) &&
+                        PhysicalContactFinite(angular) &&
+                        PhysicalContactFinite(center))
+                    {
+                        const PhysicalContactVec3 surfaceVelocity =
+                            linear + PhysicalContactCross(
+                                angular, targetPoint - center);
+                        const PhysicalContactVec3 outward =
+                            PhysicalContactNormalize(
+                                weaponOutwardNormal, {});
+                        if (PhysicalContactFinite(surfaceVelocity) &&
+                            PhysicalContactLengthSquared(outward) > 1.0e-12f)
+                            inwardSpeedMetersPerSecond = std::max(
+                                0.0f, PhysicalContactDot(
+                                    surfaceVelocity, outward) / worldScale);
+                    }
+                }
+                return PhysicalContactDynamicVisualClearanceMeters(
+                    inwardSpeedMetersPerSecond,
+                    kHalo3ContactVisualGuardClearanceMeters);
+            };
             if (weaponHandle != g_halo3ContactWeaponHandle)
             {
                 g_halo3ContactDebounce.Reset();
@@ -14349,8 +14395,10 @@ namespace
                                     intendedWeaponTransform,
                                     closestVisualGuard.normal,
                                     proposedGuard.setbackWorldUnits,
-                                    kHalo3ContactVisualGuardClearanceMeters *
-                                        worldScale,
+                                    dynamicVisualClearanceMeters(
+                                        closestVisualGuardHandle,
+                                        closestVisualGuard.targetPoint,
+                                        closestVisualGuard.normal) * worldScale,
                                     worldScale, guardOverlap);
                             if (verifiedGuard.constrained)
                             {
@@ -14602,8 +14650,9 @@ namespace
                         PhysicalContactVerifiedSeparationOffset(
                             intendedWeaponTransform, closest.normal,
                             bodyConstraint.setbackWorldUnits,
-                            kHalo3ContactVisualGuardClearanceMeters *
-                                worldScale,
+                            dynamicVisualClearanceMeters(
+                                closestHandle, closest.point,
+                                closest.normal) * worldScale,
                             worldScale, exactOverlap);
                     if (verifiedConstraint.constrained)
                     {

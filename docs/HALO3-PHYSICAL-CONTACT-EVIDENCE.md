@@ -2115,6 +2115,31 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
+The earlier `4f4f25e` visible-weapon pass was too short. A later replay of the
+cumulative `db84d06c909d05facb8def3d65a7d3cd2df63e9f` candidate remained clean
+through 3,322 exact palettes, then recorded two displayed triangle overlaps and
+two solid overlaps at 3,686 palettes. The target moved from 0.087 m to 0.111 m
+from its starting point over that final reporting interval while the renderer
+continued consuming approvals. The preserved failed log is
+`out/debug-openxr/20260812-073533508Z-visible-weapon-gap.log`, SHA-256
+`730D02F67F0851C0DB7BAC905A9810AAA38BA29C63C2AAE2F1CB3D28B6B5F9EF`.
+This rejects the fixed 8 mm guard plus 4 mm clearance as a complete dynamic
+body boundary. It also proves the former 900-palette validator minimum could
+approve a clean prefix before the later failure.
+
+The next candidate keeps the preventive 8 mm authored-triangle guard but makes
+its additional clearance follow the exact target surface point's measured
+inward motion. The point velocity includes native translation and angular
+velocity about the native centre. Motion away from the held weapon adds no gap;
+inward motion reserves 100 ms of travel, bounded from 4 mm through 35 mm.
+Invalid motion evidence selects the maximum instead of guessing small. The same
+policy protects both the pre-contact guard and an established exact contact.
+An approval keeps its original proof timestamp: the old unchecked-palette
+refresh is disabled because it could extend clearance evidence indefinitely
+while the target moved. The strict replay now requires at least 8,000 exact and
+held palettes, 2,500 corrected and approved palettes, and 2,500 measured clear
+samples with zero cumulative overlap.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
