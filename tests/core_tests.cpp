@@ -9556,23 +9556,41 @@ int main()
             true, {-6.0f, 0.0f, 0.0f}, {});
         const float enemyTangentialImpact =
             PhysicalContactTargetMeleeImpactSpeed(
-                true, 0, {0.0f, 6.0f, 0.0f}, {0.0f, 2.1f, 0.0f},
+                true, true, 0, {0.0f, 6.0f, 0.0f},
+                {0.0f, 2.1f, 0.0f},
                 {1.0f, 0.0f, 0.0f});
         const float creatureTangentialImpact =
             PhysicalContactTargetMeleeImpactSpeed(
-                true, 12, {0.0f, 6.0f, 0.0f}, {0.0f, 1.8f, 0.0f},
+                true, true, 12, {0.0f, 6.0f, 0.0f},
+                {0.0f, 1.8f, 0.0f},
                 {1.0f, 0.0f, 0.0f});
         const float vehicleTangentialImpact =
             PhysicalContactTargetMeleeImpactSpeed(
-                true, 1, {0.0f, 6.0f, 0.0f}, {0.0f, 2.1f, 0.0f},
+                true, true, 1, {0.0f, 6.0f, 0.0f},
+                {0.0f, 2.1f, 0.0f},
                 {1.0f, 0.0f, 0.0f});
         const float stationaryEnemyImpact =
             PhysicalContactTargetMeleeImpactSpeed(
-                true, 0, {0.0f, 6.0f, 0.0f}, {},
+                true, true, 0, {0.0f, 6.0f, 0.0f}, {},
                 {1.0f, 0.0f, 0.0f});
+        const bool armedEnemyContinuation =
+            PhysicalContactTargetMeleeSpeedEligible(false, 0, true);
         const float continuedEnemyImpact =
             PhysicalContactTargetMeleeImpactSpeed(
-                false, 0, {0.0f, 6.0f, 0.0f}, {0.0f, 2.1f, 0.0f},
+                false, armedEnemyContinuation, 0,
+                {0.0f, 6.0f, 0.0f},
+                {0.0f, 2.1f, 0.0f},
+                {1.0f, 0.0f, 0.0f});
+        const float enemyRunsIntoStillWeapon =
+            PhysicalContactTargetMeleeImpactSpeed(
+                false, armedEnemyContinuation, 0, {-3.0f, 0.0f, 0.0f}, {},
+                {1.0f, 0.0f, 0.0f});
+        const PhysicalContactVec3 fallbackEnemyNormal =
+            PhysicalContactEnemyMeleeFallbackNormal(
+                {0.0f, 2.0f, 0.0f}, {1.0f, 0.0f, 0.0f});
+        const PhysicalContactVec3 invalidEnemyNormal =
+            PhysicalContactEnemyMeleeFallbackNormal(
+                {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f},
                 {1.0f, 0.0f, 0.0f});
         Check(std::fabs(closingImpact - 2.0f) < 1.0e-6f &&
               tangentialImpact == 0.0f && separatingImpact == 0.0f &&
@@ -9581,12 +9599,21 @@ int main()
               std::fabs(creatureTangentialImpact - 1.8f) < 1.0e-6f &&
               vehicleTangentialImpact == 0.0f &&
               stationaryEnemyImpact == 0.0f &&
-              continuedEnemyImpact == 0.0f &&
+              std::fabs(continuedEnemyImpact - 2.1f) < 1.0e-6f &&
+              enemyRunsIntoStillWeapon == 0.0f &&
               PhysicalContactEnemyMeleeKind(0) &&
               PhysicalContactEnemyMeleeKind(12) &&
               PhysicalContactEnemyMeleeKind(13) &&
               !PhysicalContactEnemyMeleeKind(1) &&
               !PhysicalContactEnemyMeleeKind(2) &&
+              armedEnemyContinuation &&
+              !PhysicalContactTargetMeleeSpeedEligible(false, 0, false) &&
+              !PhysicalContactTargetMeleeSpeedEligible(false, 1, true) &&
+              PhysicalContactTargetMeleeSpeedEligible(true, 1, true) &&
+              std::fabs(fallbackEnemyNormal.x) < 1.0e-6f &&
+              std::fabs(fallbackEnemyNormal.y + 1.0f) < 1.0e-6f &&
+              std::fabs(fallbackEnemyNormal.z) < 1.0e-6f &&
+              PhysicalContactLengthSquared(invalidEnemyNormal) == 0.0f &&
               PhysicalContactClassify(0.049f, 2.00f, 1.50f) ==
                    PhysicalContactAction::None &&
               PhysicalContactClassify(0.05f, 0.00f, 1.50f) ==
@@ -9610,8 +9637,9 @@ int main()
                   2.00f, std::numeric_limits<float>::quiet_NaN(), 1.50f) ==
                   PhysicalContactAction::None,
             "Relative tracking noise and non-finite velocity do nothing, "
-            "only first-contact velocity closing into the exact surface can "
-            "melee, enemy limbs accept deliberate tracked weapon-point speed, "
+            "only first-contact velocity closing into a prop surface can "
+            "melee, armed enemy contact accepts later deliberate tracked "
+            "weapon-point speed and a motion-facing effects normal, "
             "vehicle/prop tangential or sustained shoving stays physics-only, melee "
             "begins exactly at the configured threshold, and implausible "
             "headset spikes remain impulse-only");
@@ -9656,6 +9684,52 @@ int main()
             "Per-target contact preserves the swept surface normal during "
             "overlap and one-frame gaps, then rearms after 100 ms of real "
             "separation or an explicit reset");
+
+        PhysicalContactDebounce enemySwingDebounce;
+        enemySwingDebounce.BeginSample();
+        PhysicalContactTargetState* enemySwing =
+            enemySwingDebounce.Touch(0x45670008, 2000, &first);
+        const bool slowFirstEnemyTouch = first && enemySwing &&
+            PhysicalContactTargetMeleeImpactSpeed(
+                first,
+                PhysicalContactTargetMeleeSpeedEligible(
+                    first, 0, enemySwing->meleeArmed),
+                0, {-0.40f, 0.0f, 0.0f}, {-0.40f, 0.0f, 0.0f},
+                {1.0f, 0.0f, 0.0f}) < 1.50f;
+        enemySwingDebounce.EndSample(2000);
+        enemySwingDebounce.BeginSample();
+        enemySwing = enemySwingDebounce.Touch(0x45670008, 2016, &first);
+        const float armedFollowThrough =
+            PhysicalContactTargetMeleeImpactSpeed(
+                first,
+                PhysicalContactTargetMeleeSpeedEligible(
+                    first, 0, enemySwing->meleeArmed),
+                0, {-2.10f, 0.0f, 0.0f}, {-2.10f, 0.0f, 0.0f},
+                {1.0f, 0.0f, 0.0f});
+        const bool followThroughMelees = !first &&
+            PhysicalContactClassify(2.10f, armedFollowThrough, 1.50f) ==
+                PhysicalContactAction::ImpulseAndMelee;
+        enemySwing->meleeArmed = false;
+        enemySwingDebounce.EndSample(2016);
+        enemySwingDebounce.BeginSample();
+        enemySwing = enemySwingDebounce.Touch(0x45670008, 2032, &first);
+        const float disarmedFollowThrough =
+            PhysicalContactTargetMeleeImpactSpeed(
+                first,
+                PhysicalContactTargetMeleeSpeedEligible(
+                    first, 0, enemySwing->meleeArmed),
+                0, {-3.00f, 0.0f, 0.0f}, {-3.00f, 0.0f, 0.0f},
+                {1.0f, 0.0f, 0.0f});
+        const bool noRepeatEnemyMelee = !first &&
+            disarmedFollowThrough == 0.0f;
+        const bool noSustainedVehicleMelee =
+            !PhysicalContactTargetMeleeSpeedEligible(false, 1, true);
+        enemySwingDebounce.EndSample(2032);
+        Check(slowFirstEnemyTouch && followThroughMelees &&
+              noRepeatEnemyMelee && noSustainedVehicleMelee,
+            "A slow first enemy overlap may become one fast armed melee on a "
+            "later sample, while the same overlap cannot repeat damage and a "
+            "vehicle shove never gains sustained-contact melee admission");
 
         Check(!PhysicalContactMeleeReady(
                   PhysicalContactAction::ImpulseOnly, true, true, 1000, 0) &&

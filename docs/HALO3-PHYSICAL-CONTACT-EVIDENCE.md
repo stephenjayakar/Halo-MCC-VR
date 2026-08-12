@@ -1693,6 +1693,50 @@ matched both hashes, normal SteamVR settings, `physical_weapon_contact=1`, and
 the `1.50 m/s` threshold without launching any process. Full record-until-exit
 behavior intentionally awaits the next real-headset session.
 
+### Enemy melee admission diagnosis
+
+The preserved Steam / SteamVR OpenXR 2.17.7 / Oculus headset session from
+source `ed81db3accd8baa509d621ac218c76f48fe3a2ff` is
+`out/deploy-backups/17fc2dc-steam-before-f35706f-20260812-004854715Z/halo3xr.log`
+(SHA-256
+`6DE3AD969E10D7EA866187BF0D370562767D24B7588F188CAAAC3F880FE1D2D9`).
+It ran at 120 Hz and recorded 88 exact animated-body hits, 8 completed native
+melees, and 235 rejected authored overlaps whose sweep supplied no reliable
+separating normal.
+
+A read-only counter-delta audit found three biped status intervals that expose
+the old admission error. At `16:11:57`, four new animated-body hits coincided
+with an `8.97 m/s` tracked weapon sample; at `16:12:05`, two more coincided
+with `9.58 m/s`; and at `16:14:45`, six more coincided with `10.38 m/s`.
+All three reported `firstContact=0`, `meleeImpactSpeed=0.00 m/s`, and no new
+melee. By contrast, first-contact biped samples at `16:14:06` and `16:14:37`
+admitted `8.47 m/s` and `7.30 m/s` and each led to a native melee. These are
+two-second status snapshots rather than per-collision traces, so the audit does
+not attribute every counter increment to the displayed target. It does prove
+that the running classifier discarded fast, armed biped samples solely because
+the overlap had begun on an earlier frame.
+
+The same log contains an interval at `16:18:21` where 14 new animated-body
+hits and 14 new unreliable-normal rejects advanced together while the current
+candidate reported `targetShapeSource=3` and `candidateNormal=0`; the next
+interval added 9 and 9. This proves a second exact animated-body admission gap.
+The status line's last accepted `target` differs from its current `candidate`,
+so it does not prove the candidate's object kind. The session analyzer now
+requires those identities to match before assigning candidate geometry to the
+last accepted target.
+
+The pending enemy-melee candidate changes only admission. A biped, creature,
+or giant whose per-target melee latch is still armed may qualify on a later
+sample in the same overlap using tracked weapon-point speed. Vehicles and props
+retain first-contact, inward-surface speed. An exact animated-enemy overlap
+without a separating plane may use the opposite tracked weapon motion only as
+the normal for native damage/effects; that fallback cannot publish an impulse
+or a visible-weapon constraint. After one melee, the existing per-target latch
+still blocks repeats until its existing rearm path, and the global 250 ms
+cooldown remains intact. Runtime counters distinguish later-sample admissions
+(`enemySustainedMelees`) and no-plane admissions
+(`enemyFallbackNormalMelees`). Headset acceptance remains pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

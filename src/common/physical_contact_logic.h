@@ -2154,8 +2154,33 @@ inline bool PhysicalContactEnemyMeleeKind(uint8_t kind)
     return kind == 0 || kind == 12 || kind == 13;
 }
 
+inline bool PhysicalContactTargetMeleeSpeedEligible(
+    bool firstContact, uint8_t targetKind, bool meleeArmed)
+{
+    // Props and vehicles retain the strict first-contact surface test. An
+    // enemy may admit a deliberate swing later in the same overlap because an
+    // animated limb can first touch between controller samples, or while the
+    // global melee cooldown is still active. The per-target armed latch still
+    // limits the continuous contact to one native melee event.
+    return firstContact ||
+        (meleeArmed && PhysicalContactEnemyMeleeKind(targetKind));
+}
+
+inline PhysicalContactVec3 PhysicalContactEnemyMeleeFallbackNormal(
+    PhysicalContactVec3 weaponVelocityMetersPerSecond,
+    PhysicalContactVec3 movementDirection)
+{
+    if (!PhysicalContactFinite(weaponVelocityMetersPerSecond) ||
+        !PhysicalContactFinite(movementDirection))
+        return {};
+    const PhysicalContactVec3 movementFallback = PhysicalContactNormalize(
+        movementDirection * -1.0f, {});
+    return PhysicalContactNormalize(
+        weaponVelocityMetersPerSecond * -1.0f, movementFallback);
+}
+
 inline float PhysicalContactTargetMeleeImpactSpeed(
-    bool firstContact, uint8_t targetKind,
+    bool firstContact, bool enemyWeaponSpeedEligible, uint8_t targetKind,
     PhysicalContactVec3 relativeVelocityMetersPerSecond,
     PhysicalContactVec3 weaponVelocityMetersPerSecond,
     PhysicalContactVec3 targetToWeaponNormal)
@@ -2163,15 +2188,17 @@ inline float PhysicalContactTargetMeleeImpactSpeed(
     const float normalImpact = PhysicalContactMeleeImpactSpeed(
         firstContact, relativeVelocityMetersPerSecond,
         targetToWeaponNormal);
-    if (!firstContact || !PhysicalContactEnemyMeleeKind(targetKind) ||
+    if (!enemyWeaponSpeedEligible ||
+        !PhysicalContactEnemyMeleeKind(targetKind) ||
         !PhysicalContactFinite(weaponVelocityMetersPerSecond))
         return normalImpact;
 
     // Animated limb normals turn sharply across elbows, shoulders and heads.
-    // For enemies only, a deliberate first-contact weapon-point swing may
-    // melee even when that exact limb normal makes the hit look tangential.
-    // Target motion is excluded so an enemy running into a still weapon cannot
-    // manufacture damage.
+    // For enemies only, a deliberate armed weapon-point swing may melee even
+    // when that exact limb normal makes the hit look tangential.
+    // This enemy-only tangential allowance uses weapon speed, not relative
+    // target motion. First contact still retains the ordinary inward-surface
+    // rule used by every target kind.
     const float weaponSpeed = PhysicalContactLength(
         weaponVelocityMetersPerSecond);
     return std::isfinite(weaponSpeed)

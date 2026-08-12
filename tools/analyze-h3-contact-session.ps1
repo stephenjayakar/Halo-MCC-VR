@@ -99,7 +99,8 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
             foreach ($name in @(
                 'sweeps', 'hits', 'impulses', 'releases', 'melees',
                 'authoredShapeHits', 'animatedBodyHits', 'unsupportedShapes',
-                'rejectNormal', 'rejectPose', 'rejectVelocity',
+                'rejectNormal', 'enemySustainedMelees',
+                'enemyFallbackNormalMelees', 'rejectPose', 'rejectVelocity',
                 'rejectMeleeSpike', 'weaponTriangles', 'targetTriangles',
                 'targetDetailed', 'targetFallback', 'nativeSamples',
                 'wallBlocks', 'bodyConstraints', 'bodyGapHolds', 'wallRays',
@@ -123,11 +124,16 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
                     }
                 }
                 $detail = $kindDetail[$key]
-                if ((Get-Number $pairs 'targetShapeSource') -eq 1 -and
+                $targetIdentityCurrent = $pairs.ContainsKey('target') -and
+                    $pairs.ContainsKey('candidate') -and
+                    $pairs['target'] -eq $pairs['candidate']
+                if ($targetIdentityCurrent -and
+                    (Get-Number $pairs 'targetShapeSource') -eq 1 -and
                     (Get-Number $pairs 'targetDetailed') -gt 0) {
                     $detail.detailed_geometry = $true
                 }
-                if ((Get-Number $pairs 'targetShapeSource') -eq 3) {
+                if ($targetIdentityCurrent -and
+                    (Get-Number $pairs 'targetShapeSource') -eq 3) {
                     $detail.animated_body = $true
                 }
                 $detail.maximum_mass_kg = [math]::Max(
@@ -261,7 +267,7 @@ if ($SelfTest) {
 [10:00:00.003] headset: 'SteamVR/OpenXR : oculus' (vendor 0x28DE) on runtime sample
 [10:00:00.004] headset: panel is running at 90.0Hz
 [10:00:00.005] H3 physical contact: optional native bindings installed
-[10:00:01.000] H3 physical contact status: sweeps=2 hits=1 impulses=1 releases=0 melees=0 commandStatus=2 meleeStatus=0 kind=3 weaponMass=2.764 targetMass=0.382 contactHaptic=0.250 authoredShapeHits=1 animatedBodyHits=0 weaponTriangles=36 targetShapeSource=1 targetTriangles=8 targetDetailed=1 targetFallback=0 wallBlocks=1 bodyConstraints=1 bodyGapHolds=1 wallRays=4 wallObjectPlanes=2 wallPlanes=3 decoratorPlanes=5 decoratorSelfTest=0
+[10:00:01.000] H3 physical contact status: sweeps=2 hits=1 impulses=1 releases=0 melees=0 commandStatus=2 meleeStatus=0 target=0x12340001 candidate=0x12340001 kind=3 weaponMass=2.764 targetMass=0.382 contactHaptic=0.250 authoredShapeHits=1 animatedBodyHits=0 weaponTriangles=36 targetShapeSource=1 targetTriangles=8 targetDetailed=1 targetFallback=0 wallBlocks=1 bodyConstraints=1 bodyGapHolds=1 wallRays=4 wallObjectPlanes=2 wallPlanes=3 decoratorPlanes=5 decoratorSelfTest=0
 [10:00:01.001] H3 left grab status: bindings=1 acquisitions=1 commands=2 applied=2 releases=1 mass=0.382
 [10:00:01.002] H3 physical contact visible IDs: slotMatches=3 slotMisses=0 submissions=3
 '@
