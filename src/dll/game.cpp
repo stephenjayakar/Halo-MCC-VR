@@ -994,6 +994,10 @@ namespace
     std::atomic<uint64_t> g_halo3ContactDebugVisibleConfirmedOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidSeparations{0};
+    std::atomic<uint64_t> g_halo3ContactDebugAlignedDirectOverlaps{0};
+    std::atomic<uint64_t> g_halo3ContactDebugAlignedGeometryOverlaps{0};
+    std::atomic<uint64_t> g_halo3ContactDebugAlignedConfirmedOverlaps{0};
+    std::atomic<uint64_t> g_halo3ContactDebugAlignedSolidOverlaps{0};
     std::atomic<uint32_t> g_halo3ContactDebugLastResetReason{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
     std::atomic<float> g_halo3ContactDebugVisibleMaximumGap{-FLT_MAX};
@@ -13038,6 +13042,56 @@ namespace
                 if (haveDebugTargetShape &&
                     PhysicalContactTransformFinite(debugTargetTransform))
                 {
+                    PhysicalContactTransform alignedTargetTransform =
+                        debugTargetTransform;
+                    bool haveAlignedTargetTransform = false;
+                    if (g_halo3ContactDebugRotatingTarget.load(
+                            std::memory_order_relaxed) &&
+                        displayedPoseMs && nowMs >= displayedPoseMs &&
+                        nowMs - displayedPoseMs <= 100 &&
+                        g_halo3ObjectGetVelocities && g_halo3ObjectGetCenter)
+                    {
+                        float targetLinear[3]{}, targetAngular[3]{};
+                        float targetCenter[3]{};
+                        g_halo3ObjectGetVelocities(
+                            detailedTargetHandle,
+                            targetLinear, targetAngular);
+                        g_halo3ObjectGetCenter(
+                            detailedTargetHandle, targetCenter);
+                        const PhysicalContactVec3 linear{
+                            targetLinear[0], targetLinear[1],
+                            targetLinear[2]};
+                        const PhysicalContactVec3 angular{
+                            targetAngular[0], targetAngular[1],
+                            targetAngular[2]};
+                        const PhysicalContactVec3 pivot{
+                            targetCenter[0], targetCenter[1],
+                            targetCenter[2]};
+                        const PhysicalContactRigidBodyFollow rewind =
+                            PhysicalContactBuildRigidBodyFollow(
+                                linear * -1.0f, angular * -1.0f, pivot,
+                                displayedPoseMs, nowMs, worldScale,
+                                0.10f, 0.25f, 1.0f);
+                        if (rewind.valid)
+                        {
+                            alignedTargetTransform.position =
+                                PhysicalContactApplyRigidBodyFollowPoint(
+                                    rewind,
+                                    debugTargetTransform.position);
+                            alignedTargetTransform.forward =
+                                PhysicalContactApplyRigidBodyFollowVector(
+                                    rewind, debugTargetTransform.forward);
+                            alignedTargetTransform.left =
+                                PhysicalContactApplyRigidBodyFollowVector(
+                                    rewind, debugTargetTransform.left);
+                            alignedTargetTransform.up =
+                                PhysicalContactApplyRigidBodyFollowVector(
+                                    rewind, debugTargetTransform.up);
+                            haveAlignedTargetTransform =
+                                PhysicalContactTransformFinite(
+                                    alignedTargetTransform);
+                        }
+                    }
                     uint64_t activeReplayStartMs =
                         g_halo3ContactDebugVisibleActiveStartMs.load(
                             std::memory_order_relaxed);
@@ -13094,6 +13148,14 @@ namespace
                             g_halo3ContactDebugVisibleSolidOverlaps.store(
                                 0, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleSolidSeparations.store(
+                                0, std::memory_order_relaxed);
+                            g_halo3ContactDebugAlignedDirectOverlaps.store(
+                                0, std::memory_order_relaxed);
+                            g_halo3ContactDebugAlignedGeometryOverlaps.store(
+                                0, std::memory_order_relaxed);
+                            g_halo3ContactDebugAlignedConfirmedOverlaps.store(
+                                0, std::memory_order_relaxed);
+                            g_halo3ContactDebugAlignedSolidOverlaps.store(
                                 0, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleMinimumGap.store(
                                 FLT_MAX, std::memory_order_relaxed);
@@ -13199,6 +13261,84 @@ namespace
                              ? g_halo3ContactDebugVisibleSolidOverlaps
                              : g_halo3ContactDebugVisibleSolidSeparations)
                             .fetch_add(1, std::memory_order_relaxed);
+                        if (haveAlignedTargetTransform)
+                        {
+                            const auto alignedHit = [&](float radius) {
+                                return PhysicalContactTriangleMeshValid(
+                                           debugTargetTriangleMesh)
+                                    ? PhysicalContactSweepTriangleMeshes(
+                                          *measuredWeaponMesh,
+                                          measuredWeaponTransform,
+                                          measuredWeaponTransform,
+                                          debugTargetTriangleMesh,
+                                          alignedTargetTransform,
+                                          kHalo3ContactTriangleStepMeters *
+                                              worldScale,
+                                          radius).hit
+                                    : PhysicalContactSweepTriangleMeshCompound(
+                                          *measuredWeaponMesh,
+                                          measuredWeaponTransform,
+                                          measuredWeaponTransform,
+                                          debugTargetShape,
+                                          alignedTargetTransform,
+                                          kHalo3ContactTriangleStepMeters *
+                                              worldScale,
+                                          radius).hit;
+                            };
+                            const bool alignedDirectHit = alignedHit(
+                                kHalo3ContactTriangleSurfaceRadiusMeters *
+                                worldScale);
+                            const bool alignedGeometryHit = alignedHit(0.0f);
+                            if (alignedDirectHit)
+                                g_halo3ContactDebugAlignedDirectOverlaps
+                                    .fetch_add(1, std::memory_order_relaxed);
+                            if (alignedGeometryHit)
+                                g_halo3ContactDebugAlignedGeometryOverlaps
+                                    .fetch_add(1, std::memory_order_relaxed);
+                            PhysicalContactTransform alignedOutwardProbe =
+                                outwardProbe;
+                            const auto alignedProbeHit = [&](float radius) {
+                                return PhysicalContactTriangleMeshValid(
+                                           debugTargetTriangleMesh)
+                                    ? PhysicalContactSweepTriangleMeshes(
+                                          *measuredWeaponMesh,
+                                          alignedOutwardProbe,
+                                          alignedOutwardProbe,
+                                          debugTargetTriangleMesh,
+                                          alignedTargetTransform,
+                                          kHalo3ContactTriangleStepMeters *
+                                              worldScale,
+                                          radius).hit
+                                    : PhysicalContactSweepTriangleMeshCompound(
+                                          *measuredWeaponMesh,
+                                          alignedOutwardProbe,
+                                          alignedOutwardProbe,
+                                          debugTargetShape,
+                                          alignedTargetTransform,
+                                          kHalo3ContactTriangleStepMeters *
+                                              worldScale,
+                                          radius).hit;
+                            };
+                            if (PhysicalContactConfirmedSurfacePenetration(
+                                    alignedDirectHit, alignedGeometryHit,
+                                    alignedProbeHit(
+                                        kHalo3ContactTriangleSurfaceRadiusMeters *
+                                        worldScale),
+                                    alignedProbeHit(0.0f)))
+                            {
+                                g_halo3ContactDebugAlignedConfirmedOverlaps
+                                    .fetch_add(1, std::memory_order_relaxed);
+                            }
+                            if (PhysicalContactCompoundsIntersect(
+                                    *measuredWeaponShape,
+                                    measuredWeaponTransform,
+                                    debugTargetShape,
+                                    alignedTargetTransform))
+                            {
+                                g_halo3ContactDebugAlignedSolidOverlaps
+                                    .fetch_add(1, std::memory_order_relaxed);
+                            }
+                        }
                     }
                     const float amplitude =
                         worldScale * debugMaxSpeed / kDebugAngularRate;
@@ -16403,6 +16543,8 @@ namespace
                     "geometryOverlaps=%llu geometrySeparations=%llu "
                     "confirmedOverlaps=%llu "
                     "solidOverlaps=%llu solidSeparations=%llu "
+                    "alignedOverlaps=%llu alignedGeometry=%llu "
+                    "alignedConfirmed=%llu alignedSolid=%llu "
                     "rotatingCommands=%llu resetReason=%u "
                     "gapRange=(%.4f %.4f)m",
                     (unsigned long long)
@@ -16443,6 +16585,18 @@ namespace
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleSolidSeparations.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugAlignedDirectOverlaps.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugAlignedGeometryOverlaps.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugAlignedConfirmedOverlaps.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugAlignedSolidOverlaps.load(
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugRotatingTargetCommands.load(
@@ -21311,6 +21465,14 @@ namespace
         g_halo3ContactDebugVisibleSolidOverlaps.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleSolidSeparations.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugAlignedDirectOverlaps.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugAlignedGeometryOverlaps.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugAlignedConfirmedOverlaps.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugAlignedSolidOverlaps.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleMinimumGap.store(
             FLT_MAX, std::memory_order_release);

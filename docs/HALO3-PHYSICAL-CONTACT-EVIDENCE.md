@@ -2234,3 +2234,20 @@ palette consumer already rejects approvals older than 100 ms. A render-palette
 gap can therefore safely stop contact work without clearing the approval; true
 tracking, gameplay, lifecycle, vehicle, and weapon failures retain their
 immediate resets.
+
+## Rotating replay time-alignment diagnosis
+
+The motion-reserve candidate `8cb8d34` also failed and was reverted. It stayed
+clear for 2,107 checks before two confirmed overlaps, despite continuously
+publishing corrected poses and reaching a one-metre bounded setback. More
+clearance therefore did not address the measurement. The replay checker reads
+the last final weapon palette, then compares it with the target transform read
+on the following gameplay sample. A rotating target can advance between those
+timestamps even though the weapon and target were separated when rendered.
+
+The next diagnostic candidate keeps gameplay unchanged. During the opt-in
+rotating replay only, it uses the exact displayed-palette timestamp plus native
+linear velocity, angular velocity, and centre of mass to rewind the target
+transform to the same time. It reports the existing current-time overlap and a
+second time-aligned overlap. The validator remains unchanged until runtime
+evidence proves whether this is a cross-frame false positive.
