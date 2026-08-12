@@ -994,6 +994,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactDebugVisibleConfirmedOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidSeparations{0};
+    std::atomic<uint32_t> g_halo3ContactDebugLastResetReason{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
     std::atomic<float> g_halo3ContactDebugVisibleMaximumGap{-FLT_MAX};
 
@@ -11142,8 +11143,10 @@ namespace
         }
     }
 
-    void Halo3ResetPhysicalContact()
+    void Halo3ResetPhysicalContact(uint32_t debugReason = 0)
     {
+        g_halo3ContactDebugLastResetReason.store(
+            debugReason, std::memory_order_relaxed);
         g_halo3ContactDebounce.Reset();
         g_halo3ContactReleaseLatch.Reset();
         g_halo3ContactPreparedRenderDatum.store(
@@ -12117,7 +12120,7 @@ namespace
                 std::memory_order_relaxed);
             if (!gate || !motion.poseValid ||
                 (motion.sampleMs && nowMs - motion.sampleMs > 100))
-                Halo3ResetPhysicalContact();
+                Halo3ResetPhysicalContact(1);
             return;
         }
         g_halo3ContactLastMotionSerial = motion.serial;
@@ -12191,7 +12194,7 @@ namespace
             g_halo3ContactStage.store(
                 static_cast<uint32_t>(Halo3PhysicalContactStage::VisiblePose),
                 std::memory_order_relaxed);
-            Halo3ResetPhysicalContact();
+            Halo3ResetPhysicalContact(2);
             return;
         }
 
@@ -12224,7 +12227,7 @@ namespace
                 g_halo3ContactStage.store(
                     static_cast<uint32_t>(Halo3PhysicalContactStage::GameMode),
                     std::memory_order_relaxed);
-                Halo3ResetPhysicalContact();
+                Halo3ResetPhysicalContact(3);
                 return;
             }
             auto* table = *reinterpret_cast<unsigned char**>(
@@ -12235,7 +12238,7 @@ namespace
                     static_cast<uint32_t>(
                         Halo3PhysicalContactStage::ObjectTable),
                     std::memory_order_relaxed);
-                Halo3ResetPhysicalContact();
+                Halo3ResetPhysicalContact(4);
                 return;
             }
             OdstDataArrayHeaderView header{};
@@ -12256,7 +12259,7 @@ namespace
                     static_cast<uint32_t>(
                         Halo3PhysicalContactStage::ObjectTable),
                     std::memory_order_relaxed);
-                Halo3ResetPhysicalContact();
+                Halo3ResetPhysicalContact(5);
                 return;
             }
             auto* entries = *reinterpret_cast<unsigned char**>(
@@ -12439,7 +12442,7 @@ namespace
                     static_cast<uint32_t>(
                         Halo3PhysicalContactStage::HeldWeapon),
                     std::memory_order_relaxed);
-                Halo3ResetPhysicalContact();
+                Halo3ResetPhysicalContact(6);
                 return;
             }
             auto* unitEntry = entries +
@@ -12453,7 +12456,7 @@ namespace
                     static_cast<uint32_t>(
                         Halo3PhysicalContactStage::HeldWeapon),
                     std::memory_order_relaxed);
-                Halo3ResetPhysicalContact();
+                Halo3ResetPhysicalContact(7);
                 return;
             }
             auto* unitData = *reinterpret_cast<unsigned char**>(
@@ -12473,7 +12476,7 @@ namespace
                     static_cast<uint32_t>(
                         Halo3PhysicalContactStage::HeldWeapon),
                     std::memory_order_relaxed);
-                Halo3ResetPhysicalContact();
+                Halo3ResetPhysicalContact(8);
                 return;
             }
             g_halo3ContactActiveWeaponHandle.store(
@@ -12489,7 +12492,7 @@ namespace
                     static_cast<uint32_t>(
                         Halo3PhysicalContactStage::HeldWeapon),
                     std::memory_order_relaxed);
-                Halo3ResetPhysicalContact();
+                Halo3ResetPhysicalContact(9);
                 return;
             }
             auto* weaponData = *reinterpret_cast<unsigned char**>(
@@ -12500,7 +12503,7 @@ namespace
                     static_cast<uint32_t>(
                         Halo3PhysicalContactStage::HeldWeapon),
                     std::memory_order_relaxed);
-                Halo3ResetPhysicalContact();
+                Halo3ResetPhysicalContact(10);
                 return;
             }
             // Keep the preceding safe pose fresh while this proposal is being
@@ -12515,7 +12518,7 @@ namespace
             if (!std::isfinite(worldScale) || worldScale < 0.05f ||
                 worldScale > 2.0f)
             {
-                Halo3ResetPhysicalContact();
+                Halo3ResetPhysicalContact(11);
                 return;
             }
             const float authoredRadius =
@@ -12703,7 +12706,7 @@ namespace
                         aimTarget = -1;
                         aimKind = 0xFF;
                         debugAimData = nullptr;
-                        Halo3ResetPhysicalContact();
+                        Halo3ResetPhysicalContact(12);
                     }
                 }
                 else if (aimTarget != -1 && anchoredHandle == -1)
@@ -12953,7 +12956,7 @@ namespace
                     static_cast<uint32_t>(
                         Halo3PhysicalContactStage::HeldWeapon),
                     std::memory_order_relaxed);
-                Halo3ResetPhysicalContact();
+                Halo3ResetPhysicalContact(13);
                 return;
             }
             if (debugRig && debugExactVisibleReplay && debugAimData)
@@ -15507,7 +15510,7 @@ namespace
                 std::memory_order_relaxed);
             g_halo3PhysicalContactBindings.store(
                 false, std::memory_order_release);
-            Halo3ResetPhysicalContact();
+            Halo3ResetPhysicalContact(14);
         }
     }
 
@@ -16395,7 +16398,7 @@ namespace
                     "geometryOverlaps=%llu geometrySeparations=%llu "
                     "confirmedOverlaps=%llu "
                     "solidOverlaps=%llu solidSeparations=%llu "
-                    "rotatingCommands=%llu "
+                    "rotatingCommands=%llu resetReason=%u "
                     "gapRange=(%.4f %.4f)m",
                     (unsigned long long)
                         g_halo3ContactDebugVisiblePalettes.load(
@@ -16439,6 +16442,8 @@ namespace
                     (unsigned long long)
                         g_halo3ContactDebugRotatingTargetCommands.load(
                             std::memory_order_relaxed),
+                    g_halo3ContactDebugLastResetReason.load(
+                        std::memory_order_relaxed),
                     g_halo3ContactDebugVisibleMinimumGap.load(
                         std::memory_order_relaxed),
                     g_halo3ContactDebugVisibleMaximumGap.load(
