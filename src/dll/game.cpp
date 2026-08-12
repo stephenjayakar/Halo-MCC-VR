@@ -965,6 +965,18 @@ namespace
     std::atomic<uint64_t> g_halo3ContactApprovedPalettes{0};
     std::atomic<uint64_t> g_halo3ContactHeldPalettes{0};
     extern std::atomic<bool> g_halo3PhysicalContactBindings;
+    struct Halo3RenderEnvelopePublication
+    {
+        static constexpr uint32_t kMaximumSpheres = 16;
+        std::atomic<uint32_t> sequence{0};
+        std::atomic<uint64_t> sampleMs{0};
+        std::atomic<uint64_t> poseSerial{0};
+        std::atomic<int32_t> targetHandle{-1};
+        std::atomic<uint32_t> sphereCount{0};
+        std::atomic<float> targetRadius{0.0f};
+        std::atomic<float> spheres[kMaximumSpheres][4]{};
+    };
+    Halo3RenderEnvelopePublication g_halo3RenderEnvelope;
     // Debug-only replay publication. Unlike the older contact rig, this moves
     // the palette Halo actually submits for the visible held weapon. The
     // contact solver then consumes that same final palette on the next sample.
@@ -1131,6 +1143,95 @@ namespace
         return false;
     }
 
+    void Halo3PublishRenderEnvelope(
+        int32_t targetHandle,
+        const PhysicalContactCompoundShape& weaponShape,
+        float targetRadius, uint64_t sampleMs, uint64_t poseSerial)
+    {
+        auto& published = g_halo3RenderEnvelope;
+        published.sequence.fetch_add(1, std::memory_order_acq_rel);
+        uint32_t count = 0;
+        if (targetHandle != -1 &&
+            PhysicalContactCompoundValid(weaponShape) &&
+            weaponShape.childCount <=
+                Halo3RenderEnvelopePublication::kMaximumSpheres &&
+            std::isfinite(targetRadius) && targetRadius > 0.0f)
+        {
+            for (uint16_t child = 0; child < weaponShape.childCount; ++child)
+            {
+                PhysicalContactLocalBoundingSphere sphere{};
+                if (!PhysicalContactConvexLocalBoundingSphere(
+                        weaponShape.children[child], sphere))
+                {
+                    count = 0;
+                    break;
+                }
+                published.spheres[count][0].store(
+                    sphere.centre.x, std::memory_order_relaxed);
+                published.spheres[count][1].store(
+                    sphere.centre.y, std::memory_order_relaxed);
+                published.spheres[count][2].store(
+                    sphere.centre.z, std::memory_order_relaxed);
+                published.spheres[count][3].store(
+                    sphere.radius, std::memory_order_relaxed);
+                ++count;
+            }
+        }
+        published.sampleMs.store(count ? sampleMs : 0,
+                                 std::memory_order_relaxed);
+        published.poseSerial.store(count ? poseSerial : 0,
+                                   std::memory_order_relaxed);
+        published.targetHandle.store(count ? targetHandle : -1,
+                                     std::memory_order_relaxed);
+        published.targetRadius.store(count ? targetRadius : 0.0f,
+                                     std::memory_order_relaxed);
+        published.sphereCount.store(count, std::memory_order_relaxed);
+        published.sequence.fetch_add(1, std::memory_order_release);
+    }
+
+    bool Halo3ReadRenderEnvelope(
+        int32_t& targetHandle,
+        std::array<PhysicalContactLocalBoundingSphere,
+                   Halo3RenderEnvelopePublication::kMaximumSpheres>& spheres,
+        uint32_t& sphereCount, float& targetRadius,
+        uint64_t& sampleMs, uint64_t& poseSerial)
+    {
+        auto& published = g_halo3RenderEnvelope;
+        for (int attempt = 0; attempt < 2; ++attempt)
+        {
+            const uint32_t before = published.sequence.load(
+                std::memory_order_acquire);
+            if (before & 1u)
+                continue;
+            sampleMs = published.sampleMs.load(std::memory_order_relaxed);
+            poseSerial = published.poseSerial.load(std::memory_order_relaxed);
+            targetHandle = published.targetHandle.load(
+                std::memory_order_relaxed);
+            targetRadius = published.targetRadius.load(
+                std::memory_order_relaxed);
+            sphereCount = published.sphereCount.load(
+                std::memory_order_relaxed);
+            if (!sphereCount || sphereCount > spheres.size())
+                return false;
+            for (uint32_t sphere = 0; sphere < sphereCount; ++sphere)
+            {
+                spheres[sphere].centre = {
+                    published.spheres[sphere][0].load(
+                        std::memory_order_relaxed),
+                    published.spheres[sphere][1].load(
+                        std::memory_order_relaxed),
+                    published.spheres[sphere][2].load(
+                        std::memory_order_relaxed)};
+                spheres[sphere].radius = published.spheres[sphere][3].load(
+                    std::memory_order_relaxed);
+            }
+            if (published.sequence.load(std::memory_order_acquire) == before)
+                return targetHandle != -1 && sampleMs && poseSerial &&
+                    std::isfinite(targetRadius) && targetRadius > 0.0f;
+        }
+        return false;
+    }
+
     void Halo3PublishWeaponWallOffset(
         PhysicalContactVec3 offset, uint64_t sampleMs)
     {
@@ -1168,6 +1269,11 @@ namespace
     // palette hook only uses it to bound the render-model palette before
     // publishing its root; a missing tag binding simply withholds contact.
     unsigned char* Halo3LoadedTagDefinition(uint32_t datum);
+    bool Halo3ContactObjectDataForHandle(
+        int32_t objectHandle, unsigned char*& objectData,
+        uint8_t* objectKind);
+    PhysicalContactTransform Halo3ContactObjectTransform(
+        const unsigned char* objectData);
 
     void Halo3PublishWeaponPose(
         Halo3VisibleWeaponPosePublication& published,
@@ -5797,6 +5903,80 @@ namespace
                                 destination[node].rotation[index + 1] = rotated.y;
                                 destination[node].rotation[index + 2] = rotated.z;
                             }
+                        }
+                    }
+                    std::array<PhysicalContactLocalBoundingSphere,
+                               Halo3RenderEnvelopePublication::kMaximumSpheres>
+                        envelopeSpheres{};
+                    uint32_t envelopeSphereCount = 0;
+                    int32_t envelopeTargetHandle = -1;
+                    float envelopeTargetRadius = 0.0f;
+                    uint64_t envelopeMs = 0;
+                    uint64_t envelopeSerial = 0;
+                    if (approvedCorrected && std::isfinite(worldScale) &&
+                        worldScale >= 0.05f && worldScale <= 2.0f &&
+                        Halo3ReadRenderEnvelope(
+                            envelopeTargetHandle, envelopeSpheres,
+                            envelopeSphereCount, envelopeTargetRadius,
+                            envelopeMs, envelopeSerial) &&
+                        nowMs >= envelopeMs && nowMs - envelopeMs <= 100)
+                    {
+                        __try
+                        {
+                            unsigned char* targetData = nullptr;
+                            uint8_t targetKind = 0xFF;
+                            if (Halo3ContactObjectDataForHandle(
+                                    envelopeTargetHandle, targetData,
+                                    &targetKind))
+                            {
+                                const PhysicalContactTransform targetTransform =
+                                    Halo3ContactObjectTransform(targetData);
+                                PhysicalContactTransform displayedTransform{};
+                                displayedTransform.scale = destination[0].scale;
+                                displayedTransform.forward = {
+                                    destination[0].rotation[0],
+                                    destination[0].rotation[1],
+                                    destination[0].rotation[2]};
+                                displayedTransform.left = {
+                                    destination[0].rotation[3],
+                                    destination[0].rotation[4],
+                                    destination[0].rotation[5]};
+                                displayedTransform.up = {
+                                    destination[0].rotation[6],
+                                    destination[0].rotation[7],
+                                    destination[0].rotation[8]};
+                                displayedTransform.position = {
+                                    destination[0].translation[0],
+                                    destination[0].translation[1],
+                                    destination[0].translation[2]};
+                                const PhysicalContactWallConstraint envelope =
+                                    PhysicalContactRotationInvariantSphereSetOffset(
+                                        envelopeSpheres.data(),
+                                        envelopeSphereCount,
+                                        displayedTransform,
+                                        targetTransform.position,
+                                        envelopeTargetRadius,
+                                        0.004f * worldScale,
+                                        worldScale);
+                                if (envelope.constrained)
+                                {
+                                    for (int node = 0;
+                                         node < renderNodeCount; ++node)
+                                    {
+                                        destination[node].translation[0] +=
+                                            envelope.offset.x;
+                                        destination[node].translation[1] +=
+                                            envelope.offset.y;
+                                        destination[node].translation[2] +=
+                                            envelope.offset.z;
+                                    }
+                                }
+                            }
+                        }
+                        __except (EXCEPTION_EXECUTE_HANDLER)
+                        {
+                            // Optional last-moment envelope fails open for
+                            // this palette. VR ownership remains installed.
                         }
                     }
                     displayedSerial = approvedSerial;
@@ -11181,6 +11361,7 @@ namespace
         g_halo3ContactBodyAnchorHandle = -1;
         g_halo3ContactBodyAnchorValid = false;
         Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
+        Halo3PublishRenderEnvelope(-1, {}, 0.0f, 0, 0);
         g_halo3ContactPreviousWallTransform = {};
         g_halo3ContactWallWeaponHandle = -1;
         g_halo3ContactPreviousWallPoseValid = false;
@@ -14093,10 +14274,13 @@ namespace
                 Halo3PublishWeaponWallOffset(
                     g_halo3ContactWallOffset + g_halo3ContactBodyOffset, nowMs);
                 if (observation ==
-                        PhysicalContactDynamicBodyObservation::Separated &&
-                    PhysicalContactLengthSquared(
-                        g_halo3ContactBodyOffset) <= 1.0e-10f)
+                            PhysicalContactDynamicBodyObservation::Separated &&
+                        PhysicalContactLengthSquared(
+                            g_halo3ContactBodyOffset) <= 1.0e-10f)
+                {
                     Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
+                    Halo3PublishRenderEnvelope(-1, {}, 0.0f, 0, 0);
+                }
             };
             const auto publishBodyFollow = [&] (int32_t targetHandle)
             {
@@ -14136,6 +14320,7 @@ namespace
                     0.0f, std::memory_order_relaxed);
                 Halo3PublishWeaponWallOffset(g_halo3ContactWallOffset, nowMs);
                 Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
+                Halo3PublishRenderEnvelope(-1, {}, 0.0f, 0, 0);
             }
             if (!g_halo3ContactPreviousPoseValid)
             {
@@ -14990,6 +15175,8 @@ namespace
                     kHalo3ContactTriangleSurfaceRadiusMeters +
                         observedSurfaceReserveMeters,
                     worldScale);
+            bool rotationEnvelopeConstrained = false;
+            float rotationEnvelopeTargetRadius = 0.0f;
             if (closestUsesAuthoredShape)
             {
                 PhysicalContactCompoundShape verifiedTargetShape{};
@@ -15013,6 +15200,58 @@ namespace
                 if (verifiedGeometry &&
                     PhysicalContactTransformFinite(verifiedTargetTransform))
                 {
+                    if (closestTargetShapeSource != 3 &&
+                        g_halo3ObjectGetVelocities)
+                    {
+                        float envelopeLinear[3]{}, envelopeAngular[3]{};
+                        g_halo3ObjectGetVelocities(
+                            closestHandle, envelopeLinear, envelopeAngular);
+                        const PhysicalContactVec3 angularVelocity{
+                            envelopeAngular[0], envelopeAngular[1],
+                            envelopeAngular[2]};
+                        const float targetRadius =
+                            PhysicalContactRotationInvariantRadius(
+                                verifiedTargetShape,
+                                &verifiedTargetMesh) *
+                            verifiedTargetTransform.scale;
+                        const float rotationalSurfaceSpeedMeters =
+                            PhysicalContactLength(angularVelocity) *
+                            targetRadius / worldScale;
+                        if (PhysicalContactFinite(angularVelocity) &&
+                            std::isfinite(rotationalSurfaceSpeedMeters) &&
+                            rotationalSurfaceSpeedMeters >= 0.05f)
+                        {
+                            std::array<PhysicalContactLocalBoundingSphere,
+                                       Halo3RenderEnvelopePublication::
+                                           kMaximumSpheres> spheres{};
+                            bool spheresValid = weaponShape.childCount > 0 &&
+                                weaponShape.childCount <= spheres.size();
+                            for (uint16_t child = 0;
+                                 spheresValid &&
+                                 child < weaponShape.childCount; ++child)
+                                spheresValid =
+                                    PhysicalContactConvexLocalBoundingSphere(
+                                        weaponShape.children[child],
+                                        spheres[child]);
+                            const PhysicalContactWallConstraint envelope =
+                                spheresValid
+                                ? PhysicalContactRotationInvariantSphereSetOffset(
+                                      spheres.data(), weaponShape.childCount,
+                                      intendedWeaponTransform,
+                                      verifiedTargetTransform.position,
+                                      targetRadius,
+                                      kHalo3ContactVisualGuardClearanceMeters *
+                                          worldScale,
+                                      worldScale)
+                                : PhysicalContactWallConstraint{};
+                            if (envelope.constrained)
+                            {
+                                bodyConstraint = envelope;
+                                rotationEnvelopeConstrained = true;
+                                rotationEnvelopeTargetRadius = targetRadius;
+                            }
+                        }
+                    }
                     const auto exactOverlap =
                         [&](const PhysicalContactTransform& candidate) {
                             bool surfaceOverlap = false;
@@ -15081,7 +15320,10 @@ namespace
                                 followedLength;
                         }
                     }
-                    if (followedConstraint.constrained)
+                    if (rotationEnvelopeConstrained)
+                    {
+                    }
+                    else if (followedConstraint.constrained)
                         bodyConstraint = followedConstraint;
                     else if (verifiedConstraint.constrained)
                     {
@@ -15112,6 +15354,12 @@ namespace
                 g_halo3ContactBodyAnchorValid = PhysicalContactFinite(
                     g_halo3ContactBodyLocalWeaponAnchor);
                 publishBodyFollow(closestHandle);
+                if (rotationEnvelopeConstrained)
+                    Halo3PublishRenderEnvelope(
+                        closestHandle, weaponShape,
+                        rotationEnvelopeTargetRadius, nowMs, proposalSerial);
+                else
+                    Halo3PublishRenderEnvelope(-1, {}, 0.0f, 0, 0);
             }
             if (bodyConstraint.constrained &&
                 !visualConstraintUsesFallbackNormal)
