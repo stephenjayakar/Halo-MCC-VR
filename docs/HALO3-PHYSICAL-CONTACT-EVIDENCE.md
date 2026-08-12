@@ -1883,6 +1883,14 @@ motion at the render boundary, while leaving all collision discovery and
 native physics work outside the render hook. Normal SteamVR settings were
 restored with the byte-identical hash above.
 
+The next null-runtime replay is diagnostic only. Alongside the existing exact
+triangle overlap counter, it records the complete authored solid-compound
+overlap at the same final corrected palette. This distinguishes a stale
+worker/correction publication from a solid query that disagrees with the
+rendered triangle geometry. The counters are environment-gated, lock-free and
+allocation-free in the existing debug path; they do not alter a pose, physics,
+melee, input, or production feature state.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

@@ -1469,6 +1469,26 @@ struct PhysicalContactCompoundHit : PhysicalContactConvexHit
     uint16_t targetChild = 0;
 };
 
+inline bool PhysicalContactCompoundsIntersect(
+    const PhysicalContactCompoundShape& a,
+    const PhysicalContactTransform& transformA,
+    const PhysicalContactCompoundShape& b,
+    const PhysicalContactTransform& transformB)
+{
+    if (!PhysicalContactCompoundValid(a) ||
+        !PhysicalContactTransformFinite(transformA) ||
+        !PhysicalContactCompoundValid(b) ||
+        !PhysicalContactTransformFinite(transformB))
+        return false;
+    for (uint16_t childA = 0; childA < a.childCount; ++childA)
+        for (uint16_t childB = 0; childB < b.childCount; ++childB)
+            if (PhysicalContactConvexIntersect(
+                    a.children[childA], transformA,
+                    b.children[childB], transformB))
+                return true;
+    return false;
+}
+
 inline PhysicalContactCompoundHit PhysicalContactSweepCompound(
     const PhysicalContactCompoundShape& weapon,
     const PhysicalContactTransform& previousWeaponTransform,

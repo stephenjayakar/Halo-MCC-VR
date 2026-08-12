@@ -972,6 +972,8 @@ namespace
     std::atomic<bool> g_halo3ContactDebugVisibleMeasurementStarted{false};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectSeparations{0};
+    std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidOverlaps{0};
+    std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidSeparations{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
     std::atomic<float> g_halo3ContactDebugVisibleMaximumGap{-FLT_MAX};
 
@@ -12612,6 +12614,10 @@ namespace
                                 0, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleDirectSeparations.store(
                                 0, std::memory_order_relaxed);
+                            g_halo3ContactDebugVisibleSolidOverlaps.store(
+                                0, std::memory_order_relaxed);
+                            g_halo3ContactDebugVisibleSolidSeparations.store(
+                                0, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleMinimumGap.store(
                                 FLT_MAX, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleMaximumGap.store(
@@ -12640,6 +12646,14 @@ namespace
                         (directHit
                              ? g_halo3ContactDebugVisibleDirectOverlaps
                              : g_halo3ContactDebugVisibleDirectSeparations)
+                            .fetch_add(1, std::memory_order_relaxed);
+                        const bool solidHit =
+                            PhysicalContactCompoundsIntersect(
+                                weaponShape, weaponTransform,
+                                debugTargetShape, debugTargetTransform);
+                        (solidHit
+                             ? g_halo3ContactDebugVisibleSolidOverlaps
+                             : g_halo3ContactDebugVisibleSolidSeparations)
                             .fetch_add(1, std::memory_order_relaxed);
                     }
                     const float amplitude =
@@ -15328,6 +15342,7 @@ namespace
                     "palettes=%llu exactPublishes=%llu exactPalettes=%llu "
                     "correctedPalettes=%llu "
                     "directOverlaps=%llu directSeparations=%llu "
+                    "solidOverlaps=%llu solidSeparations=%llu "
                     "gapRange=(%.4f %.4f)m",
                     (unsigned long long)
                         g_halo3ContactDebugVisiblePalettes.load(
@@ -15346,6 +15361,12 @@ namespace
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleDirectSeparations.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugVisibleSolidOverlaps.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugVisibleSolidSeparations.load(
                             std::memory_order_relaxed),
                     g_halo3ContactDebugVisibleMinimumGap.load(
                         std::memory_order_relaxed),
