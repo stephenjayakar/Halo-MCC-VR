@@ -1792,6 +1792,31 @@ produces an outward visual correction, and neither an unreliable sweep normal
 nor an absent cache can authorize a physics impulse. Headset acceptance remains
 pending.
 
+### Whole-visible-weapon dynamic blocker
+
+The first strict corrected-palette replay on source `a69430e` disproved the
+claim that the visual body blocker prevented all clipping. Its preserved log is
+`out/debug-openxr/20260812-015656688Z-visible-weapon-gap.log` (SHA-256
+`D24C68470E7F83567595FAAE6BEAA3CF9776400D7EF1D29C12EFA3409A6F1B57`).
+The visible Assault Rifle used all 36 authored triangles against all 88 target
+triangles. The palette hook applied the published correction 95 times in the
+first measured interval, but the corrected full meshes still overlapped 34
+times; later totals reached 78 overlaps after 239 corrected palettes. The
+validator correctly failed because it requires zero direct overlaps.
+
+The old depth calculation explains that result. It measured only the one held-
+weapon triangle or convex selected by the earliest exact hit. Moving that one
+piece outside the contacted target plane did not move a different, deeper part
+of the same rendered weapon outside it. The pending candidate keeps the selected
+exact support point for contact velocity and native impulse, but measures visual
+penetration from the deepest support point of the complete visible triangle
+mesh (or the complete authored compound fallback). One rigid translation then
+places the full rendered weapon on the target-facing side of that exact local
+surface. Regression coverage uses a two-part weapon where the selected triangle
+reports zero depth while the other triangle remains 0.50 m inside, and proves
+the full-shape calculation catches the missing depth. The strict corrected-
+palette replay remains the runtime gate; headset acceptance remains pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

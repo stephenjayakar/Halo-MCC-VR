@@ -1968,6 +1968,28 @@ inline PhysicalContactVec3 PhysicalContactUpdateDynamicBodyOffset(
 // unconstrained controller intent; the previous pose is the last rendered,
 // constrained pose. Measured end-pose penetration also covers rotation about
 // the grip, where position travel alone is insufficient.
+inline float PhysicalContactDynamicBodyPenetrationMeters(
+    PhysicalContactVec3 deepestWeaponPoint,
+    PhysicalContactVec3 targetSurfacePoint,
+    PhysicalContactVec3 targetToWeaponNormal,
+    float worldUnitsPerMeter)
+{
+    if (!PhysicalContactFinite(deepestWeaponPoint) ||
+        !PhysicalContactFinite(targetSurfacePoint) ||
+        !PhysicalContactFinite(targetToWeaponNormal) ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f)
+        return 0.0f;
+    const PhysicalContactVec3 outward = PhysicalContactNormalize(
+        targetToWeaponNormal, {});
+    if (PhysicalContactLengthSquared(outward) <= 1.0e-12f)
+        return 0.0f;
+    const float signedDistance = PhysicalContactDot(
+        deepestWeaponPoint - targetSurfacePoint, outward);
+    if (!std::isfinite(signedDistance))
+        return 0.0f;
+    return std::max(0.0f, -signedDistance / worldUnitsPerMeter);
+}
+
 inline PhysicalContactWallConstraint PhysicalContactDynamicBodyOffset(
     const PhysicalContactTransform& previousWeaponTransform,
     const PhysicalContactTransform& intendedWeaponTransform,

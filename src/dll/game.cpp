@@ -14037,11 +14037,23 @@ namespace
                     PhysicalContactConvexSupport(
                         closestTargetShape, closestTargetTransform,
                         closest.normal);
-                closestPenetrationMeters = std::max(
-                    0.0f,
-                    -PhysicalContactDot(
-                        closestWeaponPoint - targetPoint,
-                        closest.normal) / worldScale);
+                // The selected triangle/convex remains the exact material point
+                // used by physics. It is not enough for visual blocking: a
+                // different part of the held weapon can extend farther through
+                // the same target surface. Measure the deepest point of the
+                // complete visible collision shape so one rigid translation
+                // puts the whole rendered weapon on the free side.
+                const PhysicalContactVec3 deepestWeaponPoint = collisionShape
+                    ? PhysicalContactTriangleMeshSupport(
+                          weaponTriangleMesh, intendedWeaponTransform,
+                          closest.normal * -1.0f, 0.0f)
+                    : Halo3ContactCompoundSupport(
+                          weaponShape, intendedWeaponTransform,
+                          closest.normal * -1.0f);
+                closestPenetrationMeters =
+                    PhysicalContactDynamicBodyPenetrationMeters(
+                        deepestWeaponPoint, targetPoint, closest.normal,
+                        worldScale);
                 // Use the exact target surface for the native point impulse.
                 // The current weapon support point is only the matching
                 // material point used to measure rigid weapon velocity.

@@ -10363,6 +10363,23 @@ int main()
                 1.0f / 120.0f, 0.5f);
         PhysicalContactTransform bodyPrevious{};
         PhysicalContactTransform bodyIntended{};
+        const PhysicalContactVec3 selectedBodyWeaponPoint =
+            PhysicalContactTriangleSupport(
+                separatedSurfaceMesh.triangles[1], identityTransform,
+                {-1.0f, 0.0f, 0.0f}, 0.0f);
+        const PhysicalContactVec3 deepestBodyWeaponPoint =
+            PhysicalContactTriangleMeshSupport(
+                separatedSurfaceMesh, identityTransform,
+                {-1.0f, 0.0f, 0.0f}, 0.0f);
+        const float selectedBodyPenetration =
+            PhysicalContactDynamicBodyPenetrationMeters(
+                selectedBodyWeaponPoint, {}, {1.0f, 0.0f, 0.0f}, 1.0f);
+        const float wholeWeaponBodyPenetration =
+            PhysicalContactDynamicBodyPenetrationMeters(
+                deepestBodyWeaponPoint, {}, {1.0f, 0.0f, 0.0f}, 1.0f);
+        const float invalidBodyPenetration =
+            PhysicalContactDynamicBodyPenetrationMeters(
+                deepestBodyWeaponPoint, {}, {}, 1.0f);
         bodyIntended.position = {1.0f, 0.0f, 0.0f};
         const PhysicalContactWallConstraint bodyTunnel =
             PhysicalContactDynamicBodyOffset(
@@ -10420,6 +10437,9 @@ int main()
                   PhysicalContactDynamicBodyObservation::Uncertain &&
               bodyHitObservation ==
                   PhysicalContactDynamicBodyObservation::Uncertain &&
+              selectedBodyPenetration == 0.0f &&
+              std::fabs(wholeWeaponBodyPenetration - 0.50f) < 1.0e-6f &&
+              invalidBodyPenetration == 0.0f &&
               std::fabs(bodyUncertainHeld.x + 0.20f) < 1.0e-6f &&
               std::fabs(bodyUncertainStillHeld.x + 0.20f) < 1.0e-6f &&
               bodySeparated.x > -0.20f &&
@@ -10457,8 +10477,9 @@ int main()
             "all 36 Assault Rifle triangles fit beside its 20 authored convex "
             "vertices, while larger meshes rotate an evenly spread bounded "
             "face-centre sample set; "
-            "dynamic bodies reject only inward travel while preserving slides, "
-            "hold exact correction across a 50 ms query gap, then release");
+            "dynamic bodies use the deepest point of the whole visible weapon, "
+            "reject only inward travel while preserving slides, hold exact "
+            "correction across an unresolved query gap, then release");
 
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&
