@@ -9728,9 +9728,11 @@ int main()
               !PhysicalContactTargetMeleeSpeedEligible(false, 1, true) &&
               PhysicalContactTargetMeleeSpeedEligible(true, 1, true) &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 0) -
-                            0.75f) < 1.0e-6f &&
+                            0.50f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 12) -
-                            0.75f) < 1.0e-6f &&
+                            0.50f) < 1.0e-6f &&
+              std::fabs(PhysicalContactTargetMeleeThreshold(3.00f, 13) -
+                            1.00f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 1) -
                             1.50f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 2) -
@@ -9738,11 +9740,11 @@ int main()
               std::fabs(PhysicalContactTargetMeleeThreshold(0.50f, 0) -
                             0.50f) < 1.0e-6f &&
               PhysicalContactClassify(
-                  0.75f, 0.75f,
+                  0.50f, 0.50f,
                   PhysicalContactTargetMeleeThreshold(1.50f, 0)) ==
                   PhysicalContactAction::ImpulseAndMelee &&
               PhysicalContactClassify(
-                  0.75f, 0.75f,
+                  0.50f, 0.50f,
                   PhysicalContactTargetMeleeThreshold(1.50f, 1)) ==
                   PhysicalContactAction::ImpulseOnly &&
               std::fabs(fallbackEnemyNormal.x) < 1.0e-6f &&

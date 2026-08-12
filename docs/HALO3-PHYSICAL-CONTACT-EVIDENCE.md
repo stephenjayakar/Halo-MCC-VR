@@ -1776,6 +1776,24 @@ rejection are unchanged. Pure coverage proves that a `0.75 m/s` biped hit is
 melee while the same Mongoose contact remains physics-only. Headset acceptance
 remains pending.
 
+### 2026-08-12 minimum enemy threshold follow-up
+
+The `0.75 m/s` enemy-only threshold above was still an estimate rather than a
+headset-accepted result, while the user's requested outcome was that campaign
+enemy melee should be *much* easier. The next isolated candidate reduces only
+biped, creature, and giant melee to one third of the configured threshold. At
+the default `1.50 m/s` setting this reaches the existing `0.50 m/s` safety
+floor. Vehicles, loose objects, and props remain at the full configured
+threshold, so a slow Mongoose shove cannot become melee.
+
+The exact animated-body contact path, later-sample admission, tracked weapon
+speed requirement, per-target armed latch, `250 ms` global cooldown, and
+`8 m/s` spike rejection are unchanged. The `0.50 m/s` enemy threshold remains
+ten times the `0.05 m/s` tracking-noise floor. Pure coverage also proves that a
+larger explicit configuration still scales (`3.00 m/s` becomes `1.00 m/s`) and
+that the same `0.50 m/s` contact remains physics-only for a vehicle. Headset
+acceptance remains pending.
+
 ### 2026-08-12 rotating-body render follow-up
 
 The user reported that a weapon could still clip through an object after a
