@@ -804,9 +804,9 @@ public static class HaloMccVrContactInput {
 
     Wait-Until {
         $text = Get-NewLogText $runtimeLog $startedUtc
+        $useAlignedGapCounters = $Test -eq 'rotating-body-gap'
         if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
-            (Test-VisibleWeaponGapFailure $text
-                ($Test -eq 'rotating-body-gap'))) {
+            (Test-VisibleWeaponGapFailure $text $useAlignedGapCounters)) {
             throw 'Halo 3 visible-weapon-gap recorded a cumulative direct overlap.'
         }
         Test-ValidationResult $text $Test
@@ -817,9 +817,9 @@ public static class HaloMccVrContactInput {
         Start-Sleep -Seconds $PostPassHoldSeconds
     }
     $text = Get-NewLogText $runtimeLog $startedUtc
+    $useAlignedGapCounters = $Test -eq 'rotating-body-gap'
     if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
-        (Test-VisibleWeaponGapFailure $text
-            ($Test -eq 'rotating-body-gap'))) {
+        (Test-VisibleWeaponGapFailure $text $useAlignedGapCounters)) {
         throw 'Halo 3 visible-weapon-gap recorded a cumulative direct overlap during the post-pass hold.'
     }
     if (-not (Test-ValidationResult $text $Test)) {
