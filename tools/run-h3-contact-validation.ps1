@@ -394,9 +394,11 @@ function Test-VisibleWeaponGapFailure(
         $_ -match 'H3 physical contact DEBUG VISIBLE REPLAY:'
     } | Select-Object -Last 1
     if (-not $line) { return $false }
-    return $UseAlignedCounters
-        ? $line -match 'alignedConfirmed=([1-9][0-9]*)|alignedSolid=([1-9][0-9]*)'
-        : $line -match 'confirmedOverlaps=([1-9][0-9]*)'
+    if ($UseAlignedCounters) {
+        return $line -match
+            'alignedConfirmed=([1-9][0-9]*)|alignedSolid=([1-9][0-9]*)'
+    }
+    return $line -match 'confirmedOverlaps=([1-9][0-9]*)'
 }
 
 function Test-ValidationResult([string]$Text, [string]$Name) {
