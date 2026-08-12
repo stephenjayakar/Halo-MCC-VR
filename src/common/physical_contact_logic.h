@@ -1922,14 +1922,43 @@ struct PhysicalContactWallPlane
     float clearanceWorldUnits = 0.0f;
 };
 
-inline size_t PhysicalContactWallTriangleCentroidBudget(
+struct PhysicalContactWallTriangleFeatureBudget
+{
+    size_t centreCount = 0;
+    size_t edgeCount = 0;
+};
+
+inline PhysicalContactWallTriangleFeatureBudget
+PhysicalContactWallTriangleFeatureSampleBudget(
     size_t authoredConvexVertices, size_t authoredTriangles,
     size_t fixedCapacity)
 {
-    if (authoredConvexVertices >= fixedCapacity)
-        return 0;
-    return std::min(
-        authoredTriangles, fixedCapacity - authoredConvexVertices);
+    PhysicalContactWallTriangleFeatureBudget result{};
+    if (!authoredTriangles || authoredConvexVertices >= fixedCapacity)
+        return result;
+
+    const size_t available = fixedCapacity - authoredConvexVertices;
+    if (authoredTriangles <= available)
+    {
+        // Preserve one face-centre ray for every triangle first. Spend any
+        // remaining bounded capacity on edge midpoints, where a thin wall can
+        // intersect a long triangle while both endpoints and its centre clear.
+        result.centreCount = authoredTriangles;
+        const size_t edgeFeatureCount = authoredTriangles >
+                std::numeric_limits<size_t>::max() / size_t{3}
+            ? std::numeric_limits<size_t>::max()
+            : authoredTriangles * size_t{3};
+        result.edgeCount = std::min(
+            available - result.centreCount, edgeFeatureCount);
+        return result;
+    }
+
+    // Dense meshes cannot fit every feature in one physics sample. Keep both
+    // face interiors and edges represented, then rotate the evenly spread
+    // choices with the controller sample serial.
+    result.centreCount = (available + 1) / 2;
+    result.edgeCount = available - result.centreCount;
+    return result;
 }
 
 inline size_t PhysicalContactWallTriangleSampleIndex(
@@ -1941,6 +1970,33 @@ inline size_t PhysicalContactWallTriangleSampleIndex(
         return triangleCount;
     return ((sampleIndex * triangleCount) / sampleCount +
             phase % triangleCount) % triangleCount;
+}
+
+struct PhysicalContactWallTriangleEdgeSample
+{
+    size_t triangleIndex = 0;
+    size_t edgeIndex = 0;
+    bool valid = false;
+};
+
+inline PhysicalContactWallTriangleEdgeSample
+PhysicalContactWallTriangleEdgeSampleIndex(
+    size_t sampleIndex, size_t sampleCount, size_t triangleCount,
+    size_t phase)
+{
+    PhysicalContactWallTriangleEdgeSample result{};
+    if (!triangleCount || triangleCount >
+            std::numeric_limits<size_t>::max() / size_t{3})
+        return result;
+    const size_t edgeFeatureCount = triangleCount * size_t{3};
+    const size_t featureIndex = PhysicalContactWallTriangleSampleIndex(
+        sampleIndex, sampleCount, edgeFeatureCount, phase);
+    if (featureIndex >= edgeFeatureCount)
+        return result;
+    result.triangleIndex = featureIndex / 3;
+    result.edgeIndex = featureIndex % 3;
+    result.valid = true;
+    return result;
 }
 
 // Project one rigid translation against every exact static surface plane.

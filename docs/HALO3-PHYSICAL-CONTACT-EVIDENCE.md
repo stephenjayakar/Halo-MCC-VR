@@ -862,21 +862,28 @@ passes beside it. The target wall can be exact and native yet still never reach
 the rigid plane solver.
 
 The replacement keeps every authored convex vertex and adds exact triangle
-centres from the already prepared held-weapon collision mesh. The current and
-previous-transform native queries use the same local point, so both present
-overlap and sideways tunnelling remain continuous. The Assault Rifle's 20
-vertices plus all 36 triangle centres fit in a fixed 64-sample budget. Larger
-held meshes keep every outer vertex and rotate an evenly distributed subset of
-triangle centres across fresh controller samples; no allocation or new target
-proxy is introduced. Invalid or absent triangle data leaves the existing
-vertex-only path unchanged.
+centres and edge midpoints from the already prepared held-weapon collision
+mesh. The current and previous-transform native queries use the same local
+point, so both present overlap and sideways tunnelling remain continuous. The
+Assault Rifle's 20 vertices plus all 36 triangle centres and eight edge
+midpoints fit in a fixed 64-sample budget. An edge midpoint covers the case
+where a thin wall cuts a broad triangle while its endpoints and centre remain
+clear. Larger held meshes keep every outer vertex and rotate evenly distributed
+subsets of both feature kinds across fresh controller samples; no allocation or
+new target proxy is introduced. Invalid or absent triangle data leaves the
+existing vertex-only path unchanged.
+
+The edge-midpoint extension passes the cumulative Release build, pure tests,
+and the shared Reach consistency gate. Its exact installed candidate remains
+headset-pending; the accepted-build pointer does not advance.
 
 This improves narrow BSP, instanced-structure, and fixed-object coverage
 without naming a map or wall. It does not pretend that Valhalla's render-only
 decorator rocks have native collision; those still require the separately
 documented streamed decorator-resource or renderer-instance binding. Pure
-tests cover the fixed budget, complete Assault Rifle sample set, even large-
-mesh sampling, phase rotation, and invalid indices. Source `dc03a63` then
+tests cover the fixed budget, complete Assault Rifle centre set plus bounded
+edge samples, even large-mesh sampling, phase rotation, and invalid indices.
+Source `dc03a63` then
 passed a visible-state Valhalla Forge wall transaction under the SteamVR null
 driver. The assault rifle published all 56 samples, reached 13,660 native wall
 rays, and validated both exact map structure and a fixed Halo object. The

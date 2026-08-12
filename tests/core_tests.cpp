@@ -10619,25 +10619,43 @@ int main()
               std::fabs(bodyFollowClamped.rotationRadians - 0.35f) <
                   1.0e-6f &&
               !bodyFollowStale.valid && !bodyFollowInvalid.valid &&
-              PhysicalContactWallTriangleCentroidBudget(20, 222, 64) ==
-                  44 &&
-              PhysicalContactWallTriangleCentroidBudget(20, 36, 64) ==
-                  36 &&
-              PhysicalContactWallTriangleCentroidBudget(64, 768, 64) ==
-                  0 &&
+              PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
+                      .centreCount == 22 &&
+              PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
+                      .edgeCount == 22 &&
+              PhysicalContactWallTriangleFeatureSampleBudget(20, 36, 64)
+                      .centreCount == 36 &&
+              PhysicalContactWallTriangleFeatureSampleBudget(20, 36, 64)
+                      .edgeCount == 8 &&
+              PhysicalContactWallTriangleFeatureSampleBudget(64, 768, 64)
+                      .centreCount == 0 &&
+              PhysicalContactWallTriangleFeatureSampleBudget(64, 768, 64)
+                      .edgeCount == 0 &&
               PhysicalContactWallTriangleSampleIndex(0, 44, 222, 0) == 0 &&
               PhysicalContactWallTriangleSampleIndex(1, 44, 222, 0) == 5 &&
               PhysicalContactWallTriangleSampleIndex(43, 44, 222, 0) ==
                   216 &&
               PhysicalContactWallTriangleSampleIndex(43, 44, 222, 7) == 1 &&
               PhysicalContactWallTriangleSampleIndex(44, 44, 222, 0) ==
-                  222,
+                  222 &&
+              PhysicalContactWallTriangleEdgeSampleIndex(0, 8, 36, 0)
+                      .valid &&
+              PhysicalContactWallTriangleEdgeSampleIndex(0, 8, 36, 0)
+                      .triangleIndex == 0 &&
+              PhysicalContactWallTriangleEdgeSampleIndex(0, 8, 36, 0)
+                      .edgeIndex == 0 &&
+              PhysicalContactWallTriangleEdgeSampleIndex(7, 8, 36, 0)
+                      .triangleIndex == 31 &&
+              PhysicalContactWallTriangleEdgeSampleIndex(7, 8, 36, 0)
+                      .edgeIndex == 1 &&
+              !PhysicalContactWallTriangleEdgeSampleIndex(8, 8, 36, 0)
+                       .valid,
             "Wall contact solves exact rigid surface planes, sideways "
             "tunnelling, and corners, includes clearance, engages immediately, "
             "releases smoothly, clamps travel, and rejects invalid data; "
             "all 36 Assault Rifle triangles fit beside its 20 authored convex "
-            "vertices, while larger meshes rotate an evenly spread bounded "
-            "face-centre sample set; "
+            "vertices and eight triangle-edge midpoints, while larger meshes "
+            "rotate evenly spread bounded face-centre and edge samples; "
             "dynamic bodies reject only inward travel while preserving slides, "
             "hold exact correction across an unresolved query gap, follow the "
             "bounded translation and rotation of a moving body, accept only "

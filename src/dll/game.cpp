@@ -13641,16 +13641,19 @@ namespace
                      childIndex < weaponShape.childCount; ++childIndex)
                     wallVertexCount +=
                         weaponShape.children[childIndex].vertexCount;
-                const size_t wallTriangleCentroidCount =
+                const PhysicalContactWallTriangleFeatureBudget
+                    wallTriangleFeatureBudget =
                     collisionShape &&
                         PhysicalContactTriangleMeshValid(weaponTriangleMesh)
-                    ? PhysicalContactWallTriangleCentroidBudget(
+                    ? PhysicalContactWallTriangleFeatureSampleBudget(
                           wallVertexCount,
                           weaponTriangleMesh.triangleCount,
                           kWallAuthoredSampleBudget)
-                    : 0;
+                    : PhysicalContactWallTriangleFeatureBudget{};
                 const size_t wallSampleCount =
-                    wallVertexCount + wallTriangleCentroidCount;
+                    wallVertexCount +
+                    wallTriangleFeatureBudget.centreCount +
+                    wallTriangleFeatureBudget.edgeCount;
                 g_halo3ContactWallVertices.store(
                     static_cast<uint32_t>(wallSampleCount),
                     std::memory_order_relaxed);
@@ -13784,13 +13787,14 @@ namespace
                         (kHalo3ContactTriangleSurfaceRadiusMeters + 0.005f) *
                         worldScale;
                     for (size_t triangleIndex = 0;
-                         triangleIndex < wallTriangleCentroidCount;
+                         triangleIndex <
+                             wallTriangleFeatureBudget.centreCount;
                          ++triangleIndex)
                     {
                         const size_t sampledTriangle =
                             PhysicalContactWallTriangleSampleIndex(
                                 triangleIndex,
-                                wallTriangleCentroidCount,
+                                wallTriangleFeatureBudget.centreCount,
                                 weaponTriangleMesh.triangleCount,
                                 motion.serial);
                         if (sampledTriangle >=
@@ -13800,6 +13804,28 @@ namespace
                             weaponTriangleMesh.triangles[
                                 sampledTriangle].centre,
                             triangleClearance);
+                    }
+                    for (size_t edgeSampleIndex = 0;
+                         edgeSampleIndex < wallTriangleFeatureBudget.edgeCount;
+                         ++edgeSampleIndex)
+                    {
+                        const PhysicalContactWallTriangleEdgeSample edge =
+                            PhysicalContactWallTriangleEdgeSampleIndex(
+                                edgeSampleIndex,
+                                wallTriangleFeatureBudget.edgeCount,
+                                weaponTriangleMesh.triangleCount,
+                                motion.serial);
+                        if (!edge.valid || edge.triangleIndex >=
+                                weaponTriangleMesh.triangleCount)
+                            continue;
+                        const PhysicalContactTriangle& triangle =
+                            weaponTriangleMesh.triangles[edge.triangleIndex];
+                        const PhysicalContactVec3& first =
+                            triangle.vertices[edge.edgeIndex];
+                        const PhysicalContactVec3& second =
+                            triangle.vertices[(edge.edgeIndex + 1) % 3];
+                        processWallLocalPoint(
+                            (first + second) * 0.5f, triangleClearance);
                     }
 
                     if (collisionShape &&
