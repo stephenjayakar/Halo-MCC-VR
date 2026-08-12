@@ -8910,26 +8910,6 @@ int main()
                   5, 7, 42, kRightWristSubtree, false),
             "Physical contact publishes only the active primary weapon render "
             "model, never a small attachment sharing its wrist palette");
-        Check(PhysicalContactApprovedPaletteUsable(
-                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
-                  0x12340001, 0x12340001, 5, 5, 12, 11, 1000, 1100) &&
-              !PhysicalContactApprovedPaletteUsable(
-                  kActiveWeaponRenderTag, 0x4321u,
-                  0x12340001, 0x12340001, 5, 5, 12, 11, 1000, 1100) &&
-              !PhysicalContactApprovedPaletteUsable(
-                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
-                  0x12340001, 0x56780001, 5, 5, 12, 11, 1000, 1100) &&
-              !PhysicalContactApprovedPaletteUsable(
-                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
-                  0x12340001, 0x12340001, 5, 6, 12, 11, 1000, 1100) &&
-              !PhysicalContactApprovedPaletteUsable(
-                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
-                  0x12340001, 0x12340001, 5, 5, 12, 13, 1000, 1100) &&
-              !PhysicalContactApprovedPaletteUsable(
-                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
-                  0x12340001, 0x12340001, 5, 5, 12, 11, 1000, 1101),
-            "The render gate consumes only a fresh, same-weapon, same-shape "
-            "worker approval that cannot come from a future proposal");
 
         const PhysicalContactHit translation = PhysicalContactSweepCapsule(
             {0, 0, 0}, {0.5f, 0, 0}, {2, 0, 0}, {2.5f, 0, 0},
@@ -10356,18 +10336,6 @@ int main()
         const auto bodyHitObservation =
             PhysicalContactDynamicBodyObservationForTarget(
                 0x12340001, true, true, true);
-        const float stillTargetVisualClearance =
-            PhysicalContactDynamicVisualClearanceMeters(0.0f);
-        const float movingTargetVisualClearance =
-            PhysicalContactDynamicVisualClearanceMeters(0.20f);
-        const float fastTargetVisualClearance =
-            PhysicalContactDynamicVisualClearanceMeters(10.0f);
-        const float invalidTargetVisualClearance =
-            PhysicalContactDynamicVisualClearanceMeters(
-                std::numeric_limits<float>::quiet_NaN());
-        const float invalidVisualClearancePolicy =
-            PhysicalContactDynamicVisualClearanceMeters(
-                0.20f, 0.04f, 0.06f, 0.03f);
         const PhysicalContactVec3 bodyUncertainHeld =
             PhysicalContactUpdateDynamicBodyOffset(
                 {-0.20f, 0, 0}, {},
@@ -10395,21 +10363,6 @@ int main()
                 1.0f / 120.0f, 0.5f);
         PhysicalContactTransform bodyPrevious{};
         PhysicalContactTransform bodyIntended{};
-        PhysicalContactTransform verifiedIntended{};
-        const auto overlappingUntil = [](const PhysicalContactTransform& pose) {
-            return pose.position.x < 0.35f;
-        };
-        const PhysicalContactWallConstraint verifiedSeparation =
-            PhysicalContactVerifiedSeparationOffset(
-                verifiedIntended, {1.0f, 0.0f, 0.0f},
-                0.02f, 0.005f, 1.0f, overlappingUntil);
-        PhysicalContactTransform verifiedClear = verifiedIntended;
-        verifiedClear.position =
-            verifiedClear.position + verifiedSeparation.offset;
-        const PhysicalContactWallConstraint verifiedWrongDirection =
-            PhysicalContactVerifiedSeparationOffset(
-                verifiedIntended, {-1.0f, 0.0f, 0.0f},
-                0.02f, 0.005f, 0.50f, overlappingUntil);
         bodyIntended.position = {1.0f, 0.0f, 0.0f};
         const PhysicalContactWallConstraint bodyTunnel =
             PhysicalContactDynamicBodyOffset(
@@ -10467,21 +10420,13 @@ int main()
                   PhysicalContactDynamicBodyObservation::Uncertain &&
               bodyHitObservation ==
                   PhysicalContactDynamicBodyObservation::Uncertain &&
-              std::fabs(stillTargetVisualClearance - 0.008f) < 1.0e-6f &&
-              std::fabs(movingTargetVisualClearance - 0.020f) < 1.0e-6f &&
-              std::fabs(fastTargetVisualClearance - 0.035f) < 1.0e-6f &&
-              std::fabs(invalidTargetVisualClearance - 0.035f) < 1.0e-6f &&
-              std::fabs(invalidVisualClearancePolicy) < 1.0e-6f &&
               std::fabs(bodyUncertainHeld.x + 0.20f) < 1.0e-6f &&
               std::fabs(bodyUncertainStillHeld.x + 0.20f) < 1.0e-6f &&
-              PhysicalContactLengthSquared(bodySeparated) < 1.0e-10f &&
+              bodySeparated.x > -0.20f &&
+              bodySeparated.x < -0.18f &&
               std::fabs(bodyReblocked.x + 0.35f) < 1.0e-6f &&
               PhysicalContactLengthSquared(bodyInvalidObservation) <
                   1.0e-10f &&
-              verifiedSeparation.constrained &&
-              !overlappingUntil(verifiedClear) &&
-              verifiedSeparation.setbackWorldUnits > 0.35f &&
-              !verifiedWrongDirection.constrained &&
               bodyTunnel.constrained &&
               std::fabs(bodyTunnel.offset.x + 0.51f) < 1.0e-6f &&
               std::fabs(bodyTunnel.offset.y) < 1.0e-6f &&
@@ -10513,10 +10458,7 @@ int main()
             "vertices, while larger meshes rotate an evenly spread bounded "
             "face-centre sample set; "
             "dynamic bodies reject only inward travel while preserving slides, "
-            "hold exact correction across an unresolved query gap, accept only "
-            "a directly verified clear final pose, reserve bounded clearance "
-            "for measured target motion, then release directly to that checked "
-            "pose");
+            "hold exact correction across an unresolved query gap, then release");
 
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&

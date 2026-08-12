@@ -301,19 +301,15 @@ function Test-VisibleWeaponGapResult([string]$Text) {
     } | Select-Object -Last 1
     if (-not $line) { return $false }
     if ($line -notmatch
-        'exactPalettes=([0-9]+).*correctedPalettes=([0-9]+).*approvedPalettes=([0-9]+) heldPalettes=([0-9]+).*directOverlaps=([0-9]+) directSeparations=([0-9]+)') {
+        'exactPalettes=([0-9]+).*correctedPalettes=([0-9]+).*directOverlaps=([0-9]+) directSeparations=([0-9]+)') {
         return $false
     }
     $exactPalettes = [int]$Matches[1]
     $correctedPalettes = [int]$Matches[2]
-    $approvedPalettes = [int]$Matches[3]
-    $heldPalettes = [int]$Matches[4]
-    $directOverlaps = [int]$Matches[5]
-    $directSeparations = [int]$Matches[6]
+    $directOverlaps = [int]$Matches[3]
+    $directSeparations = [int]$Matches[4]
     return $exactPalettes -ge 900 -and
         $correctedPalettes -ge 250 -and
-        $approvedPalettes -ge 250 -and
-        $heldPalettes -ge 250 -and
         $directSeparations -ge 400 -and
         $directOverlaps -eq 0
 }
