@@ -10546,6 +10546,20 @@ int main()
             PhysicalContactBuildRigidBodyFollow(
                 {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f},
                 {}, {}, 1000, 1017, 0.5f);
+        PhysicalContactCompoundShape rotationEnvelopeWeapon{};
+        rotationEnvelopeWeapon.childCount = 1;
+        rotationEnvelopeWeapon.children[0] = makeBox(
+            {0.10f, 0.05f, 0.05f}, 0.0f);
+        PhysicalContactTransform rotationEnvelopeWeaponTransform{};
+        rotationEnvelopeWeaponTransform.position = {0.55f, 0.0f, 0.0f};
+        const PhysicalContactWallConstraint rotationEnvelope =
+            PhysicalContactRotationInvariantSphereOffset(
+                rotationEnvelopeWeapon,
+                rotationEnvelopeWeaponTransform, {}, 0.50f, 0.01f, 1.0f);
+        const PhysicalContactWallConstraint rotationEnvelopeTooFar =
+            PhysicalContactRotationInvariantSphereOffset(
+                rotationEnvelopeWeapon,
+                rotationEnvelopeWeaponTransform, {}, 2.0f, 0.01f, 1.0f);
         Check(wallTip.constrained &&
               std::fabs(wallTip.setbackWorldUnits - 0.60f) < 1.0e-6f &&
               std::fabs(wallTip.offset.x + 0.60f) < 1.0e-6f &&
@@ -10619,6 +10633,9 @@ int main()
               std::fabs(bodyFollowClamped.rotationRadians - 0.35f) <
                   1.0e-6f &&
               !bodyFollowStale.valid && !bodyFollowInvalid.valid &&
+              rotationEnvelope.constrained &&
+              rotationEnvelope.offset.x > 0.05f &&
+              !rotationEnvelopeTooFar.constrained &&
               PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
                       .centreCount == 22 &&
               PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
