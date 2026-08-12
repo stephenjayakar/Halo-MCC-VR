@@ -1920,6 +1920,12 @@ PhysicalContactDynamicBodyObservationForTarget(
     return PhysicalContactDynamicBodyObservation::Uncertain;
 }
 
+inline bool PhysicalContactDynamicImpulseNormalEligible(
+    bool sweptNormalReliable, bool cachedReliableNormal)
+{
+    return sweptNormalReliable || cachedReliableNormal;
+}
+
 inline PhysicalContactVec3 PhysicalContactUpdateDynamicBodyOffset(
     PhysicalContactVec3 currentOffset, PhysicalContactVec3 requestedOffset,
     PhysicalContactDynamicBodyObservation observation, float elapsedSeconds,

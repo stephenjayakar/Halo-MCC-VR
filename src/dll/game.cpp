@@ -6591,6 +6591,7 @@ namespace
     std::atomic<float> g_halo3ContactWallSetbackMeters{0.0f};
     std::atomic<float> g_halo3ContactBodySetbackMeters{0.0f};
     std::atomic<uint64_t> g_halo3ContactBodyConstraints{0};
+    std::atomic<uint64_t> g_halo3ContactBodyFallbackNormalConstraints{0};
     std::atomic<uint64_t> g_halo3ContactBodyUncertainHolds{0};
     std::atomic<float> g_halo3ContactBodyPeakSetbackMeters{0.0f};
     std::atomic<uint64_t> g_halo3ContactWallRays{0};
@@ -10868,6 +10869,8 @@ namespace
         g_halo3ContactBodySetbackMeters.store(0.0f,
                                                std::memory_order_relaxed);
         g_halo3ContactBodyConstraints.store(0, std::memory_order_relaxed);
+        g_halo3ContactBodyFallbackNormalConstraints.store(
+            0, std::memory_order_relaxed);
         g_halo3ContactBodyUncertainHolds.store(
             0, std::memory_order_relaxed);
         g_halo3ContactBodyPeakSetbackMeters.store(
@@ -13976,6 +13979,11 @@ namespace
                 !contact->contactNormalValid &&
                 closestTargetShapeSource == 3 && contact->meleeArmed &&
                 PhysicalContactEnemyMeleeKind(targetKind);
+            const bool dynamicImpulseNormalEligible =
+                PhysicalContactDynamicImpulseNormalEligible(
+                    closestNormalReliable, contact->contactNormalValid);
+            const bool visualConstraintUsesFallbackNormal =
+                closestUsesAuthoredShape && !dynamicImpulseNormalEligible;
             if (closestUsesAuthoredShape)
             {
                 if (closestNormalReliable)
@@ -13985,52 +13993,55 @@ namespace
                 }
                 else if (contact->contactNormalValid)
                     closest.normal = contact->contactNormal;
-                else if (!enemyMeleeWithoutReliableNormal)
+                else
                 {
                     // A newly observed pre-existing overlap has no swept
-                    // separating plane. Wait for separation instead of
-                    // inventing a center-to-center force direction.
-                    g_halo3ContactUnreliableNormalRejects.fetch_add(
-                        1, std::memory_order_relaxed);
-                    updateBodyConstraint(constrainedBodyObservation, {});
-                    g_halo3ContactDebounce.EndSample(nowMs);
-                    return;
+                    // separating plane. Its exact fallback direction is safe
+                    // only for moving the rendered kinematic weapon back out;
+                    // it must never drive a native rigid-body impulse.
+                    if (!enemyMeleeWithoutReliableNormal)
+                        g_halo3ContactUnreliableNormalRejects.fetch_add(
+                            1, std::memory_order_relaxed);
                 }
-                if (!enemyMeleeWithoutReliableNormal)
-                {
-                    closestWeaponPoint = PhysicalContactConvexSupport(
-                        closestWeaponShape, intendedWeaponTransform,
-                        closest.normal * -1.0f);
-                    const PhysicalContactVec3 targetPoint =
-                        PhysicalContactConvexSupport(
-                            closestTargetShape, closestTargetTransform,
-                            closest.normal);
-                    closestPenetrationMeters = std::max(
-                        0.0f,
-                        -PhysicalContactDot(
-                            closestWeaponPoint - targetPoint,
-                            closest.normal) / worldScale);
-                    // Use the exact target surface for the native point
-                    // impulse. The current weapon support point is only the
-                    // matching material point used to measure rigid weapon
-                    // velocity.
-                    closest.point = targetPoint;
-                }
+                closestWeaponPoint = PhysicalContactConvexSupport(
+                    closestWeaponShape, intendedWeaponTransform,
+                    closest.normal * -1.0f);
+                const PhysicalContactVec3 targetPoint =
+                    PhysicalContactConvexSupport(
+                        closestTargetShape, closestTargetTransform,
+                        closest.normal);
+                closestPenetrationMeters = std::max(
+                    0.0f,
+                    -PhysicalContactDot(
+                        closestWeaponPoint - targetPoint,
+                        closest.normal) / worldScale);
+                // Use the exact target surface for the native point impulse.
+                // The current weapon support point is only the matching
+                // material point used to measure rigid weapon velocity.
+                closest.point = targetPoint;
             }
             const PhysicalContactWallConstraint bodyConstraint =
-                enemyMeleeWithoutReliableNormal
-                ? PhysicalContactWallConstraint{}
-                : PhysicalContactDynamicBodyOffset(
-                      previousWeaponTransform, intendedWeaponTransform,
-                      closest.fraction, closest.normal,
-                      closestPenetrationMeters,
-                      kHalo3ContactTriangleSurfaceRadiusMeters, worldScale);
+                PhysicalContactDynamicBodyOffset(
+                    previousWeaponTransform, intendedWeaponTransform,
+                    closest.fraction, closest.normal,
+                    closestPenetrationMeters,
+                    kHalo3ContactTriangleSurfaceRadiusMeters, worldScale);
             updateBodyConstraint(
                 bodyConstraint.constrained
                     ? PhysicalContactDynamicBodyObservation::Blocked
                     : constrainedBodyObservation,
                 bodyConstraint.offset,
                 bodyConstraint.constrained ? closestHandle : -1);
+            if (bodyConstraint.constrained &&
+                visualConstraintUsesFallbackNormal)
+                g_halo3ContactBodyFallbackNormalConstraints.fetch_add(
+                    1, std::memory_order_relaxed);
+            if (visualConstraintUsesFallbackNormal &&
+                !enemyMeleeWithoutReliableNormal)
+            {
+                g_halo3ContactDebounce.EndSample(nowMs);
+                return;
+            }
             if (!previousPoseMs || visiblePoseMs <= previousPoseMs ||
                 visiblePoseMs - previousPoseMs > 100 ||
                 !g_halo3ObjectGetVelocities || !g_halo3ObjectGetCenter)
@@ -14134,8 +14145,9 @@ namespace
                 // The animated body and exact hit point are proven, but a
                 // pre-existing overlap has no separating plane. Use tracked
                 // weapon motion only to orient native enemy damage/effects;
-                // never use this synthetic normal for a rigid-body impulse or
-                // visible weapon constraint.
+                // never use this effects normal for a rigid-body impulse. The
+                // visual blocker above uses the exact sweep's geometry-based
+                // fallback independently.
                 closest.normal = PhysicalContactEnemyMeleeFallbackNormal(
                     pointVelocity.weaponMetersPerSecond, movementDirection);
                 if (PhysicalContactLengthSquared(closest.normal) <= 1.0e-12f)
@@ -14262,7 +14274,7 @@ namespace
                     weaponMass) && targetMassResolved;
             const bool targetIsDynamic = haveNativeMasses &&
                 PhysicalContactMotionTypeIsDynamic(targetMotionType) &&
-                !enemyMeleeWithoutReliableNormal;
+                dynamicImpulseNormalEligible;
             const PhysicalContactConstraintImpulse constraintImpulse =
                 targetIsDynamic
                 ? PhysicalContactSustainedImpulse(
@@ -14986,7 +14998,8 @@ namespace
             "targetTriangles=%u targetDetailed=%u "
             "targetFallback=%u targetConfirmRejects=%u nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm bodySetback=%.3fm "
-            "bodyConstraints=%llu bodyUncertainHolds=%llu bodyPeak=%.3fm "
+            "bodyConstraints=%llu bodyFallbackNormalConstraints=%llu "
+            "bodyUncertainHolds=%llu bodyPeak=%.3fm "
             "wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
             "wallVertices=%u wallPlanes=%u decoratorSolidDraws=%u "
@@ -15098,6 +15111,9 @@ namespace
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactBodyConstraints.load(
                 std::memory_order_relaxed),
+            (unsigned long long)
+                g_halo3ContactBodyFallbackNormalConstraints.load(
+                    std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactBodyUncertainHolds.load(
                 std::memory_order_relaxed),
             g_halo3ContactBodyPeakSetbackMeters.load(

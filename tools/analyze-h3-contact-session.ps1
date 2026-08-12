@@ -103,7 +103,8 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
                 'enemyFallbackNormalMelees', 'rejectPose', 'rejectVelocity',
                 'rejectMeleeSpike', 'weaponTriangles', 'targetTriangles',
                 'targetDetailed', 'targetFallback', 'nativeSamples',
-                'wallBlocks', 'bodyConstraints', 'bodyGapHolds',
+                'wallBlocks', 'bodyConstraints',
+                'bodyFallbackNormalConstraints', 'bodyGapHolds',
                 'bodyUncertainHolds', 'wallRays',
                 'wallMotionRays', 'wallObjectPlanes', 'wallVertices',
                 'wallPlanes', 'decoratorSolidDraws', 'decoratorInstances',
@@ -189,6 +190,8 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
         dynamic_gap_hold =
             (Test-Positive $maximum 'bodyGapHolds') -or
             (Test-Positive $maximum 'bodyUncertainHolds')
+        fallback_normal_visual_block =
+            Test-Positive $maximum 'bodyFallbackNormalConstraints'
         contact_haptic = Test-Positive $maximum 'contactHaptic'
         structure_wall =
             (Test-Positive $maximum 'wallBlocks') -and
@@ -270,7 +273,7 @@ if ($SelfTest) {
 [10:00:00.003] headset: 'SteamVR/OpenXR : oculus' (vendor 0x28DE) on runtime sample
 [10:00:00.004] headset: panel is running at 90.0Hz
 [10:00:00.005] H3 physical contact: optional native bindings installed
-[10:00:01.000] H3 physical contact status: sweeps=2 hits=1 impulses=1 releases=0 melees=0 commandStatus=2 meleeStatus=0 target=0x12340001 candidate=0x12340001 kind=3 weaponMass=2.764 targetMass=0.382 contactHaptic=0.250 authoredShapeHits=1 animatedBodyHits=0 weaponTriangles=36 targetShapeSource=1 targetTriangles=8 targetDetailed=1 targetFallback=0 wallBlocks=1 bodyConstraints=1 bodyUncertainHolds=1 wallRays=4 wallObjectPlanes=2 wallPlanes=3 decoratorPlanes=5 decoratorSelfTest=0
+[10:00:01.000] H3 physical contact status: sweeps=2 hits=1 impulses=1 releases=0 melees=0 commandStatus=2 meleeStatus=0 target=0x12340001 candidate=0x12340001 kind=3 weaponMass=2.764 targetMass=0.382 contactHaptic=0.250 authoredShapeHits=1 animatedBodyHits=0 weaponTriangles=36 targetShapeSource=1 targetTriangles=8 targetDetailed=1 targetFallback=0 wallBlocks=1 bodyConstraints=1 bodyFallbackNormalConstraints=1 bodyUncertainHolds=1 wallRays=4 wallObjectPlanes=2 wallPlanes=3 decoratorPlanes=5 decoratorSelfTest=0
 [10:00:01.001] H3 left grab status: bindings=1 acquisitions=1 commands=2 applied=2 releases=1 mass=0.382
 [10:00:01.002] H3 physical contact visible IDs: slotMatches=3 slotMisses=0 submissions=3
 '@

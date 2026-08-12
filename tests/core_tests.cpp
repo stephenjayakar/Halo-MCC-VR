@@ -8955,6 +8955,22 @@ int main()
             PhysicalContactSweepConvex(
                 rifle, overlappingRifle, overlappingRifle,
                 prop, propTransform);
+        const PhysicalContactVec3 existingOverlapWeaponPoint =
+            PhysicalContactConvexSupport(
+                rifle, overlappingRifle, existingOverlap.normal * -1.0f);
+        const PhysicalContactVec3 existingOverlapTargetPoint =
+            PhysicalContactConvexSupport(
+                prop, propTransform, existingOverlap.normal);
+        const float existingOverlapDepth = std::max(
+            0.0f,
+            -PhysicalContactDot(
+                existingOverlapWeaponPoint - existingOverlapTargetPoint,
+                existingOverlap.normal));
+        const PhysicalContactWallConstraint existingOverlapVisualConstraint =
+            PhysicalContactDynamicBodyOffset(
+                overlappingRifle, overlappingRifle,
+                existingOverlap.fraction, existingOverlap.normal,
+                existingOverlapDepth, 0.00125f, 1.0f);
         propTransform.position = {1.0f, 0.16f, 0};
         const PhysicalContactConvexHit exactGrazingMiss =
             PhysicalContactSweepConvex(
@@ -8976,11 +8992,17 @@ int main()
               exactTranslation.fraction < 0.30f &&
               exactTranslation.normal.x < -0.90f &&
               existingOverlap.hit && !existingOverlap.normalReliable &&
+              existingOverlapVisualConstraint.constrained &&
+              existingOverlapVisualConstraint.offset.x < -0.16f &&
+              !PhysicalContactDynamicImpulseNormalEligible(false, false) &&
+              PhysicalContactDynamicImpulseNormalEligible(true, false) &&
+              PhysicalContactDynamicImpulseNormalEligible(false, true) &&
               !exactGrazingMiss.hit && exactRotation.hit &&
               !invalidShape.hit,
             "Authored convex sweeps detect thin translation and rotation, "
-            "preserve grazing clearance, distinguish swept planes from "
-            "existing overlap, and reject invalid geometry");
+            "preserve grazing clearance, visually eject an existing overlap "
+            "without admitting its fallback normal for an impulse, and reject "
+            "invalid geometry");
 
         PhysicalContactCompoundShape twoPartWeapon{};
         twoPartWeapon.childCount = 2;

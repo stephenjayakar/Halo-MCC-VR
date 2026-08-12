@@ -1767,6 +1767,31 @@ reblocking, invalid-state rejection, and no melee rearm during uncertainty.
 This candidate does not change impulse strength, geometry, or melee rules.
 Headset acceptance remains pending.
 
+### Pre-existing-overlap visual blocker
+
+The same real-headset run counted 235 exact authored overlaps whose sweep could
+not supply a reliable separating plane. The previous path rejected a new
+overlap completely when no earlier reliable normal was cached. That protected
+native physics from a guessed force direction, but it also withheld the visual
+body constraint and allowed the rendered weapon to remain inside the target.
+
+The pending visual-blocker candidate keeps the safety boundary while separating
+the two uses of a normal. For an exact overlap, the sweep already returns a
+finite geometry-based fallback direction and the exact weapon/target convexes.
+Their opposing support points provide a bounded penetration correction for the
+rendered kinematic weapon. That fallback can publish only the visual blocker;
+it is explicitly ineligible for native rigid-body impulse. Ordinary targets
+return after the blocker is published. The already isolated animated-enemy
+path may continue only to native melee, using tracked weapon motion for effects
+orientation, and remains ineligible for impulse. Runtime telemetry records
+`bodyFallbackNormalConstraints`.
+
+The regression suite begins with an already intersecting rifle and prop. It
+proves the sweep marks the normal unreliable, the exact support-point depth
+produces an outward visual correction, and neither an unreliable sweep normal
+nor an absent cache can authorize a physics impulse. Headset acceptance remains
+pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
