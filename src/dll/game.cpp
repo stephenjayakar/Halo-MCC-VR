@@ -11211,16 +11211,12 @@ namespace
             std::memory_order_relaxed);
     }
 
-    void Halo3ProcessPhysicalWeaponContact(uint64_t nowMs);
-
     // Authoritative Halo 3 simulation thread. H3EK's objects_update body owns
     // the object_update_absolute_index transaction; the unique retail homolog
     // at +0x34067C carries the same object-list/update-loop invariants. Native
     // melee stays before Halo's update. Sustained whole-body velocity is
     // applied immediately after it so a floor-loaded body cannot overwrite the
-    // correction in the same tick. The visual/contact solver then observes the
-    // final post-physics transforms before approving a palette for rendering.
-    // The original always runs after a failure.
+    // correction in the same tick. The original always runs after a failure.
     void __fastcall Halo3ObjectsUpdateHook()
     {
         bool deferredWorldVelocity = false;
@@ -11855,13 +11851,10 @@ namespace
         // right-weapon contact this tick. This ordering prevents the nudge
         // response from knocking an actively held prop out of the palm.
         Halo3ConsumeLeftGrabCommand();
-        if (g_halo3RuntimeGeneration.load(std::memory_order_acquire))
-            Halo3ProcessPhysicalWeaponContact(GetTickCount64());
     }
 
-    // Simulation-thread-only, immediately after Halo's authoritative object
-    // update. Native writes are reached only after the same validated Halo 3
-    // TLS/object-table path used by the vehicle sampler.
+    // Camera-thread-only. Native writes are reached only after the same
+    // validated Halo 3 TLS/object-table path used by the vehicle sampler.
     void Halo3ProcessPhysicalWeaponContact(uint64_t nowMs)
     {
         const uint32_t generation =
@@ -15986,6 +15979,7 @@ namespace
             TitleAdapter_PublishHeartbeat(
                 GameTitle::Halo3, runtimeGeneration, cameraNowMs);
             Halo3SampleVehicleState(cameraNowMs);
+            Halo3ProcessPhysicalWeaponContact(cameraNowMs);
             Halo3ProcessLeftHandGrab(cameraNowMs);
         }
         // Low-frequency timing proof paired with vr.cpp's HMD sample-rate log.
