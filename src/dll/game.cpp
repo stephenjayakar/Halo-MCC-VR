@@ -6604,18 +6604,6 @@ namespace
     Halo3DirectWeaponAimPublication g_halo3DirectWeaponAim;
     std::atomic<uint32_t> g_halo3DirectWeaponAimOverrides{0};
     std::atomic<uint32_t> g_halo3DirectWeaponAimFaults{0};
-    std::atomic<bool> g_halo3DirectWeaponAimDebug{false};
-    std::atomic<uint32_t> g_halo3DirectWeaponAimCalls{0};
-    std::atomic<uint32_t> g_halo3DirectWeaponAimRejectBinding{0};
-    std::atomic<uint32_t> g_halo3DirectWeaponAimRejectGetter{0};
-    std::atomic<uint32_t> g_halo3DirectWeaponAimRejectSample{0};
-    std::atomic<uint32_t> g_halo3DirectWeaponAimRejectVr{0};
-    std::atomic<uint32_t> g_halo3DirectWeaponAimRejectOffset{0};
-    std::atomic<uint32_t> g_halo3DirectWeaponAimRejectOnFoot{0};
-    std::atomic<uint32_t> g_halo3DirectWeaponAimRejectUnit{0};
-    std::atomic<uint32_t> g_halo3DirectWeaponAimRejectGeneration{0};
-    std::atomic<uint32_t> g_halo3DirectWeaponAimRejectFreshness{0};
-    std::atomic<uint32_t> g_halo3DirectWeaponAimRejectVector{0};
     Halo3InterpolatedNodesFn g_halo3InterpolatedNodes = nullptr;
     Halo3MarkersInternalFn g_halo3MarkersInternal = nullptr;
     using Halo3ObjectSetVelocityFn = void(__fastcall*)(
@@ -8138,16 +8126,9 @@ namespace
         original(
             unitHandle, origin, forward, inheritedVelocity,
             firstPersonWeaponOffset, offsetOrigin, offsetAim, verifyOrigin);
-        const bool debug =
-            g_halo3DirectWeaponAimDebug.load(std::memory_order_relaxed);
-        if (debug)
-            g_halo3DirectWeaponAimCalls.fetch_add(1, std::memory_order_relaxed);
         if (!forward ||
             !g_halo3DirectWeaponAimBinding.load(std::memory_order_acquire))
         {
-            if (debug)
-                g_halo3DirectWeaponAimRejectBinding.fetch_add(
-                    1, std::memory_order_relaxed);
             return;
         }
 
@@ -8155,12 +8136,7 @@ namespace
         __try
         {
             if (!g_halo3PlayerUnitGetter)
-            {
-                if (debug)
-                    g_halo3DirectWeaponAimRejectGetter.fetch_add(
-                        1, std::memory_order_relaxed);
                 return;
-            }
             localUnitHandle = g_halo3PlayerUnitGetter(0);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -8181,59 +8157,16 @@ namespace
             generation) == Halo3VehicleState::OnFoot;
         Halo3DirectWeaponAimSample sample{};
         if (!Halo3ReadDirectWeaponAim(sample))
-        {
-            if (debug)
-                g_halo3DirectWeaponAimRejectSample.fetch_add(
-                    1, std::memory_order_relaxed);
             return;
-        }
         float direction[3]{};
-        const bool vrActive =
-            g_enabled.load(std::memory_order_relaxed) &&
-            g_vrAim.load(std::memory_order_relaxed) && VR_IsStereoEnabled();
         if (!Halo3DirectWeaponAimDirectionForShot(
                 true,
-                vrActive,
+                g_enabled.load(std::memory_order_relaxed) &&
+                    g_vrAim.load(std::memory_order_relaxed) &&
+                    VR_IsStereoEnabled(),
                 offsetAim, onFoot, unitHandle, localUnitHandle, generation,
                 GetTickCount64(), sample, direction))
         {
-            if (debug)
-            {
-                const uint64_t nowMs = GetTickCount64();
-                const float lengthSquared =
-                    sample.direction[0] * sample.direction[0] +
-                    sample.direction[1] * sample.direction[1] +
-                    sample.direction[2] * sample.direction[2];
-                if (!vrActive)
-                    g_halo3DirectWeaponAimRejectVr.fetch_add(
-                        1, std::memory_order_relaxed);
-                else if (!offsetAim)
-                    g_halo3DirectWeaponAimRejectOffset.fetch_add(
-                        1, std::memory_order_relaxed);
-                else if (!onFoot)
-                    g_halo3DirectWeaponAimRejectOnFoot.fetch_add(
-                        1, std::memory_order_relaxed);
-                else if (unitHandle == -1 || unitHandle != localUnitHandle)
-                    g_halo3DirectWeaponAimRejectUnit.fetch_add(
-                        1, std::memory_order_relaxed);
-                else if (generation == 0 ||
-                         sample.generation != generation)
-                    g_halo3DirectWeaponAimRejectGeneration.fetch_add(
-                        1, std::memory_order_relaxed);
-                else if (sample.sampleMs == 0 || nowMs < sample.sampleMs ||
-                         nowMs - sample.sampleMs >
-                             kHalo3DirectWeaponAimMaxAgeMs)
-                    g_halo3DirectWeaponAimRejectFreshness.fetch_add(
-                        1, std::memory_order_relaxed);
-                else if (!std::isfinite(sample.direction[0]) ||
-                         !std::isfinite(sample.direction[1]) ||
-                         !std::isfinite(sample.direction[2]) ||
-                         !std::isfinite(lengthSquared) ||
-                         lengthSquared < 0.9025f ||
-                         lengthSquared > 1.1025f)
-                    g_halo3DirectWeaponAimRejectVector.fetch_add(
-                        1, std::memory_order_relaxed);
-            }
             return;
         }
         memcpy(forward, direction, sizeof(direction));
@@ -10674,43 +10607,6 @@ namespace
             LOG("H3 direct weapon aim: first local on-foot shot used the "
                 "fresh visible-weapon direction before native aim assist");
             directAimFirstShotLogged = true;
-        }
-        static uint32_t directAimDebugCallsLogged = 0;
-        static uint64_t directAimDebugLastLogMs = 0;
-        const uint32_t directAimDebugCalls =
-            g_halo3DirectWeaponAimCalls.load(std::memory_order_relaxed);
-        const uint64_t directAimDebugNowMs = GetTickCount64();
-        if (g_halo3DirectWeaponAimDebug.load(std::memory_order_acquire) &&
-            directAimDebugCalls != directAimDebugCallsLogged &&
-            (directAimDebugLastLogMs == 0 ||
-             directAimDebugNowMs >= directAimDebugLastLogMs + 500))
-        {
-            LOG("H3 direct weapon aim DEBUG: calls=%u overrides=%u "
-                "binding=%u getter=%u sample=%u vr=%u offset=%u onFoot=%u "
-                "unit=%u generation=%u freshness=%u vector=%u",
-                directAimDebugCalls, directAimOverrides,
-                g_halo3DirectWeaponAimRejectBinding.load(
-                    std::memory_order_relaxed),
-                g_halo3DirectWeaponAimRejectGetter.load(
-                    std::memory_order_relaxed),
-                g_halo3DirectWeaponAimRejectSample.load(
-                    std::memory_order_relaxed),
-                g_halo3DirectWeaponAimRejectVr.load(
-                    std::memory_order_relaxed),
-                g_halo3DirectWeaponAimRejectOffset.load(
-                    std::memory_order_relaxed),
-                g_halo3DirectWeaponAimRejectOnFoot.load(
-                    std::memory_order_relaxed),
-                g_halo3DirectWeaponAimRejectUnit.load(
-                    std::memory_order_relaxed),
-                g_halo3DirectWeaponAimRejectGeneration.load(
-                    std::memory_order_relaxed),
-                g_halo3DirectWeaponAimRejectFreshness.load(
-                    std::memory_order_relaxed),
-                g_halo3DirectWeaponAimRejectVector.load(
-                    std::memory_order_relaxed));
-            directAimDebugCallsLogged = directAimDebugCalls;
-            directAimDebugLastLogMs = directAimDebugNowMs;
         }
 
         // The node anchor and occupant bounce are independent optional
@@ -21634,15 +21530,6 @@ namespace
         // projectile begins on the exact visible weapon direction, then Halo's
         // native targeting and aim-assist stages continue normally.
         {
-            wchar_t directAimDebugValue[8]{};
-            const DWORD directAimDebugLength = GetEnvironmentVariableW(
-                L"HALOMCCVR_H3_DIRECT_AIM_DEBUG", directAimDebugValue,
-                static_cast<DWORD>(std::size(directAimDebugValue)));
-            g_halo3DirectWeaponAimDebug.store(
-                directAimDebugLength > 0 &&
-                    directAimDebugLength < std::size(directAimDebugValue) &&
-                    directAimDebugValue[0] != L'0',
-                std::memory_order_release);
             g_halo3DirectWeaponAimBinding.store(
                 false, std::memory_order_release);
             g_origHalo3UnitAdjustProjectileRay = nullptr;
@@ -21650,27 +21537,6 @@ namespace
             g_halo3DirectWeaponAimOverrides.store(
                 0, std::memory_order_relaxed);
             g_halo3DirectWeaponAimFaults.store(
-                0, std::memory_order_relaxed);
-            g_halo3DirectWeaponAimCalls.store(0, std::memory_order_relaxed);
-            g_halo3DirectWeaponAimRejectBinding.store(
-                0, std::memory_order_relaxed);
-            g_halo3DirectWeaponAimRejectGetter.store(
-                0, std::memory_order_relaxed);
-            g_halo3DirectWeaponAimRejectSample.store(
-                0, std::memory_order_relaxed);
-            g_halo3DirectWeaponAimRejectVr.store(
-                0, std::memory_order_relaxed);
-            g_halo3DirectWeaponAimRejectOffset.store(
-                0, std::memory_order_relaxed);
-            g_halo3DirectWeaponAimRejectOnFoot.store(
-                0, std::memory_order_relaxed);
-            g_halo3DirectWeaponAimRejectUnit.store(
-                0, std::memory_order_relaxed);
-            g_halo3DirectWeaponAimRejectGeneration.store(
-                0, std::memory_order_relaxed);
-            g_halo3DirectWeaponAimRejectFreshness.store(
-                0, std::memory_order_relaxed);
-            g_halo3DirectWeaponAimRejectVector.store(
                 0, std::memory_order_relaxed);
 
             const uintptr_t rayHit =
