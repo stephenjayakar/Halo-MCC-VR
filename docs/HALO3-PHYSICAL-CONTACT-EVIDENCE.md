@@ -2043,6 +2043,46 @@ before the first impulse or target rotation rather than trying to recover after
 penetration. The strict validator requires sustained corrected approvals and
 zero displayed overlaps.
 
+Candidate `4f4f25e4355cd693c226b3ff1738cda7de49fb91` was built and
+installed from
+`out/candidates/4f4f25e-h3-physical-contact-20260812-063042103Z`; its DLL
+SHA-256 was
+`70D7211B6DB03BDCFF6B3EDE77A1920DEFD1BB30826FEFD0D26E18A405B73EF8`.
+The strict visible-weapon replay passed with zero displayed triangle and solid
+overlaps after 2,230 exact palettes, including 879 corrected palettes and 827
+approved palettes. Its preserved log is
+`out/debug-openxr/20260812-063104028Z-visible-weapon-gap.log`, SHA-256
+`367FCEAAC9CB700F8EDF678F480E36600B723B24E5B8F41F05AC5E6E40FF2A07`.
+The same installed candidate passed visible weapon nudge and exact loose-weapon
+lift/carry/release. Their preserved logs are
+`out/debug-openxr/20260812-063650725Z-visible-weapon-nudge.log`, SHA-256
+`BA3DECFD8AA0173C3BA8884A7068F7A7638E70CECF3EDD5451E3FFF202DDBBAF`,
+and `out/debug-openxr/20260812-063936948Z-weapon-scoop.log`, SHA-256
+`FCFB4BEBF84135E1B793074703E72004ED37F259277537334A3E0D0215329032`.
+The scoop resolved a native 0.382 kg weapon and measured 1.906 m peak lift,
+0.212 m carry and 0.474 m/s release. These null-driver results validate the
+guard and deterministic rig, not headset acceptance.
+
+The later High Ground Mongoose run exposed a separate melee-classification
+defect. Its preserved log is
+`out/debug-openxr/20260812-064236047Z-vehicle-nudge.log`, SHA-256
+`362A77D02712D3BFBB6FAFEFDE26B99C9FC6C817B24A919AF92B68740CEA7451`.
+The exact 502-triangle, 464.835 kg Mongoose had been moving from prior pushes.
+At the decisive contact the tracked weapon point moved only 0.88 m/s, but the
+target-relative speed was 1.70 m/s and queued a 1.68 m/s native melee. The
+validator incorrectly accepted an earlier completed impulse line before that
+queued melee executed. This proves target rebound must remain part of physics
+response but cannot contribute to melee classification.
+
+The next candidate therefore classifies all native melee from tracked weapon
+point velocity. Props and vehicles retain the configured threshold and strict
+first-contact surface-normal rule. Animated enemy kinds retain exact target
+selection and the armed sustained-contact allowance, but use a bounded
+one-third threshold reduction: the default 1.50 m/s setting becomes 1.00 m/s
+for bipeds, creatures and giants. The vehicle validator also requires the
+latest target status to have no pending melee, so it cannot pass on stale
+evidence again.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

@@ -237,6 +237,18 @@ function Test-VehicleReleaseResult([string]$Text) {
     if (-not (Test-DetailedTargetGeometrySeen $Text)) {
         return $false
     }
+    # Do not accept an earlier clean line while a later contact has queued a
+    # native melee. This caught a real slow Mongoose shove where target rebound
+    # raised relative speed to 1.68 m/s while the weapon itself moved 0.88 m/s.
+    $latestStatus = ($Text -split "`r?`n") | Where-Object {
+        $_ -match 'H3 physical contact status:' -and
+        $_ -match 'target=0x(?!FFFFFFFF)[0-9A-F]+ kind=1 '
+    } | Select-Object -Last 1
+    if (-not $latestStatus -or
+        $latestStatus -notmatch 'melees=0 ' -or
+        $latestStatus -notmatch 'meleeStatus=0 ') {
+        return $false
+    }
     $lines = $Text -split "`r?`n" | Where-Object {
         $_ -match 'H3 physical contact status:' -and
         $_ -match 'impulses=([1-9][0-9]*) releases=([1-9][0-9]*) melees=0 ' -and
@@ -729,16 +741,23 @@ public static class HaloMccVrContactInput {
         Test-ValidationResult $text $Test
     } $ValidationTimeoutSeconds "Halo 3 $Test did not reach its pass condition."
 
+    if ($PostPassHoldSeconds -gt 0) {
+        Write-Host "Holding the validated Forge process for $PostPassHoldSeconds seconds."
+        Start-Sleep -Seconds $PostPassHoldSeconds
+    }
     $text = Get-NewLogText $runtimeLog $startedUtc
+    if ($Test -eq 'visible-weapon-gap' -and
+        (Test-VisibleWeaponGapFailure $text)) {
+        throw 'Halo 3 visible-weapon-gap recorded a cumulative direct overlap during the post-pass hold.'
+    }
+    if (-not (Test-ValidationResult $text $Test)) {
+        throw "Halo 3 $Test lost its pass condition during the post-pass hold."
+    }
     [IO.File]::WriteAllText($savedLogPath, $text)
     if ($Test -in @('visible-weapon-nudge', 'visible-weapon-gap')) {
         Save-DesktopScreenshot $successScreenshot
     }
     $passed = $true
-    if ($PostPassHoldSeconds -gt 0) {
-        Write-Host "Holding the validated Forge process for $PostPassHoldSeconds seconds."
-        Start-Sleep -Seconds $PostPassHoldSeconds
-    }
 }
 catch {
     $failure = $_.Exception.Message

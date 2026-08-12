@@ -9627,6 +9627,16 @@ int main()
                 true, true, 1, {0.0f, 6.0f, 0.0f},
                 {0.0f, 2.1f, 0.0f},
                 {1.0f, 0.0f, 0.0f});
+        const float reboundingVehicleImpact =
+            PhysicalContactTargetMeleeImpactSpeed(
+                true, true, 1, {-4.0f, 0.0f, 0.0f},
+                {-0.88f, 0.0f, 0.0f},
+                {1.0f, 0.0f, 0.0f});
+        const float struckVehicleImpact =
+            PhysicalContactTargetMeleeImpactSpeed(
+                true, true, 1, {-1.90f, 0.0f, 0.0f},
+                {-1.70f, 0.0f, 0.0f},
+                {1.0f, 0.0f, 0.0f});
         const float stationaryEnemyImpact =
             PhysicalContactTargetMeleeImpactSpeed(
                 true, true, 0, {0.0f, 6.0f, 0.0f}, {},
@@ -9656,6 +9666,8 @@ int main()
               std::fabs(enemyTangentialImpact - 2.1f) < 1.0e-6f &&
               std::fabs(creatureTangentialImpact - 1.8f) < 1.0e-6f &&
               vehicleTangentialImpact == 0.0f &&
+              std::fabs(reboundingVehicleImpact - 0.88f) < 1.0e-6f &&
+              std::fabs(struckVehicleImpact - 1.70f) < 1.0e-6f &&
               stationaryEnemyImpact == 0.0f &&
               std::fabs(continuedEnemyImpact - 2.1f) < 1.0e-6f &&
               enemyRunsIntoStillWeapon == 0.0f &&
@@ -9668,6 +9680,16 @@ int main()
               !PhysicalContactTargetMeleeSpeedEligible(false, 0, false) &&
               !PhysicalContactTargetMeleeSpeedEligible(false, 1, true) &&
               PhysicalContactTargetMeleeSpeedEligible(true, 1, true) &&
+              std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 0) -
+                            1.00f) < 1.0e-6f &&
+              std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 12) -
+                            1.00f) < 1.0e-6f &&
+              std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 1) -
+                            1.50f) < 1.0e-6f &&
+              std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 2) -
+                            1.50f) < 1.0e-6f &&
+              std::fabs(PhysicalContactTargetMeleeThreshold(0.50f, 0) -
+                            0.50f) < 1.0e-6f &&
               std::fabs(fallbackEnemyNormal.x) < 1.0e-6f &&
               std::fabs(fallbackEnemyNormal.y + 1.0f) < 1.0e-6f &&
               std::fabs(fallbackEnemyNormal.z) < 1.0e-6f &&
@@ -9695,11 +9717,13 @@ int main()
                   2.00f, std::numeric_limits<float>::quiet_NaN(), 1.50f) ==
                   PhysicalContactAction::None,
             "Relative tracking noise and non-finite velocity do nothing, "
-            "only first-contact velocity closing into a prop surface can "
+            "only first-contact tracked weapon velocity closing into a prop "
+            "surface can "
             "melee, armed enemy contact accepts later deliberate tracked "
             "weapon-point speed and a motion-facing effects normal, "
-            "vehicle/prop tangential or sustained shoving stays physics-only, melee "
-            "begins exactly at the configured threshold, and implausible "
+            "target rebound and vehicle/prop tangential or sustained shoving "
+            "stay physics-only, enemies use the bounded one-third threshold "
+            "allowance, rigid targets begin exactly at the configured threshold, and implausible "
             "headset spikes remain impulse-only");
 
         PhysicalContactDebounce debounce;

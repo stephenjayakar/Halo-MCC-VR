@@ -2356,14 +2356,36 @@ inline PhysicalContactVec3 PhysicalContactEnemyMeleeFallbackNormal(
         weaponVelocityMetersPerSecond * -1.0f, movementFallback);
 }
 
+inline float PhysicalContactTargetMeleeThreshold(
+    float configuredThresholdMetersPerSecond, uint8_t targetKind)
+{
+    if (!std::isfinite(configuredThresholdMetersPerSecond))
+        return configuredThresholdMetersPerSecond;
+    if (!PhysicalContactEnemyMeleeKind(targetKind))
+        return configuredThresholdMetersPerSecond;
+
+    // Animated targets are harder to meet with exact controller samples than
+    // rigid props. Preserve the player's configured threshold for props and
+    // vehicles, but give bipeds/creatures/giants a deliberate one-third
+    // allowance. At the default 1.50 m/s this is an exact 1.00 m/s enemy hit.
+    return std::clamp(
+        configuredThresholdMetersPerSecond * (2.0f / 3.0f), 0.50f, 4.00f);
+}
+
 inline float PhysicalContactTargetMeleeImpactSpeed(
     bool firstContact, bool enemyWeaponSpeedEligible, uint8_t targetKind,
     PhysicalContactVec3 relativeVelocityMetersPerSecond,
     PhysicalContactVec3 weaponVelocityMetersPerSecond,
     PhysicalContactVec3 targetToWeaponNormal)
 {
+    // Damage represents the player's swing, not motion the target gained from
+    // an earlier shove. Use tracked weapon-point velocity for every melee
+    // decision. Relative velocity remains the correct input for rigid-body
+    // impulse magnitude, but a rebounding vehicle/prop cannot turn a slow hand
+    // motion into native melee damage.
+    (void)relativeVelocityMetersPerSecond;
     const float normalImpact = PhysicalContactMeleeImpactSpeed(
-        firstContact, relativeVelocityMetersPerSecond,
+        firstContact, weaponVelocityMetersPerSecond,
         targetToWeaponNormal);
     if (!enemyWeaponSpeedEligible ||
         !PhysicalContactEnemyMeleeKind(targetKind) ||

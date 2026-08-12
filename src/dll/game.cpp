@@ -14768,14 +14768,17 @@ namespace
                     firstContact, meleeSpeedEligible, targetKind,
                     relativeVelocity,
                     pointVelocity.weaponMetersPerSecond, closest.normal);
+            const float meleeThreshold =
+                PhysicalContactTargetMeleeThreshold(
+                    g_config.physical_weapon_melee_speed, targetKind);
             const PhysicalContactVec3 contactDirection =
                 PhysicalContactNormalize(relativeVelocity, movementDirection);
             const PhysicalContactAction action = PhysicalContactClassify(
                 relativeSpeed, meleeImpactSpeed,
-                g_config.physical_weapon_melee_speed);
+                meleeThreshold);
             if (action == PhysicalContactAction::ImpulseAndMelee)
                 g_halo3ContactReleaseLatch.Reset();
-            if (meleeImpactSpeed >= g_config.physical_weapon_melee_speed &&
+            if (meleeImpactSpeed >= meleeThreshold &&
                 !PhysicalContactMeleeSpeedPlausible(meleeImpactSpeed))
             {
                 g_halo3ContactMeleeSpikeRejects.fetch_add(
