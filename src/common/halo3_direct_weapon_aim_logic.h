@@ -34,31 +34,6 @@ inline bool Halo3DirectWeaponAimFromYawPitch(
     return true;
 }
 
-// The final visible right-hand pose already carries Halo's forward/left/up
-// basis. Publishing column zero from that render-owned pose keeps firing
-// independent of whether MCC happened to poll its XInput right-stick path in
-// the same frame.
-inline bool Halo3DirectWeaponAimFromVisibleBasis(
-    const float* basis, float (&outDirection)[3]) noexcept
-{
-    if (!basis)
-        return false;
-    const float lengthSquared =
-        basis[0] * basis[0] + basis[1] * basis[1] + basis[2] * basis[2];
-    if (!std::isfinite(basis[0]) || !std::isfinite(basis[1]) ||
-        !std::isfinite(basis[2]) || !std::isfinite(lengthSquared) ||
-        lengthSquared < 1.0e-6f)
-    {
-        return false;
-    }
-    const float inverseLength = 1.0f / std::sqrt(lengthSquared);
-    if (!std::isfinite(inverseLength))
-        return false;
-    for (int axis = 0; axis < 3; ++axis)
-        outDirection[axis] = basis[axis] * inverseLength;
-    return true;
-}
-
 // The detour calls Halo first, then may replace only the resulting direction.
 // Every lifecycle or identity doubt keeps that original direction unchanged.
 inline bool Halo3DirectWeaponAimDirectionForShot(

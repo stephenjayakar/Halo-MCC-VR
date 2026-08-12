@@ -95,33 +95,6 @@ weapon. The shot and muzzle should follow the visible barrel immediately;
 target adhesion should remain present. The log must contain both the installed
 line and the first-local-shot line.
 
-### 2026-08-12 missing-publication diagnosis and repair
-
-Opt-in diagnostic candidate `8d863b6` counted only bounded rejection gates in
-the firing detour; it did not change aim behavior. A visible Halo 3 Forge run
-fired the assault rifle through ordinary Windows mouse input. The detour saw 18
-native firing calls and rejected all 18 at `sample`, with every later gate at
-zero. The preserved log is
-`out/debug-openxr/20260812-110455498Z-vehicle-nudge.log`, SHA-256
-`C5700BC6C4E770E9ECC3A224E1DF3AC8C75B11ED064951951C3D6D8E76316CC8`.
-The diagnostic was explicitly reverted by `390618e` before this repair.
-
-The missing sample had a concrete code cause. Publication existed only inside
-`Game_ComputeAimStick`, which is reached through MCC's XInput polling path.
-Keyboard/mouse firing can call the verified native projectile helper without
-polling that path, leaving the otherwise-correct firing detour with no sample.
-
-The final visible right-hand path already computes the mount-trimmed controller
-basis in `ControllerWorldPoseEx`. Basis column zero is the same forward axis
-used to align the authored barrel and visible weapon. The repair publishes that
-normalized column through the existing lock-free snapshot whenever the exact
-Halo 3 generation is alive and on foot. The XInput publisher remains as a
-redundant fallback. This adds no input synthesis and does not change projectile
-origin, spread, tags, aim assist, or firing state. Unit coverage checks exact
-column selection, normalization, and invalid-basis rejection. Runtime
-acceptance still requires the installed and first-local-shot log lines from the
-same build, followed by the headset alignment test above.
-
 ## Always-scoped VR auto-aim
 
 ### Pinned evidence

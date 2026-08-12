@@ -1488,22 +1488,6 @@ int main()
                 "Halo 3 direct weapon aim converts the visible weapon's "
                 "world yaw/pitch to Halo's unit firing vector");
 
-            const float visibleBasis[9] = {
-                0.6f, 0.8f, 0.0f,
-                -0.8f, 0.6f, 0.0f,
-                0.0f, 0.0f, 1.0f};
-            const float invalidBasis[9] = {};
-            float visibleDirection[3]{};
-            Check(Halo3DirectWeaponAimFromVisibleBasis(
-                      visibleBasis, visibleDirection) &&
-                  !Halo3DirectWeaponAimFromVisibleBasis(
-                      invalidBasis, invalid) &&
-                  std::fabs(visibleDirection[0] - 0.6f) < 1.0e-6f &&
-                  std::fabs(visibleDirection[1] - 0.8f) < 1.0e-6f &&
-                  std::fabs(visibleDirection[2]) < 1.0e-6f,
-                "Halo 3 direct weapon aim publishes the normalized forward "
-                "column of the final visible right-hand pose");
-
             Halo3DirectWeaponAimSample sample{};
             sample.generation = 7;
             sample.sampleMs = 1000;
