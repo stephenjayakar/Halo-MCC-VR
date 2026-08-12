@@ -39,6 +39,62 @@ Runtime acceptance still requires a Halo 3 headset test proving that the
 visible barrel, floating reticle, muzzle effects, and shot direction remain on
 one line while the player moves their head around a stationary weapon.
 
+## Direct weapon-owned projectile base ray
+
+The stick path above makes Halo's normal unit aim approach the visible weapon,
+but it cannot make it arrive immediately. Official H3EK proves why: function
+`unit_euler_aiming_update` (`halo3_tag_test.exe` RVA `0xA5EC80`) integrates the
+unit's aim under authored angular-velocity and acceleration limits. Official
+`unit_get_aiming_vector` (RVA `0xA60D80`) then copies the integrated vector from
+unit `+0x1AC..+0x1B4`. A fast hand movement can therefore leave the shot on the
+torso-owned vector for several frames even though the visible weapon has
+already moved.
+
+Official H3EK names the narrow firing helper at RVA `0xA55D90`
+`unit_adjust_projectile_ray`. Its eight arguments are the firing unit handle,
+origin, forward vector, inherited velocity, first-person weapon offset, and
+three booleans for origin offset, aim offset, and origin verification. Its sole
+direct caller is at `0xA84C33` inside the official weapon-barrel projectile
+creation function. The helper obtains the unit camera position, conditionally
+copies the unit aiming vector, and performs Halo's authored origin adjustment
+and verification before the caller continues into targeting and aim assist.
+
+Pinned retail RVA `0x3524B0` is the exact optimized homolog. It has the same
+eight-argument ABI, the same camera/seat alternatives, the same unit aiming
+vector fields, and one direct caller at RVA `0x368B92` in the retail weapon-fire
+function. The following entry signature occurs exactly once in the complete
+pinned `halo3.dll` (file offset `0x3518B0`, RVA `0x3524B0`):
+
+```text
+48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18
+55 41 56 41 57 48 8D 68 C1 48 81 EC C0 00 00 00
+44 8B 15 ?? ?? ?? ?? 48 8B FA 0F 29 70 D8
+```
+
+The optional detour always calls Halo's original helper first. It may then
+replace only the final `forward[3]` with a fresh, finite, normalized direction
+published from the same world yaw/pitch that places the visible weapon. It
+does not change origin, spread, projectile data, weapon tags, animation, input,
+or trigger state. Because the hook is before the caller's native targeting and
+aim-assist work, those systems remain downstream of the corrected base ray.
+The normal right-stick servo also remains active so the character and weapon
+animation catch up naturally.
+
+The replacement is limited to the exact output-user-0 unit, on foot, while VR
+head tracking and VR aim are active, when the native call requested aim offset,
+and when the lock-free publication matches the current Halo 3 generation and
+is at most 100 ms old. AI, vehicles, stale samples, title transitions, tracking
+loss, and every failed identity check keep Halo's original direction. A runtime
+fault disables only this optional replacement while the detour continues to
+call the original helper. Unit coverage proves world-vector construction,
+normalization, the freshness boundary, and every local-player/lifecycle reject.
+
+Headset acceptance remains required. Fire the assault rifle while rapidly
+moving the controller sideways and while moving the head around a stationary
+weapon. The shot and muzzle should follow the visible barrel immediately;
+target adhesion should remain present. The log must contain both the installed
+line and the first-local-shot line.
+
 ## Always-scoped VR auto-aim
 
 ### Pinned evidence

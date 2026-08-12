@@ -113,8 +113,13 @@ The user confirmed that this frees the shotgun left arm. The removed synthetic p
 ## Input and firing
 
 - OpenXR actions are merged into XInput slot 0.
-- Controller aim is converted into Halo's normal aim steering so projectile direction, target logic, vehicles, and turrets remain game-owned.
-- Halo still owns projectile origin. There is no verified fire-origin hook.
+- Controller aim still drives Halo's normal aim steering for character motion,
+  vehicles, turrets, target logic, and animation. For the local player on foot,
+  the verified `unit_adjust_projectile_ray` detour replaces only the fresh base
+  firing direction with the visible weapon direction before Halo's native
+  targeting and aim-assist stages. It fails open to the original vector.
+- Halo still owns projectile origin, verification, spread, ballistics, and
+  effects. The direct-aim hook does not change origin.
 - The visible weapon mount trim must not rotate the reticle/projectile ray; otherwise calibration cannot converge.
 
 ## Native pause state

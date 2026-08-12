@@ -19,6 +19,7 @@
 #include "cutscene_theater_logic.h"
 #include "frame_pacing_logic.h"
 #include "halo3_aim_assist_logic.h"
+#include "halo3_direct_weapon_aim_logic.h"
 #include "halo3_theater_logic.h"
 #include "halo3_vehicle_logic.h"
 #include "hud_layout_logic.h"
@@ -1461,6 +1462,90 @@ int main()
               Halo3VrAimAssistMagnificationLevel(false, -1, 2) == -1,
             "Halo 3 VR uses the first authored scoped auto-aim level only for "
             "an unscoped zoom-capable weapon");
+        {
+            constexpr float kHalfPi = 1.57079632679489661923f;
+            float forward[3]{};
+            float left[3]{};
+            float up[3]{};
+            float invalid[3]{};
+            Check(Halo3DirectWeaponAimFromYawPitch(0.0f, 0.0f, forward) &&
+                  Halo3DirectWeaponAimFromYawPitch(
+                      kHalfPi, 0.0f, left) &&
+                  Halo3DirectWeaponAimFromYawPitch(
+                      0.0f, kHalfPi, up) &&
+                  !Halo3DirectWeaponAimFromYawPitch(
+                      std::numeric_limits<float>::quiet_NaN(), 0.0f,
+                      invalid) &&
+                  std::fabs(forward[0] - 1.0f) < 1.0e-6f &&
+                  std::fabs(forward[1]) < 1.0e-6f &&
+                  std::fabs(forward[2]) < 1.0e-6f &&
+                  std::fabs(left[0]) < 1.0e-6f &&
+                  std::fabs(left[1] - 1.0f) < 1.0e-6f &&
+                  std::fabs(left[2]) < 1.0e-6f &&
+                  std::fabs(up[0]) < 1.0e-6f &&
+                  std::fabs(up[1]) < 1.0e-6f &&
+                  std::fabs(up[2] - 1.0f) < 1.0e-6f,
+                "Halo 3 direct weapon aim converts the visible weapon's "
+                "world yaw/pitch to Halo's unit firing vector");
+
+            Halo3DirectWeaponAimSample sample{};
+            sample.generation = 7;
+            sample.sampleMs = 1000;
+            sample.direction[0] = 0.6f;
+            sample.direction[1] = 0.8f;
+            sample.direction[2] = 0.0f;
+            float accepted[3]{};
+            Check(Halo3DirectWeaponAimDirectionForShot(
+                      true, true, true, true, 0x1234, 0x1234,
+                      7, 1100, sample, accepted) &&
+                  std::fabs(accepted[0] - 0.6f) < 1.0e-6f &&
+                  std::fabs(accepted[1] - 0.8f) < 1.0e-6f &&
+                  std::fabs(accepted[2]) < 1.0e-6f,
+                "Halo 3 direct weapon aim accepts an exact local-player, "
+                "on-foot sample at the 100 ms freshness boundary");
+            Check(!Halo3DirectWeaponAimDirectionForShot(
+                      false, true, true, true, 1, 1, 7, 1001,
+                      sample, accepted) &&
+                  !Halo3DirectWeaponAimDirectionForShot(
+                      true, false, true, true, 1, 1, 7, 1001,
+                      sample, accepted) &&
+                  !Halo3DirectWeaponAimDirectionForShot(
+                      true, true, false, true, 1, 1, 7, 1001,
+                      sample, accepted) &&
+                  !Halo3DirectWeaponAimDirectionForShot(
+                      true, true, true, false, 1, 1, 7, 1001,
+                      sample, accepted) &&
+                  !Halo3DirectWeaponAimDirectionForShot(
+                      true, true, true, true, 1, 2, 7, 1001,
+                      sample, accepted) &&
+                  !Halo3DirectWeaponAimDirectionForShot(
+                      true, true, true, true, -1, -1, 7, 1001,
+                      sample, accepted) &&
+                  !Halo3DirectWeaponAimDirectionForShot(
+                      true, true, true, true, 1, 1, 8, 1001,
+                      sample, accepted) &&
+                  !Halo3DirectWeaponAimDirectionForShot(
+                      true, true, true, true, 1, 1, 7, 999,
+                      sample, accepted) &&
+                  !Halo3DirectWeaponAimDirectionForShot(
+                      true, true, true, true, 1, 1, 7, 1101,
+                      sample, accepted),
+                "Halo 3 direct weapon aim rejects disabled, non-aim, vehicle, "
+                "non-local, invalid-generation, future, and stale shots");
+
+            sample.direction[0] =
+                std::numeric_limits<float>::infinity();
+            Check(!Halo3DirectWeaponAimDirectionForShot(
+                      true, true, true, true, 1, 1, 7, 1001,
+                      sample, accepted),
+                "Halo 3 direct weapon aim rejects non-finite publications");
+            sample.direction[0] = 0.4f;
+            sample.direction[1] = 0.0f;
+            Check(!Halo3DirectWeaponAimDirectionForShot(
+                      true, true, true, true, 1, 1, 7, 1001,
+                      sample, accepted),
+                "Halo 3 direct weapon aim rejects a non-unit publication");
+        }
         {
             std::array<uint8_t, 0xB3> query{};
             query[kHalo3AimAssistTagInstanceLoadOffset + 0] = 0x48;
