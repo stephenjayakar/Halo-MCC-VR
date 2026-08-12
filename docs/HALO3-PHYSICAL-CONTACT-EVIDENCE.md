@@ -2177,6 +2177,21 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
+### 2026-08-12 dynamic-body motion clearance
+
+Candidate `20b33b12d3a3cd8e04eb5126cfd7b8fa1ba1fb82` correctly stopped all
+render extrapolation, but the rotating target itself entered the fixed palette
+between worker samples. Its replay failed after 414 palettes with a measured
+minimum gap of -0.0245 m. The preserved log is
+`out/debug-openxr/20260812-162543304Z-rotating-body-gap.log`. That behavior is
+rejected and reverted by `42a3ae2`.
+
+The next candidate keeps the collision-approved render follow and adds a fixed
+40 mm clearance to the exact dynamic-body separation search. This is above the
+measured 25 mm inter-sample failure while remaining far below the existing 1 m
+maximum correction. Static walls keep their precise 4 mm clearance. The final
+pose still has to pass complete triangle-surface and solid-overlap checks.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

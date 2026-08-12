@@ -14660,8 +14660,7 @@ namespace
                     updateBodyConstraint(
                         PhysicalContactDynamicBodyObservation::Blocked,
                         followedOffset, constrainedBodyTargetHandle);
-                    publishBodyFollow(
-                        constrainedBodyTargetHandle);
+                    Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
                     publishApprovedVisiblePose();
                     g_halo3ContactDebounce.EndSample(nowMs);
                     return;
@@ -14768,8 +14767,8 @@ namespace
                                         Blocked,
                                     verifiedGuard.offset,
                                     closestVisualGuardHandle);
-                                publishBodyFollow(
-                                    closestVisualGuardHandle);
+                                Halo3PublishWeaponBodyFollow(
+                                    {}, {}, {}, 0, 0);
                                 publishApprovedVisiblePose();
                                 g_halo3ContactDebounce.EndSample(nowMs);
                                 return;
@@ -15051,8 +15050,12 @@ namespace
                         PhysicalContactVerifiedSeparationOffset(
                             intendedWeaponTransform, closest.normal,
                             bodyConstraint.setbackWorldUnits,
-                            kHalo3ContactVisualGuardClearanceMeters *
-                                worldScale,
+                            // Dynamic bodies can enter a just-approved pose
+                            // before the next worker sample. The rotating-body
+                            // replay measured a 25 mm first failure. Keep a
+                            // bounded 40 mm motion margin here; static walls
+                            // retain their separate precise 4 mm clearance.
+                            0.04f * worldScale,
                             worldScale, exactOverlap);
                     PhysicalContactWallConstraint followedConstraint{};
                     if (g_halo3ContactBodyAnchorValid &&
@@ -15111,7 +15114,7 @@ namespace
                 g_halo3ContactBodyAnchorHandle = closestHandle;
                 g_halo3ContactBodyAnchorValid = PhysicalContactFinite(
                     g_halo3ContactBodyLocalWeaponAnchor);
-                publishBodyFollow(closestHandle);
+                Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
             }
             if (bodyConstraint.constrained &&
                 !visualConstraintUsesFallbackNormal)
