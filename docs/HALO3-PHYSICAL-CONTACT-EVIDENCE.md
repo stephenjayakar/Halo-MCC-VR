@@ -1825,23 +1825,6 @@ real-headset settings hash
 `F8B2C009AE05A2AC796D3458B9AA8B072A5BEA97CA8EC5A74FAA5DD585DBAB9E`.
 Headset acceptance remains pending.
 
-The pending replacement uses the contact normal only as a search direction,
-not as proof of separation. If the intended final pose overlaps, it translates
-the complete held-weapon shape outward through a fixed bounded search. Every
-trial is checked by the same complete exact query used by the strict replay:
-triangle mesh versus triangle mesh, triangle mesh versus authored Havok
-compound, or authored compound versus compound. It expands up to the existing
-one-metre safety cap, bisects the first proven clear interval ten times, adds a
-5 mm clearance only when that padded pose also tests clear, and publishes a
-constraint only when the final full-geometry query returns separated. Animated
-multi-node bodies remain on their separately bounded path; this change targets
-the exact complete geometry available for loose weapons, equipment, crates and
-vehicles. The hot path uses fixed stack storage and bounded loops, with no
-allocation, logging, locks, file I/O, or signature scanning. Regression coverage
-starts with one part of a two-part held mesh already inside a target while the
-other part is clear, and requires the returned full-shape pose to test separated.
-The strict Valhalla corrected-palette replay remains the runtime gate.
-
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
