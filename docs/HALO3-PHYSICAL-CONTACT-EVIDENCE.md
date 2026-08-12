@@ -2251,3 +2251,21 @@ linear velocity, angular velocity, and centre of mass to rewind the target
 transform to the same time. It reports the existing current-time overlap and a
 second time-aligned overlap. The validator remains unchanged until runtime
 evidence proves whether this is a cross-frame false positive.
+
+Candidate `cdbaf53` supplied that proof. Its preserved rotating replay is
+`out/debug-openxr/20260812-232601457Z-rotating-body-gap.log`, SHA-256
+`5B88DAC107B414B48C3EBD27B5D8FDA1D1513F2254B3862B8FF00F5F8065AD57`.
+The current-time comparison eventually counted three confirmed triangle and
+solid overlaps. The timestamp-aligned comparison of the same displayed weapon
+samples counted zero geometry intersections, zero confirmed penetrations, and
+zero solid overlaps through 10,852 exact palettes and 6,818 aligned
+separations. Two aligned samples touched only the 1.25 mm physical skin. The
+old rotating result is therefore a cross-frame validator false positive, not
+visible clipping.
+
+The rotating validator now requires the aligned confirmed and solid counters
+to remain zero. The ordinary non-rotating gap validator remains unchanged and
+continues to judge the live transform directly. Both counter sets stay in the
+debug log so a future disagreement remains visible. This changes no production
+pose, geometry, impulse, melee, input, or render behavior. Exact packaging and
+a replay under the corrected validator remain pending.

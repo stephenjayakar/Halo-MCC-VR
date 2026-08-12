@@ -360,11 +360,31 @@ function Test-RotatingBodyGapResult([string]$Text) {
     $line = ($Text -split "`r?`n") | Where-Object {
         $_ -match 'H3 physical contact DEBUG VISIBLE REPLAY:'
     } | Select-Object -Last 1
-    return (Test-VisibleWeaponGapResult $Text) -and $line -and
-        $line -match 'rotatingCommands=([1-9][0-9]{2,})'
+    if (-not $line -or $line -notmatch
+        'exactPalettes=([0-9]+).*correctedPalettes=([0-9]+).*approvedPalettes=([0-9]+) heldPalettes=([0-9]+).*directOverlaps=([0-9]+) directSeparations=([0-9]+).*geometryOverlaps=([0-9]+) geometrySeparations=([0-9]+) confirmedOverlaps=([0-9]+).*solidOverlaps=([0-9]+) solidSeparations=([0-9]+).*alignedOverlaps=([0-9]+) alignedGeometry=([0-9]+) alignedConfirmed=([0-9]+) alignedSolid=([0-9]+).*rotatingCommands=([0-9]+)') {
+        return $false
+    }
+    $exactPalettes = [int]$Matches[1]
+    $correctedPalettes = [int]$Matches[2]
+    $approvedPalettes = [int]$Matches[3]
+    $heldPalettes = [int]$Matches[4]
+    $directSeparations = [int]$Matches[6]
+    $geometrySeparations = [int]$Matches[8]
+    $alignedConfirmed = [int]$Matches[14]
+    $alignedSolid = [int]$Matches[15]
+    $rotatingCommands = [int]$Matches[16]
+    return $exactPalettes -ge 8000 -and
+        $correctedPalettes -ge 2500 -and
+        $approvedPalettes -ge 2500 -and
+        $heldPalettes -ge 8000 -and
+        $directSeparations -ge 2500 -and
+        $geometrySeparations -ge 2500 -and
+        $alignedConfirmed -eq 0 -and $alignedSolid -eq 0 -and
+        $rotatingCommands -ge 100
 }
 
-function Test-VisibleWeaponGapFailure([string]$Text) {
+function Test-VisibleWeaponGapFailure(
+    [string]$Text, [bool]$UseAlignedCounters = $false) {
     # The physical query has a 1.25 mm contact skin, so direct overlap includes
     # legitimate near-touch. A zero-radius coplanar edge can also hit from a
     # floating-point branch while the enclosing skin is clear. Require both
@@ -373,7 +393,10 @@ function Test-VisibleWeaponGapFailure([string]$Text) {
     $line = ($Text -split "`r?`n") | Where-Object {
         $_ -match 'H3 physical contact DEBUG VISIBLE REPLAY:'
     } | Select-Object -Last 1
-    return $line -and $line -match 'confirmedOverlaps=([1-9][0-9]*)'
+    if (-not $line) { return $false }
+    return $UseAlignedCounters
+        ? $line -match 'alignedConfirmed=([1-9][0-9]*)|alignedSolid=([1-9][0-9]*)'
+        : $line -match 'confirmedOverlaps=([1-9][0-9]*)'
 }
 
 function Test-ValidationResult([string]$Text, [string]$Name) {
@@ -782,7 +805,8 @@ public static class HaloMccVrContactInput {
     Wait-Until {
         $text = Get-NewLogText $runtimeLog $startedUtc
         if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
-            (Test-VisibleWeaponGapFailure $text)) {
+            (Test-VisibleWeaponGapFailure $text
+                ($Test -eq 'rotating-body-gap'))) {
             throw 'Halo 3 visible-weapon-gap recorded a cumulative direct overlap.'
         }
         Test-ValidationResult $text $Test
@@ -794,7 +818,8 @@ public static class HaloMccVrContactInput {
     }
     $text = Get-NewLogText $runtimeLog $startedUtc
     if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
-        (Test-VisibleWeaponGapFailure $text)) {
+        (Test-VisibleWeaponGapFailure $text
+            ($Test -eq 'rotating-body-gap'))) {
         throw 'Halo 3 visible-weapon-gap recorded a cumulative direct overlap during the post-pass hold.'
     }
     if (-not (Test-ValidationResult $text $Test)) {
