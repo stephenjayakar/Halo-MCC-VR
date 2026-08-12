@@ -13506,6 +13506,10 @@ namespace
             PhysicalContactConvexShape closestWeaponShape{};
             PhysicalContactConvexShape closestTargetShape{};
             PhysicalContactTransform closestTargetTransform{};
+            PhysicalContactCompoundShape closestTargetCompound{};
+            PhysicalContactTriangleMesh closestTargetTriangleMesh{};
+            bool closestTargetCompoundValid = false;
+            bool closestTargetTriangleMeshValid = false;
             uint32_t closestTargetShapeSource = 0;
             uint32_t closestTargetTriangleCount = 0;
             int32_t closestTargetBodyIndex = -1;
@@ -13844,6 +13848,12 @@ namespace
                 closestWeaponShape = authoredWeaponShape;
                 closestTargetShape = authoredTargetShape;
                 closestTargetTransform = authoredTargetTransform;
+                closestTargetCompound = targetShape;
+                closestTargetTriangleMesh = targetTriangleMesh;
+                closestTargetCompoundValid =
+                    PhysicalContactCompoundValid(targetShape);
+                closestTargetTriangleMeshValid =
+                    PhysicalContactTriangleMeshValid(targetTriangleMesh);
                 closestTargetShapeSource = targetShapeSource;
                 closestTargetTriangleCount = targetTriangleCount;
                 closestTargetBodyIndex = targetBodyIndex;
@@ -14047,12 +14057,50 @@ namespace
                 // material point used to measure rigid weapon velocity.
                 closest.point = targetPoint;
             }
-            const PhysicalContactWallConstraint bodyConstraint =
+            PhysicalContactWallConstraint bodyConstraint =
                 PhysicalContactDynamicBodyOffset(
                     previousWeaponTransform, intendedWeaponTransform,
                     closest.fraction, closest.normal,
                     closestPenetrationMeters,
                     kHalo3ContactTriangleSurfaceRadiusMeters, worldScale);
+            const bool exactFullTarget =
+                closestTargetShapeSource != 3 &&
+                (closestTargetTriangleMeshValid ||
+                 closestTargetCompoundValid);
+            if (exactFullTarget)
+            {
+                const float triangleRadius =
+                    kHalo3ContactTriangleSurfaceRadiusMeters * worldScale;
+                const auto exactOverlap =
+                    [&](const PhysicalContactTransform& candidate) {
+                        if (collisionShape)
+                        {
+                            if (closestTargetTriangleMeshValid)
+                                return PhysicalContactTriangleMeshesIntersect(
+                                    weaponTriangleMesh, candidate,
+                                    closestTargetTriangleMesh,
+                                    closestTargetTransform,
+                                    triangleRadius).hit;
+                            return PhysicalContactTriangleMeshCompoundIntersect(
+                                weaponTriangleMesh, candidate,
+                                closestTargetCompound,
+                                closestTargetTransform,
+                                triangleRadius).hit;
+                        }
+                        return closestTargetCompoundValid &&
+                            PhysicalContactCompoundsIntersect(
+                                weaponShape, candidate,
+                                closestTargetCompound,
+                                closestTargetTransform);
+                    };
+                const PhysicalContactWallConstraint exactConstraint =
+                    PhysicalContactExactSeparationOffset(
+                        intendedWeaponTransform, closest.normal,
+                        bodyConstraint.setbackWorldUnits,
+                        0.005f * worldScale, worldScale, exactOverlap);
+                if (exactConstraint.constrained)
+                    bodyConstraint = exactConstraint;
+            }
             updateBodyConstraint(
                 bodyConstraint.constrained
                     ? PhysicalContactDynamicBodyObservation::Blocked

@@ -10363,6 +10363,26 @@ int main()
                 1.0f / 120.0f, 0.5f);
         PhysicalContactTransform bodyPrevious{};
         PhysicalContactTransform bodyIntended{};
+        PhysicalContactTransform exactBodyTargetTransform{};
+        exactBodyTargetTransform.position = {-0.50f, 0.0f, 0.0f};
+        const auto exactBodyOverlap =
+            [&](const PhysicalContactTransform& transform) {
+                return PhysicalContactTriangleMeshCompoundIntersect(
+                    separatedSurfaceMesh, transform, gapTarget,
+                    exactBodyTargetTransform, 0.001f).hit;
+            };
+        const PhysicalContactWallConstraint exactBodySeparation =
+            PhysicalContactExactSeparationOffset(
+                identityTransform, {1.0f, 0.0f, 0.0f},
+                0.01f, 0.005f, 1.0f, exactBodyOverlap);
+        PhysicalContactTransform exactBodySeparatedTransform =
+            identityTransform;
+        exactBodySeparatedTransform.position =
+            exactBodySeparatedTransform.position + exactBodySeparation.offset;
+        const PhysicalContactWallConstraint exactBodyWrongDirection =
+            PhysicalContactExactSeparationOffset(
+                identityTransform, {}, 0.01f, 0.005f, 1.0f,
+                exactBodyOverlap);
         bodyIntended.position = {1.0f, 0.0f, 0.0f};
         const PhysicalContactWallConstraint bodyTunnel =
             PhysicalContactDynamicBodyOffset(
@@ -10420,6 +10440,11 @@ int main()
                   PhysicalContactDynamicBodyObservation::Uncertain &&
               bodyHitObservation ==
                   PhysicalContactDynamicBodyObservation::Uncertain &&
+              exactBodySeparation.constrained &&
+              exactBodySeparation.offset.x > 0.05f &&
+              exactBodySeparation.offset.x < 0.20f &&
+              !exactBodyOverlap(exactBodySeparatedTransform) &&
+              !exactBodyWrongDirection.constrained &&
               std::fabs(bodyUncertainHeld.x + 0.20f) < 1.0e-6f &&
               std::fabs(bodyUncertainStillHeld.x + 0.20f) < 1.0e-6f &&
               bodySeparated.x > -0.20f &&
@@ -10458,7 +10483,8 @@ int main()
             "vertices, while larger meshes rotate an evenly spread bounded "
             "face-centre sample set; "
             "dynamic bodies reject only inward travel while preserving slides, "
-            "hold exact correction across an unresolved query gap, then release");
+            "prove the final full-geometry pose is separated, hold exact "
+            "correction across an unresolved query gap, then release");
 
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&
