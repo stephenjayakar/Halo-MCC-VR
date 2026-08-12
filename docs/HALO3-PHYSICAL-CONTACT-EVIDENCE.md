@@ -1938,66 +1938,6 @@ must use a lock-free render proposal and worker approval, while keeping all
 collision work outside the render hook. Normal SteamVR settings were restored
 with the byte-identical hash above.
 
-The next candidate implements that render-boundary ownership change. The final
-primary-weapon palette is first published as a bounded lock-free proposal. The
-camera/gameplay worker retains all tag reads, object-table access, geometry
-construction, triangle/convex collision, and native physics work. It publishes
-a full corrected 16-node-or-smaller palette only after the final pose has been
-proven clear against both the rendered triangle surface and authored solid
-children. The render hook performs only bounded atomic reads and a fixed-size
-matrix copy: while a newer proposal is unchecked or blocked, it displays the
-last fresh approval for the exact same weapon handle, render tag, and node
-count. Weapon changes, tracking loss, runtime teardown, stale timestamps, and
-identity mismatches invalidate approval rather than crossing feature state.
-Animated multi-body targets hold the preceding safe pose during overlap because
-one struck limb is insufficient proof that the whole moving body is clear.
-
-Unit coverage now rejects stale, future, wrong-tag, wrong-handle, and wrong-node
-approvals, and confirms that the bounded exact-separation search returns only a
-directly clear final pose. Release build and full `ctest` pass. Runtime replay,
-artifact identity, and headset acceptance remain pending until this paragraph
-is updated with the committed candidate and preserved log.
-
-Candidate `ca628b1e9f326d70521ca3c3630e27bf1081b865` was built and installed
-from `out/candidates/ca628b1-h3-physical-contact-20260812-050424278Z`; its DLL
-SHA-256 was `CDEFAA79F54027FAB83365A5BCD7F0AE65B5F0375AF720848C7A6B99D45A6615`.
-The strict external-visible-state Halo 3 Forge replay failed after recording
-one displayed triangle overlap and one solid overlap. Its preserved log is
-`out/debug-openxr/20260812-050516592Z-visible-weapon-gap.log`, SHA-256
-`43AC2E68179411BCE4DC3456A086E22634CF52617C9A57D62B42EDC7B35DBFD6`.
-The same report proves the new handoff was live (`approvedPalettes=42`,
-`heldPalettes=28`), but only eight held palettes carried correction. The
-remaining hole is the dynamic-body `Separated` branch: it still eased the
-offset toward zero and approved that unchecked intermediate. This behavior is
-rejected and reverted by `1e4c204` before the next candidate. Normal SteamVR
-was restored and MCC closed.
-
-The next candidate preserves the proposal/approval gate but changes exact
-dynamic-body separation to release directly to the already checked controller
-pose. `Separated` is produced only when the constrained target was removed or
-its resolved geometry was tested and found clear; `Uncertain` continues to hold
-the last exact correction. This removes every unchecked intermediate release
-pose from the approval stream.
-
-Candidate `49fac411a56a884585572cccb4a3054395da8a72` was built and installed
-from `out/candidates/49fac41-h3-physical-contact-20260812-051540012Z`; its DLL
-SHA-256 was `D3050F752B8A290129FB41F654181EC7814A51900A6E40277B1CD417B2996FF2`.
-The strict visible-state Valhalla Forge replay failed with two displayed
-triangle overlaps and two solid overlaps. Its preserved log is
-`out/debug-openxr/20260812-051604413Z-visible-weapon-gap.log`, SHA-256
-`C31E09E95A0911AB79EE2AE62FE495E1A4498A3CEA80501AFCCAB8D17B6AFE62`.
-Direct release removed the earlier smoothed-release hole, but the target itself
-moved about 10 mm during the first report. A corrected pose that is clear at
-worker time can therefore be crossed by a moving dynamic body before the
-renderer consumes it. The candidate is rejected and reverted by `cb84883`.
-Normal SteamVR was restored and MCC closed.
-
-The next candidate treats contact as a closed gate: a blocked dynamic target
-never produces a new visible approval. Rendering holds the last clear palette
-for the duration of contact. Only the complete object sweep's exact no-hit
-branch advances to a newer proposed pose. This removes dependence on a target
-remaining still between worker proof and render consumption.
-
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
