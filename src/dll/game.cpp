@@ -39912,26 +39912,14 @@ bool Game_ComputeAimStick(float& outRx, float& outRy)
         }
     }
 
-    if (weaponOwnsDirection)
-    {
-        const uint32_t generation =
-            g_halo3RuntimeGeneration.load(std::memory_order_acquire);
-        const bool onFoot = Halo3VehicleSnapshotState(
-            g_halo3VehicleSnapshot.load(std::memory_order_acquire),
-            generation) == Halo3VehicleState::OnFoot;
-        float directWeaponDirection[3]{};
-        if (g_halo3DirectWeaponAimBinding.load(std::memory_order_acquire) &&
-            onFoot && Halo3DirectWeaponAimFromYawPitch(
-                desiredYaw, desiredPitch, directWeaponDirection))
-        {
-            Halo3PublishDirectWeaponAim(
-                generation, directWeaponDirection);
-        }
-        else
-        {
-            Halo3ClearDirectWeaponAim();
-        }
-    }
+    // Halo 3's direct firing publication has exactly one owner: the final
+    // visible right-hand basis in ControllerWorldPoseEx. Do not publish a
+    // second direction reconstructed from desiredYaw/desiredPitch here. This
+    // input path is also responsible for turning the body and can run after
+    // render placement, so it used to replace the exact barrel ray with a
+    // torso-frame approximation just before a shot. The right-stick servo
+    // below still turns Halo's body normally; only the lock-free projectile
+    // sample is render-owned.
 
     float aimForward[3] = {
         g_aimFwdX.load(), g_aimFwdY.load(), g_aimFwdZ.load()};

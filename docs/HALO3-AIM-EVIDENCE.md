@@ -115,12 +115,30 @@ The final visible right-hand path already computes the mount-trimmed controller
 basis in `ControllerWorldPoseEx`. Basis column zero is the same forward axis
 used to align the authored barrel and visible weapon. The repair publishes that
 normalized column through the existing lock-free snapshot whenever the exact
-Halo 3 generation is alive and on foot. The XInput publisher remains as a
-redundant fallback. This adds no input synthesis and does not change projectile
-origin, spread, tags, aim assist, or firing state. Unit coverage checks exact
-column selection, normalization, and invalid-basis rejection. Runtime
-acceptance still requires the installed and first-local-shot log lines from the
-same build, followed by the headset alignment test above.
+Halo 3 generation is alive and on foot. This adds no input synthesis and does
+not change projectile origin, spread, tags, aim assist, or firing state. Unit
+coverage checks exact column selection, normalization, and invalid-basis
+rejection. Runtime acceptance still requires the installed and first-local-shot
+log lines from the same build, followed by the headset alignment test above.
+
+### 2026-08-12 torso-frame overwrite diagnosis and repair
+
+Headset candidate `68e7b56` installed the verified firing detour, but the user
+reported that on-foot aiming still felt relative to their torso while native
+aim assist remained active. Code inspection found two concurrent writers for
+the one direct-shot snapshot. `ControllerWorldPoseEx` published the final
+visible barrel basis, but `Game_ComputeAimStick` could run afterward and replace
+it with a direction reconstructed from the body-turn servo's desired yaw and
+pitch. The firing detour could therefore report a valid override while consuming
+the torso-frame approximation instead of the visible weapon ray.
+
+The direct-shot snapshot now has one owner: the final visible right-hand basis.
+The XInput path retains the complete native right-stick/body-turn servo but no
+longer writes or clears the projectile snapshot. The verified
+`unit_adjust_projectile_ray` detour, native origin correction, spread, targeting,
+and aim-assist stages are unchanged. This candidate remains unaccepted until an
+exact-build headset test confirms that shots follow the visible barrel while
+aim assist remains present.
 
 ## Always-scoped VR auto-aim
 

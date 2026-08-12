@@ -12,8 +12,10 @@ struct Halo3DirectWeaponAimSample
     float direction[3]{};
 };
 
-// Halo's world basis uses yaw in XY and pitch on Z. This is the same basis
-// used by the visible Halo 3 weapon placement and by Game_ComputeAimStick.
+// Halo's world basis uses yaw in XY and pitch on Z. This conversion remains
+// covered for the controller-to-body steering calculation. It must not publish
+// the direct projectile sample: that sample has one owner, the final visible
+// weapon basis below.
 inline bool Halo3DirectWeaponAimFromYawPitch(
     float yaw, float pitch, float (&outDirection)[3]) noexcept
 {
