@@ -2177,31 +2177,6 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
-### 2026-08-12 exact animated-limb follow
-
-The preserved Quest campaign log at
-`out/deploy-backups/95cbf03-steam-before-d71fa2b-20260811-233131506Z/halo3xr.log`
-proves that contact already resolves individual animated bodies. Living enemy
-bodies are keyframed and correctly receive native melee without a physics
-impulse. A dead ragdoll limb resolved as dynamic with `targetMass=80.000`,
-`targetMotion=5`, `targetBody=0`, and received its exact point impulse.
-
-The remaining visual follow used the public whole-object velocity and centre
-even after collision selected one exact animated limb. That could let a
-rotating arm or leg cross the weapon during the short worker-to-render gap.
-The contact worker now keeps the selected rigid-body index and the same
-interpolated visible-node transform used by collision. Consecutive finite
-transforms for that exact handle and body produce bounded linear and angular
-velocity around the current limb position. A missing, stale, scale-changing,
-body-changing, or non-finite sample clears render follow for that sample. Root
-weapons, props and vehicles retain Halo's native object velocity and native
-mass-centre pivot. This adds no hook, signature, allocation, lock, or engine
-write.
-
-The pure suite covers translation, rotation, exact pivot selection, stale
-timing and scale-change rejection for this derived limb motion. Campaign
-headset confirmation against ragdolls remains required before acceptance.
-
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

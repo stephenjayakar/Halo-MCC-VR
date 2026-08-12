@@ -10546,31 +10546,6 @@ int main()
             PhysicalContactBuildRigidBodyFollow(
                 {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f},
                 {}, {}, 1000, 1017, 0.5f);
-        PhysicalContactTransform limbPrevious{};
-        PhysicalContactTransform limbCurrent{};
-        limbCurrent.position = {0.05f, -0.025f, 0.0f};
-        constexpr float kLimbTurn = 0.17f;
-        limbCurrent.forward = {
-            std::cos(kLimbTurn), std::sin(kLimbTurn), 0.0f};
-        limbCurrent.left = {
-            -std::sin(kLimbTurn), std::cos(kLimbTurn), 0.0f};
-        const PhysicalContactRigidMotionSample limbMotion =
-            PhysicalContactRigidMotionFromTransforms(
-                limbPrevious, limbCurrent, 1000, 1100, 0.5f);
-        PhysicalContactTransform limbScaleChanged = limbCurrent;
-        limbScaleChanged.scale = 2.0f;
-        const PhysicalContactRigidMotionSample limbMotionScaleChanged =
-            PhysicalContactRigidMotionFromTransforms(
-                limbPrevious, limbScaleChanged, 1000, 1100, 0.5f);
-        const PhysicalContactRigidMotionSample limbMotionStale =
-            PhysicalContactRigidMotionFromTransforms(
-                limbPrevious, limbCurrent, 1000, 1101, 0.5f);
-        PhysicalContactTransform limbHalfTurn = limbCurrent;
-        limbHalfTurn.forward = {-1.0f, 0.0f, 0.0f};
-        limbHalfTurn.left = {0.0f, -1.0f, 0.0f};
-        const PhysicalContactRigidMotionSample limbMotionAmbiguous =
-            PhysicalContactRigidMotionFromTransforms(
-                limbPrevious, limbHalfTurn, 1000, 1100, 0.5f);
         Check(wallTip.constrained &&
               std::fabs(wallTip.setbackWorldUnits - 0.60f) < 1.0e-6f &&
               std::fabs(wallTip.offset.x + 0.60f) < 1.0e-6f &&
@@ -10644,13 +10619,6 @@ int main()
               std::fabs(bodyFollowClamped.rotationRadians - 0.35f) <
                   1.0e-6f &&
               !bodyFollowStale.valid && !bodyFollowInvalid.valid &&
-              limbMotion.valid &&
-              std::fabs(limbMotion.linearVelocity.x - 0.5f) < 1.0e-6f &&
-              std::fabs(limbMotion.linearVelocity.y + 0.25f) < 1.0e-6f &&
-              std::fabs(limbMotion.angularVelocity.z - 1.7f) < 1.0e-5f &&
-              std::fabs(limbMotion.pivot.x - 0.05f) < 1.0e-6f &&
-              !limbMotionScaleChanged.valid && !limbMotionStale.valid &&
-              !limbMotionAmbiguous.valid &&
               PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
                       .centreCount == 22 &&
               PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
@@ -10690,8 +10658,7 @@ int main()
             "rotate evenly spread bounded face-centre and edge samples; "
             "dynamic bodies reject only inward travel while preserving slides, "
             "hold exact correction across an unresolved query gap, follow the "
-            "bounded translation and rotation of a moving body or exact "
-            "animated limb, accept only "
+            "bounded translation and rotation of a moving body, accept only "
             "a directly verified clear final pose, then release directly to "
             "that checked pose");
 
