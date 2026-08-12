@@ -202,68 +202,6 @@ struct PhysicalContactRigidBodyFollow
     float rotationRadians = 0.0f;
 };
 
-// A corrected weapon palette may be consumed a few milliseconds after the
-// contact worker approved it.  Move that palette by the contacted body's
-// exact transform delta instead of extrapolating a velocity.  The bounds make
-// a recycled handle, corrupt transform, or map transition fail closed for this
-// optional visual adjustment.
-inline bool PhysicalContactExactRigidFollowUsable(
-    const PhysicalContactTransform& approvedBodyTransform,
-    const PhysicalContactTransform& currentBodyTransform,
-    float worldUnitsPerMeter, float maximumTranslationMeters = 0.25f,
-    float maximumRotationRadians = 0.50f)
-{
-    if (!PhysicalContactTransformFinite(approvedBodyTransform) ||
-        !PhysicalContactTransformFinite(currentBodyTransform) ||
-        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f ||
-        !std::isfinite(maximumTranslationMeters) ||
-        maximumTranslationMeters <= 0.0f || maximumTranslationMeters > 1.0f ||
-        !std::isfinite(maximumRotationRadians) ||
-        maximumRotationRadians <= 0.0f || maximumRotationRadians > 1.0f ||
-        std::fabs(approvedBodyTransform.scale - currentBodyTransform.scale) >
-            1.0e-3f)
-        return false;
-    const float translationMeters = PhysicalContactLength(
-        currentBodyTransform.position - approvedBodyTransform.position) /
-        worldUnitsPerMeter;
-    const float cosine = std::clamp(
-        0.5f * (PhysicalContactDot(
-                    approvedBodyTransform.forward,
-                    currentBodyTransform.forward) +
-                PhysicalContactDot(
-                    approvedBodyTransform.left, currentBodyTransform.left) +
-                PhysicalContactDot(
-                    approvedBodyTransform.up, currentBodyTransform.up) -
-                1.0f),
-        -1.0f, 1.0f);
-    const float rotation = std::acos(cosine);
-    return std::isfinite(translationMeters) &&
-        translationMeters <= maximumTranslationMeters &&
-        std::isfinite(rotation) && rotation <= maximumRotationRadians;
-}
-
-inline PhysicalContactVec3 PhysicalContactApplyExactRigidFollowPoint(
-    const PhysicalContactTransform& approvedBodyTransform,
-    const PhysicalContactTransform& currentBodyTransform,
-    PhysicalContactVec3 approvedWorldPoint)
-{
-    return PhysicalContactTransformPoint(
-        currentBodyTransform,
-        PhysicalContactInverseTransformPoint(
-            approvedBodyTransform, approvedWorldPoint));
-}
-
-inline PhysicalContactVec3 PhysicalContactApplyExactRigidFollowVector(
-    const PhysicalContactTransform& approvedBodyTransform,
-    const PhysicalContactTransform& currentBodyTransform,
-    PhysicalContactVec3 approvedWorldVector)
-{
-    return PhysicalContactTransformVector(
-        currentBodyTransform,
-        PhysicalContactInverseTransformVector(
-            approvedBodyTransform, approvedWorldVector));
-}
-
 inline PhysicalContactVec3 PhysicalContactRotateAxisAngle(
     PhysicalContactVec3 value, PhysicalContactVec3 unitAxis, float radians)
 {

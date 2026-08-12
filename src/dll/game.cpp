@@ -965,15 +965,6 @@ namespace
     std::atomic<uint64_t> g_halo3ContactApprovedPalettes{0};
     std::atomic<uint64_t> g_halo3ContactHeldPalettes{0};
     extern std::atomic<bool> g_halo3PhysicalContactBindings;
-    struct Halo3ExactBodyFollowPublication
-    {
-        std::atomic<uint32_t> sequence{0};
-        std::atomic<uint64_t> sampleMs{0};
-        std::atomic<uint64_t> poseSerial{0};
-        std::atomic<int32_t> targetHandle{-1};
-        std::atomic<float> approvedTransform[13]{};
-    };
-    Halo3ExactBodyFollowPublication g_halo3ExactBodyFollow;
     // Debug-only replay publication. Unlike the older contact rig, this moves
     // the palette Halo actually submits for the visible held weapon. The
     // contact solver then consumes that same final palette on the next sample.
@@ -1140,66 +1131,6 @@ namespace
         return false;
     }
 
-    void Halo3PublishExactBodyFollow(
-        int32_t targetHandle,
-        const PhysicalContactTransform& approvedTransform,
-        uint64_t sampleMs, uint64_t poseSerial)
-    {
-        auto& published = g_halo3ExactBodyFollow;
-        published.sequence.fetch_add(1, std::memory_order_acq_rel);
-        published.sampleMs.store(sampleMs, std::memory_order_relaxed);
-        published.poseSerial.store(poseSerial, std::memory_order_relaxed);
-        published.targetHandle.store(targetHandle, std::memory_order_relaxed);
-        const float values[13] = {
-            approvedTransform.scale,
-            approvedTransform.forward.x, approvedTransform.forward.y,
-            approvedTransform.forward.z,
-            approvedTransform.left.x, approvedTransform.left.y,
-            approvedTransform.left.z,
-            approvedTransform.up.x, approvedTransform.up.y,
-            approvedTransform.up.z,
-            approvedTransform.position.x, approvedTransform.position.y,
-            approvedTransform.position.z};
-        for (int value = 0; value < 13; ++value)
-            published.approvedTransform[value].store(
-                values[value], std::memory_order_relaxed);
-        published.sequence.fetch_add(1, std::memory_order_release);
-    }
-
-    bool Halo3ReadExactBodyFollow(
-        int32_t& targetHandle,
-        PhysicalContactTransform& approvedTransform,
-        uint64_t& sampleMs, uint64_t& poseSerial)
-    {
-        auto& published = g_halo3ExactBodyFollow;
-        for (int attempt = 0; attempt < 2; ++attempt)
-        {
-            const uint32_t before = published.sequence.load(
-                std::memory_order_acquire);
-            if (before & 1u)
-                continue;
-            sampleMs = published.sampleMs.load(std::memory_order_relaxed);
-            poseSerial = published.poseSerial.load(std::memory_order_relaxed);
-            targetHandle = published.targetHandle.load(
-                std::memory_order_relaxed);
-            float values[13]{};
-            for (int value = 0; value < 13; ++value)
-                values[value] = published.approvedTransform[value].load(
-                    std::memory_order_relaxed);
-            approvedTransform.scale = values[0];
-            approvedTransform.forward = {values[1], values[2], values[3]};
-            approvedTransform.left = {values[4], values[5], values[6]};
-            approvedTransform.up = {values[7], values[8], values[9]};
-            approvedTransform.position = {
-                values[10], values[11], values[12]};
-            if (published.sequence.load(std::memory_order_acquire) == before)
-                return targetHandle != -1 && sampleMs != 0 &&
-                    poseSerial != 0 &&
-                    PhysicalContactTransformFinite(approvedTransform);
-        }
-        return false;
-    }
-
     void Halo3PublishWeaponWallOffset(
         PhysicalContactVec3 offset, uint64_t sampleMs)
     {
@@ -1237,11 +1168,6 @@ namespace
     // palette hook only uses it to bound the render-model palette before
     // publishing its root; a missing tag binding simply withholds contact.
     unsigned char* Halo3LoadedTagDefinition(uint32_t datum);
-    bool Halo3ContactObjectDataForHandle(
-        int32_t objectHandle, unsigned char*& objectData,
-        uint8_t* objectKind);
-    PhysicalContactTransform Halo3ContactObjectTransform(
-        const unsigned char* objectData);
 
     void Halo3PublishWeaponPose(
         Halo3VisibleWeaponPosePublication& published,
@@ -5828,91 +5754,14 @@ namespace
                     memcpy(destination, approvedNodes.data(),
                            static_cast<size_t>(renderNodeCount) *
                                sizeof(BoneMatrix));
-                    bool exactBodyFollowApplied = false;
-                    int32_t exactTargetHandle = -1;
-                    PhysicalContactTransform approvedBodyTransform{};
-                    uint64_t exactFollowMs = 0;
-                    uint64_t exactFollowSerial = 0;
-                    const float worldScale =
-                        g_worldScale.load(std::memory_order_relaxed);
-                    if (approvedCorrected && std::isfinite(worldScale) &&
-                        worldScale >= 0.05f && worldScale <= 2.0f &&
-                        Halo3ReadExactBodyFollow(
-                            exactTargetHandle, approvedBodyTransform,
-                            exactFollowMs, exactFollowSerial) &&
-                        exactFollowSerial == approvedSerial &&
-                        nowMs >= exactFollowMs && nowMs - exactFollowMs <= 100)
-                    {
-                        __try
-                        {
-                            unsigned char* targetData = nullptr;
-                            uint8_t targetKind = 0xFF;
-                            if (Halo3ContactObjectDataForHandle(
-                                    exactTargetHandle, targetData,
-                                    &targetKind))
-                            {
-                                const PhysicalContactTransform
-                                    currentBodyTransform =
-                                        Halo3ContactObjectTransform(
-                                            targetData);
-                                if (PhysicalContactExactRigidFollowUsable(
-                                        approvedBodyTransform,
-                                        currentBodyTransform, worldScale))
-                                {
-                                    for (int node = 0;
-                                         node < renderNodeCount; ++node)
-                                    {
-                                        PhysicalContactVec3 nodePosition =
-                                            PhysicalContactApplyExactRigidFollowPoint(
-                                                approvedBodyTransform,
-                                                currentBodyTransform,
-                                                {destination[node].translation[0],
-                                                 destination[node].translation[1],
-                                                 destination[node].translation[2]});
-                                        destination[node].translation[0] =
-                                            nodePosition.x;
-                                        destination[node].translation[1] =
-                                            nodePosition.y;
-                                        destination[node].translation[2] =
-                                            nodePosition.z;
-                                        for (int column = 0; column < 3;
-                                             ++column)
-                                        {
-                                            const int index = column * 3;
-                                            const PhysicalContactVec3 moved =
-                                                PhysicalContactApplyExactRigidFollowVector(
-                                                    approvedBodyTransform,
-                                                    currentBodyTransform,
-                                                    {destination[node]
-                                                         .rotation[index],
-                                                     destination[node]
-                                                         .rotation[index + 1],
-                                                     destination[node]
-                                                         .rotation[index + 2]});
-                                            destination[node].rotation[index] =
-                                                moved.x;
-                                            destination[node]
-                                                .rotation[index + 1] = moved.y;
-                                            destination[node]
-                                                .rotation[index + 2] = moved.z;
-                                        }
-                                    }
-                                    exactBodyFollowApplied = true;
-                                }
-                            }
-                        }
-                        __except (EXCEPTION_EXECUTE_HANDLER)
-                        {
-                            exactBodyFollowApplied = false;
-                        }
-                    }
                     PhysicalContactVec3 bodyLinearVelocity{};
                     PhysicalContactVec3 bodyAngularVelocity{};
                     PhysicalContactVec3 bodyPivot{};
                     uint64_t bodyFollowMs = 0;
                     uint64_t bodyFollowSerial = 0;
-                    if (!exactBodyFollowApplied && approvedCorrected &&
-                        std::isfinite(worldScale) &&
+                    const float worldScale =
+                        g_worldScale.load(std::memory_order_relaxed);
+                    if (approvedCorrected && std::isfinite(worldScale) &&
                         worldScale >= 0.05f && worldScale <= 2.0f &&
                         Halo3ReadWeaponBodyFollow(
                             bodyLinearVelocity, bodyAngularVelocity, bodyPivot,
@@ -11332,7 +11181,6 @@ namespace
         g_halo3ContactBodyAnchorHandle = -1;
         g_halo3ContactBodyAnchorValid = false;
         Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
-        Halo3PublishExactBodyFollow(-1, {}, 0, 0);
         g_halo3ContactPreviousWallTransform = {};
         g_halo3ContactWallWeaponHandle = -1;
         g_halo3ContactPreviousWallPoseValid = false;
@@ -14248,26 +14096,7 @@ namespace
                         PhysicalContactDynamicBodyObservation::Separated &&
                     PhysicalContactLengthSquared(
                         g_halo3ContactBodyOffset) <= 1.0e-10f)
-                {
                     Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
-                    Halo3PublishExactBodyFollow(-1, {}, 0, 0);
-                }
-            };
-            const auto publishExactBodyFollow = [&] (
-                int32_t targetHandle,
-                const PhysicalContactTransform& targetTransform,
-                uint32_t targetShapeSource)
-            {
-                // Animated actors use per-limb transforms; the root object
-                // transform cannot represent them. Keep the existing bounded
-                // velocity fallback there. Root rigid bodies use the exact
-                // transform that collision just approved.
-                if (targetHandle != -1 && targetShapeSource != 3 &&
-                    PhysicalContactTransformFinite(targetTransform))
-                    Halo3PublishExactBodyFollow(
-                        targetHandle, targetTransform, nowMs, proposalSerial);
-                else
-                    Halo3PublishExactBodyFollow(-1, {}, 0, 0);
             };
             const auto publishBodyFollow = [&] (int32_t targetHandle)
             {
@@ -14307,7 +14136,6 @@ namespace
                     0.0f, std::memory_order_relaxed);
                 Halo3PublishWeaponWallOffset(g_halo3ContactWallOffset, nowMs);
                 Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
-                Halo3PublishExactBodyFollow(-1, {}, 0, 0);
             }
             if (!g_halo3ContactPreviousPoseValid)
             {
@@ -14366,7 +14194,6 @@ namespace
             bool constrainedBodyTargetFound = false;
             bool constrainedBodyTargetGeometryResolved = false;
             bool constrainedBodyTargetHit = false;
-            uint32_t constrainedBodyTargetShapeSource = 0;
             PhysicalContactTransform constrainedBodyTargetTransform{};
             bool constrainedBodyTargetTransformValid = false;
             // collision_flags: structure; object_flags: object-query enable
@@ -14734,7 +14561,6 @@ namespace
                     constrainedBodyTargetGeometryResolved =
                         targetGeometryResolved;
                     constrainedBodyTargetHit = authored.hit;
-                    constrainedBodyTargetShapeSource = targetShapeSource;
                     if (targetGeometryResolved &&
                         PhysicalContactTransformFinite(
                             authoredTargetTransform))
@@ -14834,10 +14660,6 @@ namespace
                     updateBodyConstraint(
                         PhysicalContactDynamicBodyObservation::Blocked,
                         followedOffset, constrainedBodyTargetHandle);
-                    publishExactBodyFollow(
-                        constrainedBodyTargetHandle,
-                        constrainedBodyTargetTransform,
-                        constrainedBodyTargetShapeSource);
                     publishBodyFollow(
                         constrainedBodyTargetHandle);
                     publishApprovedVisiblePose();
@@ -14946,10 +14768,6 @@ namespace
                                         Blocked,
                                     verifiedGuard.offset,
                                     closestVisualGuardHandle);
-                                publishExactBodyFollow(
-                                    closestVisualGuardHandle,
-                                    guardTargetTransform,
-                                    closestVisualGuardShapeSource);
                                 publishBodyFollow(
                                     closestVisualGuardHandle);
                                 publishApprovedVisiblePose();
@@ -15293,9 +15111,6 @@ namespace
                 g_halo3ContactBodyAnchorHandle = closestHandle;
                 g_halo3ContactBodyAnchorValid = PhysicalContactFinite(
                     g_halo3ContactBodyLocalWeaponAnchor);
-                publishExactBodyFollow(
-                    closestHandle, closestTargetTransform,
-                    closestTargetShapeSource);
                 publishBodyFollow(closestHandle);
             }
             if (bodyConstraint.constrained &&
