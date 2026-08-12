@@ -2202,3 +2202,21 @@ the current signed SteamVR `vrclient_x64.dll` imports
 process-local `XR_RUNTIME_JSON` override proved the installed Oculus 1.201.0
 runtime initializes, but no headset was connected, so this is launch evidence
 only and not physical-contact acceptance.
+### 2026-08-12 exact-origin translation-only envelope follow
+
+- Candidate `67c310e` passed the main rotating-body replay but recorded three
+  confirmed overlaps during the extra 60-second hold. Raising the emergency
+  offset bound did not solve the handoff. Preserved log:
+  `out/debug-openxr/20260812-175652831Z-rotating-body-gap.log`, SHA-256
+  `ED3F84922243C55FB49F650A7E4DEB988F9F943FF1969AB6B8464A14A9EADBCB`.
+- Prior exact-transform follow rotated the weapon and could create collision;
+  prior velocity follow used Halo's centre-of-mass pivot rather than the exact
+  object origin used by the verified collision shape. This candidate publishes
+  that exact target origin with the approved palette. At palette submission it
+  reads the same validated target handle and applies translation only from the
+  approved origin to the current origin. The target's conservative sphere is
+  invariant under rotation, so no render-time rotation is required or allowed.
+- The publication is bounded and lock-free. The render hook performs no
+  allocation, logging, file I/O, signature scanning, COM, or locking; invalid,
+  stale, recycled, non-finite, or over-0.25 m deltas fail open to the existing
+  bounded body-follow path.
