@@ -3493,6 +3493,7 @@ namespace
     bool ControllerWorldPose(float basis[9],float pos[3],float& scale);
     bool ControllerWorldPoseEx(bool left,float basis[9],float pos[3],float& scale);
     bool DesiredWristWorld(bool left, BoneMatrix& out, float& meshScale);
+    void Halo3PublishDirectWeaponAimFromVisibleBasis(const float* basis);
     // C21: the rigid, vehicle-parented seat placement the hands hang off while
     // a first-person vehicle seat owns the view. False everywhere else.
     bool Halo3ComputeSeatBodyAnchor(float out[3]);
@@ -5976,6 +5977,8 @@ namespace
         scale = Clamp(g_config.gun_scale, 0.3f, 3.0f);
         for (int j = 0; j < 9; ++j) if (!isfinite(basis[j])) return false;
         for (int j = 0; j < 3; ++j) if (!isfinite(pos[j])) return false;
+        if (!left)
+            Halo3PublishDirectWeaponAimFromVisibleBasis(basis);
         return true;
     }
 
@@ -8064,6 +8067,25 @@ namespace
             publication.direction[axis].store(
                 direction[axis], std::memory_order_relaxed);
         publication.sequence.store(sequence + 2u, std::memory_order_release);
+    }
+
+    void Halo3PublishDirectWeaponAimFromVisibleBasis(
+        const float* basis)
+    {
+        if (!g_halo3DirectWeaponAimBinding.load(std::memory_order_acquire))
+            return;
+        const uint32_t generation =
+            g_halo3RuntimeGeneration.load(std::memory_order_acquire);
+        if (!generation ||
+            Halo3VehicleSnapshotState(
+                g_halo3VehicleSnapshot.load(std::memory_order_acquire),
+                generation) != Halo3VehicleState::OnFoot)
+        {
+            return;
+        }
+        float direction[3]{};
+        if (Halo3DirectWeaponAimFromVisibleBasis(basis, direction))
+            Halo3PublishDirectWeaponAim(generation, direction);
     }
 
     void Halo3ClearDirectWeaponAim()
