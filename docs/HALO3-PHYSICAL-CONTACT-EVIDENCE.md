@@ -2202,3 +2202,17 @@ the current signed SteamVR `vrclient_x64.dll` imports
 process-local `XR_RUNTIME_JSON` override proved the installed Oculus 1.201.0
 runtime initializes, but no headset was connected, so this is launch evidence
 only and not physical-contact acceptance.
+
+## Bounded visible-palette gaps
+
+The clean `1ac8a37` replay in
+`out/debug-openxr/20260812-195824089Z-visible-weapon-gap.log` stayed clear for
+8,388 palettes, then recorded two confirmed overlaps. The reset diagnostic was
+reason 2: a missing or stale visible-palette publication. Controller tracking,
+gameplay gates, the active weapon, and the constrained target were still
+valid. Resetting all contact state on that render-only gap erased the last
+geometry-approved pose and exposed the uncorrected replay root. The approved
+palette consumer already rejects approvals older than 100 ms. A render-palette
+gap can therefore safely stop contact work without clearing the approval; true
+tracking, gameplay, lifecycle, vehicle, and weapon failures retain their
+immediate resets.

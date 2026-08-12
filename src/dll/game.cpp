@@ -12194,7 +12194,12 @@ namespace
             g_halo3ContactStage.store(
                 static_cast<uint32_t>(Halo3PhysicalContactStage::VisiblePose),
                 std::memory_order_relaxed);
-            Halo3ResetPhysicalContact(2);
+            // A missed render-palette publication is not tracking loss. Keep
+            // the last geometry-approved pose for its existing bounded 100 ms
+            // lifetime and stop contact work for this sample. If publication
+            // does not recover, the render hook rejects the stale approval.
+            // The controller, gameplay, lifecycle, vehicle, and weapon gates
+            // still reset contact immediately on their own failures.
             return;
         }
 
