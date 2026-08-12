@@ -9223,10 +9223,6 @@ int main()
             PhysicalContactSweepTriangleMeshCompound(
                 separatedSurfaceMesh, identityTransform, identityTransform,
                 gapTarget, identityTransform, 0.002f, 0.001f);
-        const PhysicalContactCompoundHit containedSolidOverlap =
-            PhysicalContactCompoundOverlap(
-                smallWeapon, identityTransform,
-                gapTarget, identityTransform);
         PhysicalContactTriangleMesh invalidTriangleMesh = movingTriangleMesh;
         invalidTriangleMesh.groups[0].triangleCount = 2;
         Check(PhysicalContactTriangleMeshValid(movingTriangleMesh) &&
@@ -9236,13 +9232,10 @@ int main()
               triangleMeshTunnelling.fraction > 0.40f &&
               triangleMeshTunnelling.fraction < 0.60f &&
               triangleMeshTunnelling.normalReliable &&
-              !triangleMeshGrazingMiss.hit && !exactMeshGap.hit &&
-              containedSolidOverlap.hit &&
-              !containedSolidOverlap.normalReliable,
+              !triangleMeshGrazingMiss.hit && !exactMeshGap.hit,
             "Triangle-accurate contact catches a fast thin-surface crossing, "
-            "preserves grazing and concave gaps, admits closed-solid "
-            "containment only as an unreliable visual overlap, and rejects "
-            "malformed fixed mesh bounds");
+            "preserves grazing and concave gaps, and rejects malformed fixed "
+            "mesh bounds");
 
         const std::array<uint8_t, 16> packedRockPlacement{
             0xA9, 0xBE, 0xA5, 0x22, 0x65, 0x35, 0x00, 0x00,
@@ -10370,34 +10363,6 @@ int main()
                 1.0f / 120.0f, 0.5f);
         PhysicalContactTransform bodyPrevious{};
         PhysicalContactTransform bodyIntended{};
-        PhysicalContactCompoundShape solidTarget{};
-        solidTarget.childCount = 2;
-        solidTarget.children[0] = prop;
-        solidTarget.children[1] = prop;
-        for (uint16_t vertex = 0;
-             vertex < solidTarget.children[1].vertexCount; ++vertex)
-            solidTarget.children[1].vertices[vertex].x += 1.25f;
-        PhysicalContactTransform solidWeaponInside{};
-        solidWeaponInside.position = {0.05f, 0.0f, 0.0f};
-        const PhysicalContactTransform solidTargetTransform{};
-        PhysicalContactCompoundShape solidWeapon{};
-        solidWeapon.childCount = 1;
-        solidWeapon.children[0] = prop;
-        const auto solidOverlap = [&](const PhysicalContactTransform& pose) {
-            return PhysicalContactCompoundsIntersect(
-                solidWeapon, pose, solidTarget, solidTargetTransform);
-        };
-        const PhysicalContactWallConstraint solidSeparation =
-            PhysicalContactSolidSeparationOffset(
-                solidWeaponInside, {-1.0f, 0.0f, 0.0f},
-                0.01f, 0.005f, 4.0f, solidOverlap);
-        PhysicalContactTransform solidSeparated = solidWeaponInside;
-        solidSeparated.position =
-            solidSeparated.position + solidSeparation.offset;
-        const PhysicalContactWallConstraint solidWrongDirection =
-            PhysicalContactSolidSeparationOffset(
-                solidWeaponInside, {1.0f, 0.0f, 0.0f},
-                0.01f, 0.005f, 0.05f, solidOverlap);
         bodyIntended.position = {1.0f, 0.0f, 0.0f};
         const PhysicalContactWallConstraint bodyTunnel =
             PhysicalContactDynamicBodyOffset(
@@ -10462,10 +10427,6 @@ int main()
               std::fabs(bodyReblocked.x + 0.35f) < 1.0e-6f &&
               PhysicalContactLengthSquared(bodyInvalidObservation) <
                   1.0e-10f &&
-              solidOverlap(solidWeaponInside) &&
-              solidSeparation.constrained &&
-              !solidOverlap(solidSeparated) &&
-              !solidWrongDirection.constrained &&
               bodyTunnel.constrained &&
               std::fabs(bodyTunnel.offset.x + 0.51f) < 1.0e-6f &&
               std::fabs(bodyTunnel.offset.y) < 1.0e-6f &&
@@ -10497,8 +10458,7 @@ int main()
             "vertices, while larger meshes rotate an evenly spread bounded "
             "face-centre sample set; "
             "dynamic bodies reject only inward travel while preserving slides, "
-            "hold exact correction across an unresolved query gap, prove a "
-            "contained solid clear before publishing, then release");
+            "hold exact correction across an unresolved query gap, then release");
 
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&

@@ -1865,20 +1865,23 @@ solids while crossing no triangle at that sample, so the code released its
 body constraint. This post-hit-only behavior is rejected and reverted. Normal
 SteamVR settings were restored with the byte-identical hash above.
 
-The replacement admits the missing state before solving it. After a precise
-triangle sweep reports no surface crossing, a single-permutation rigid target
-is also tested as Halo's complete authored solid compound at the final visible
-weapon pose. A solid overlap becomes a visual-only contact with an explicitly
-unreliable normal: it may keep the weapon outside, but it cannot authorize an
-impulse or melee. The target's cached reliable surface normal is reused during
-continuous contact when available. The bounded solid search then publishes a
-correction only after the final complete weapon compound is proven clear of
-every complete target child. Multi-permutation vehicles still require Halo's
-native live-surface confirmation, and animated bodies keep their separate
-melee path. A regression proves the exact failure mode: the triangle surfaces
-report no hit while a closed weapon solid is contained in the target, then the
-solid query admits the overlap and the separation solver proves its final pose
-clear. The strict sustained Valhalla replay remains the runtime gate.
+Candidate `2e23800ece6e357fa49fca05eb8b9f084bf97124` admitted final-pose
+solid containment before running that same clear-pose solver. Its package was
+`out/candidates/2e23800-h3-physical-contact-20260812-034818802Z`, with DLL
+SHA-256 `871759BB0BE6FFA6C6D2554CB4F289C7CB3E2040979036EFB932CF02F19C4263`.
+The strict Valhalla Forge replay failed fast as designed. Its preserved log is
+`out/debug-openxr/20260812-034906156Z-visible-weapon-gap.log`, SHA-256
+`D2F1671206BC58413878A7752ECE99727FA94A3BE85AD78469F7C88F33528F51`.
+At 216 exact palettes and 72 corrected palettes it had already recorded 15
+direct overlaps. Runtime status showed only 131 contact sweeps during the same
+interval, while the null headset rendered at 90 Hz. The worker can prove a
+clear correction after seeing a palette, but intervening render palettes can
+move into the object before the next worker sample. Final-pose containment in
+the worker is therefore still reactive rather than preventive. This behavior
+is rejected and reverted. The next candidate must stop unapproved visible
+motion at the render boundary, while leaving all collision discovery and
+native physics work outside the render hook. Normal SteamVR settings were
+restored with the byte-identical hash above.
 
 ## Verification boundary
 
