@@ -984,12 +984,8 @@ namespace
     std::atomic<uint64_t> g_halo3ContactDebugVisibleExactPalettes{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleCorrectedPalettes{0};
     std::atomic<bool> g_halo3ContactDebugVisibleMeasurementStarted{false};
-    std::atomic<uint64_t> g_halo3ContactDebugVisibleActiveStartMs{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleDirectSeparations{0};
-    std::atomic<uint64_t> g_halo3ContactDebugVisibleGeometryOverlaps{0};
-    std::atomic<uint64_t> g_halo3ContactDebugVisibleGeometrySeparations{0};
-    std::atomic<uint64_t> g_halo3ContactDebugVisibleConfirmedOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidSeparations{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
@@ -6739,14 +6735,7 @@ namespace
     PhysicalContactVec3 g_halo3ContactBodyOffset{};
     uint64_t g_halo3ContactWallUpdateMs = 0;
     uint64_t g_halo3ContactBodyUpdateMs = 0;
-    uint64_t g_halo3ContactBodyLastBlockedMs = 0;
     int32_t g_halo3ContactBodyTargetHandle = -1;
-    PhysicalContactTransform g_halo3ContactPreviousTargetTransform{};
-    int32_t g_halo3ContactPreviousTargetSurfaceHandle = -1;
-    bool g_halo3ContactPreviousTargetSurfaceValid = false;
-    PhysicalContactVec3 g_halo3ContactBodyLocalWeaponAnchor{};
-    int32_t g_halo3ContactBodyAnchorHandle = -1;
-    bool g_halo3ContactBodyAnchorValid = false;
     PhysicalContactTransform g_halo3ContactPreviousWallTransform{};
     int32_t g_halo3ContactWallWeaponHandle = -1;
     bool g_halo3ContactPreviousWallPoseValid = false;
@@ -6780,7 +6769,6 @@ namespace
     std::atomic<uint64_t> g_halo3ContactWallBlocks{0};
     std::atomic<float> g_halo3ContactWallSetbackMeters{0.0f};
     std::atomic<float> g_halo3ContactBodySetbackMeters{0.0f};
-    std::atomic<float> g_halo3ContactBodyObservedReserveMeters{0.0f};
     std::atomic<uint64_t> g_halo3ContactBodyConstraints{0};
     std::atomic<uint64_t> g_halo3ContactBodyFallbackNormalConstraints{0};
     std::atomic<uint64_t> g_halo3ContactBodyUncertainHolds{0};
@@ -11032,22 +11020,13 @@ namespace
         g_halo3ContactBodyOffset = {};
         g_halo3ContactWallUpdateMs = 0;
         g_halo3ContactBodyUpdateMs = 0;
-        g_halo3ContactBodyLastBlockedMs = 0;
         g_halo3ContactBodyTargetHandle = -1;
-        g_halo3ContactPreviousTargetTransform = {};
-        g_halo3ContactPreviousTargetSurfaceHandle = -1;
-        g_halo3ContactPreviousTargetSurfaceValid = false;
-        g_halo3ContactBodyLocalWeaponAnchor = {};
-        g_halo3ContactBodyAnchorHandle = -1;
-        g_halo3ContactBodyAnchorValid = false;
         g_halo3ContactPreviousWallTransform = {};
         g_halo3ContactWallWeaponHandle = -1;
         g_halo3ContactPreviousWallPoseValid = false;
         g_halo3ContactWeaponMass.store(0.0f, std::memory_order_relaxed);
         g_halo3ContactTargetMass.store(0.0f, std::memory_order_relaxed);
         g_halo3ContactTargetMotionType.store(0, std::memory_order_relaxed);
-        g_halo3ContactBodyObservedReserveMeters.store(
-            0.0f, std::memory_order_relaxed);
         g_halo3ContactMeleeImpactSpeed.store(0.0f,
                                               std::memory_order_relaxed);
         g_halo3ContactFirstContact.store(0, std::memory_order_relaxed);
@@ -11232,16 +11211,12 @@ namespace
             std::memory_order_relaxed);
     }
 
-    void Halo3ProcessPhysicalWeaponContact(uint64_t nowMs);
-
     // Authoritative Halo 3 simulation thread. H3EK's objects_update body owns
     // the object_update_absolute_index transaction; the unique retail homolog
     // at +0x34067C carries the same object-list/update-loop invariants. Native
     // melee stays before Halo's update. Sustained whole-body velocity is
     // applied immediately after it so a floor-loaded body cannot overwrite the
-    // correction in the same tick. The visual/contact solver then observes the
-    // final post-physics transforms before approving a palette for rendering.
-    // The original always runs after a failure.
+    // correction in the same tick. The original always runs after a failure.
     void __fastcall Halo3ObjectsUpdateHook()
     {
         bool deferredWorldVelocity = false;
@@ -11876,13 +11851,10 @@ namespace
         // right-weapon contact this tick. This ordering prevents the nudge
         // response from knocking an actively held prop out of the palm.
         Halo3ConsumeLeftGrabCommand();
-        if (g_halo3RuntimeGeneration.load(std::memory_order_acquire))
-            Halo3ProcessPhysicalWeaponContact(GetTickCount64());
     }
 
-    // Simulation-thread-only, immediately after Halo's authoritative object
-    // update. Native writes are reached only after the same validated Halo 3
-    // TLS/object-table path used by the vehicle sampler.
+    // Camera-thread-only. Native writes are reached only after the same
+    // validated Halo 3 TLS/object-table path used by the vehicle sampler.
     void Halo3ProcessPhysicalWeaponContact(uint64_t nowMs)
     {
         const uint32_t generation =
@@ -12849,23 +12821,6 @@ namespace
                 if (haveDebugTargetShape &&
                     PhysicalContactTransformFinite(debugTargetTransform))
                 {
-                    uint64_t activeReplayStartMs =
-                        g_halo3ContactDebugVisibleActiveStartMs.load(
-                            std::memory_order_relaxed);
-                    if (!activeReplayStartMs &&
-                        g_halo3ContactHeldPalettes.load(
-                            std::memory_order_relaxed) >= 120)
-                    {
-                        uint64_t expected = 0;
-                        g_halo3ContactDebugVisibleActiveStartMs
-                            .compare_exchange_strong(
-                                expected, nowMs, std::memory_order_relaxed);
-                        activeReplayStartMs =
-                            g_halo3ContactDebugVisibleActiveStartMs.load(
-                                std::memory_order_relaxed);
-                    }
-                    const bool activeReplay = activeReplayStartMs != 0 &&
-                        nowMs >= activeReplayStartMs;
                     const PhysicalContactVec3 weaponFront =
                         Halo3ContactCompoundSupport(
                             *measuredWeaponShape, measuredWeaponTransform,
@@ -12881,8 +12836,7 @@ namespace
                     // original, uncontrolled palette or the half-updated stereo
                     // pair. Four exact palette consumptions cover both eyes and
                     // one complete follow-up pair on the observed retail path.
-                    if (activeReplay &&
-                        g_halo3ContactDebugVisibleExactPalettes.load(
+                    if (g_halo3ContactDebugVisibleExactPalettes.load(
                             std::memory_order_relaxed) >= 4 &&
                         g_halo3ContactApprovedPalettes.load(
                             std::memory_order_relaxed) >= 4 &&
@@ -12895,12 +12849,6 @@ namespace
                             g_halo3ContactDebugVisibleDirectOverlaps.store(
                                 0, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleDirectSeparations.store(
-                                0, std::memory_order_relaxed);
-                            g_halo3ContactDebugVisibleGeometryOverlaps.store(
-                                0, std::memory_order_relaxed);
-                            g_halo3ContactDebugVisibleGeometrySeparations.store(
-                                0, std::memory_order_relaxed);
-                            g_halo3ContactDebugVisibleConfirmedOverlaps.store(
                                 0, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleSolidOverlaps.store(
                                 0, std::memory_order_relaxed);
@@ -12938,69 +12886,6 @@ namespace
                              ? g_halo3ContactDebugVisibleDirectOverlaps
                              : g_halo3ContactDebugVisibleDirectSeparations)
                             .fetch_add(1, std::memory_order_relaxed);
-                        // The physical query intentionally includes its
-                        // 1.25 mm contact skin. A zero-radius query separates
-                        // legitimate near-touching from triangle intersection.
-                        const bool geometryHit =
-                            PhysicalContactTriangleMeshValid(
-                                debugTargetTriangleMesh)
-                            ? PhysicalContactSweepTriangleMeshes(
-                                  *measuredWeaponMesh,
-                                  measuredWeaponTransform,
-                                  measuredWeaponTransform,
-                                  debugTargetTriangleMesh,
-                                  debugTargetTransform,
-                                  kHalo3ContactTriangleStepMeters * worldScale,
-                                  0.0f).hit
-                            : PhysicalContactSweepTriangleMeshCompound(
-                                  *measuredWeaponMesh,
-                                  measuredWeaponTransform,
-                                  measuredWeaponTransform, debugTargetShape,
-                                  debugTargetTransform,
-                                  kHalo3ContactTriangleStepMeters * worldScale,
-                                  0.0f).hit;
-                        (geometryHit
-                             ? g_halo3ContactDebugVisibleGeometryOverlaps
-                             : g_halo3ContactDebugVisibleGeometrySeparations)
-                            .fetch_add(1, std::memory_order_relaxed);
-                        // Exact touching is allowed. Move the displayed weapon
-                        // 0.25 mm toward free space and require both nested
-                        // authored-surface queries to remain intersecting before
-                        // calling the sample penetration.
-                        PhysicalContactTransform outwardProbe =
-                            measuredWeaponTransform;
-                        outwardProbe.position = outwardProbe.position -
-                            measuredWeaponTransform.forward *
-                                (0.00025f * worldScale);
-                        const auto probeHit = [&](float radius) {
-                            return PhysicalContactTriangleMeshValid(
-                                       debugTargetTriangleMesh)
-                                ? PhysicalContactSweepTriangleMeshes(
-                                      *measuredWeaponMesh, outwardProbe,
-                                      outwardProbe, debugTargetTriangleMesh,
-                                      debugTargetTransform,
-                                      kHalo3ContactTriangleStepMeters *
-                                          worldScale,
-                                      radius).hit
-                                : PhysicalContactSweepTriangleMeshCompound(
-                                      *measuredWeaponMesh, outwardProbe,
-                                      outwardProbe, debugTargetShape,
-                                      debugTargetTransform,
-                                      kHalo3ContactTriangleStepMeters *
-                                          worldScale,
-                                      radius).hit;
-                        };
-                        const bool outwardDirectHit = probeHit(
-                            kHalo3ContactTriangleSurfaceRadiusMeters *
-                            worldScale);
-                        const bool outwardGeometryHit = probeHit(0.0f);
-                        if (PhysicalContactConfirmedSurfacePenetration(
-                                directHit, geometryHit, outwardDirectHit,
-                                outwardGeometryHit))
-                        {
-                            g_halo3ContactDebugVisibleConfirmedOverlaps.fetch_add(
-                                1, std::memory_order_relaxed);
-                        }
                         const bool solidHit =
                             PhysicalContactCompoundsIntersect(
                                 *measuredWeaponShape,
@@ -13013,15 +12898,9 @@ namespace
                     }
                     const float amplitude =
                         worldScale * debugMaxSpeed / kDebugAngularRate;
-                    const float activePhase = activeReplay
-                        ? static_cast<float>(
-                              (nowMs - activeReplayStartMs) % 1000u) *
-                              0.00628318530718f
-                        : 0.0f;
-                    const float displacement = activeReplay
-                        ? amplitude * std::sin(activePhase) -
-                              worldScale * 0.02f
-                        : worldScale * 0.10f;
+                    const float displacement =
+                        amplitude * std::sin(debugPhase) -
+                        worldScale * 0.02f;
                     const PhysicalContactVec3 proposedWeaponFront =
                         Halo3ContactCompoundSupport(
                             weaponShape, weaponTransform, forward);
@@ -13822,11 +13701,6 @@ namespace
                 PhysicalContactVec3 requestedOffset,
                 int32_t blockedTargetHandle = -1)
             {
-                constexpr uint64_t kDynamicBodyReleaseHoldMs = 60;
-                observation = PhysicalContactHoldRecentDynamicBodySeparation(
-                    observation, g_halo3ContactBodyTargetHandle,
-                    g_halo3ContactBodyLastBlockedMs, nowMs,
-                    kDynamicBodyReleaseHoldMs);
                 const float bodyDt = g_halo3ContactBodyUpdateMs &&
                         nowMs > g_halo3ContactBodyUpdateMs
                     ? std::min(
@@ -13844,24 +13718,16 @@ namespace
                         observation, bodyDt, worldScale);
                 if (observation ==
                         PhysicalContactDynamicBodyObservation::Blocked)
-                {
                     g_halo3ContactBodyTargetHandle = blockedTargetHandle;
-                    g_halo3ContactBodyLastBlockedMs = nowMs;
-                }
                 else if (observation ==
                              PhysicalContactDynamicBodyObservation::Separated &&
                          PhysicalContactLengthSquared(
                              g_halo3ContactBodyOffset) <= 1.0e-10f)
-                {
                     g_halo3ContactBodyTargetHandle = -1;
-                    g_halo3ContactBodyAnchorHandle = -1;
-                    g_halo3ContactBodyAnchorValid = false;
-                }
                 if (uncertainHeld)
                     g_halo3ContactBodyUncertainHolds.fetch_add(
                         1, std::memory_order_relaxed);
                 g_halo3ContactBodyUpdateMs = nowMs;
-                g_halo3ContactBodyLastBlockedMs = 0;
                 const float setbackMeters = PhysicalContactLength(
                     g_halo3ContactBodyOffset) / worldScale;
                 g_halo3ContactBodySetbackMeters.store(
@@ -13894,10 +13760,6 @@ namespace
                 g_halo3ContactBodyOffset = {};
                 g_halo3ContactBodyUpdateMs = nowMs;
                 g_halo3ContactBodyTargetHandle = -1;
-                g_halo3ContactPreviousTargetSurfaceHandle = -1;
-                g_halo3ContactPreviousTargetSurfaceValid = false;
-                g_halo3ContactBodyAnchorHandle = -1;
-                g_halo3ContactBodyAnchorValid = false;
                 g_halo3ContactBodySetbackMeters.store(
                     0.0f, std::memory_order_relaxed);
                 Halo3PublishWeaponWallOffset(g_halo3ContactWallOffset, nowMs);
@@ -13959,8 +13821,6 @@ namespace
             bool constrainedBodyTargetFound = false;
             bool constrainedBodyTargetGeometryResolved = false;
             bool constrainedBodyTargetHit = false;
-            PhysicalContactTransform constrainedBodyTargetTransform{};
-            bool constrainedBodyTargetTransformValid = false;
             // collision_flags: structure; object_flags: object-query enable
             // plus every object type. H3EK's generated +0x14060 initializer
             // proves the type mask is 0x7FFE, while the official assertion in
@@ -14326,14 +14186,6 @@ namespace
                     constrainedBodyTargetGeometryResolved =
                         targetGeometryResolved;
                     constrainedBodyTargetHit = authored.hit;
-                    if (targetGeometryResolved &&
-                        PhysicalContactTransformFinite(
-                            authoredTargetTransform))
-                    {
-                        constrainedBodyTargetTransform =
-                            authoredTargetTransform;
-                        constrainedBodyTargetTransformValid = true;
-                    }
                 }
                 ++eligibleObjects;
                 if (authoredVisualGuard.hit &&
@@ -14406,30 +14258,6 @@ namespace
                 constrainedBodyTargetHandle != -1)
                 g_halo3ContactDebounce.PreserveUncertainContact(
                     constrainedBodyTargetHandle, nowMs);
-            if (!closest.hit && constrainedBodyTargetTransformValid &&
-                g_halo3ContactBodyAnchorValid &&
-                g_halo3ContactBodyAnchorHandle ==
-                    constrainedBodyTargetHandle)
-            {
-                const PhysicalContactVec3 followedPosition =
-                    PhysicalContactTransformPoint(
-                        constrainedBodyTargetTransform,
-                        g_halo3ContactBodyLocalWeaponAnchor);
-                const PhysicalContactVec3 followedOffset = followedPosition -
-                    intendedWeaponTransform.position -
-                    g_halo3ContactWallOffset;
-                if (PhysicalContactFinite(followedOffset) &&
-                    PhysicalContactLengthSquared(followedOffset) <=
-                        worldScale * worldScale)
-                {
-                    updateBodyConstraint(
-                        PhysicalContactDynamicBodyObservation::Blocked,
-                        followedOffset, constrainedBodyTargetHandle);
-                    publishApprovedVisiblePose();
-                    g_halo3ContactDebounce.EndSample(nowMs);
-                    return;
-                }
-            }
             if (!closest.hit && closestVisualGuard.hit &&
                 closestVisualGuardHandle != -1 &&
                 closestVisualGuard.normalReliable)
@@ -14548,10 +14376,6 @@ namespace
             }
             if (!closest.hit)
             {
-                g_halo3ContactPreviousTargetSurfaceHandle = -1;
-                g_halo3ContactPreviousTargetSurfaceValid = false;
-                g_halo3ContactBodyObservedReserveMeters.store(
-                    0.0f, std::memory_order_relaxed);
                 updateBodyConstraint(constrainedBodyObservation, {});
                 if (constrainedBodyObservation ==
                     PhysicalContactDynamicBodyObservation::Uncertain)
@@ -14711,46 +14535,12 @@ namespace
                 // material point used to measure rigid weapon velocity.
                 closest.point = targetPoint;
             }
-            float observedSurfaceReserveMeters = 0.0f;
-            if (closestUsesAuthoredShape &&
-                g_halo3ContactPreviousTargetSurfaceValid &&
-                g_halo3ContactPreviousTargetSurfaceHandle == closestHandle)
-            {
-                const PhysicalContactVec3 targetLocalPoint =
-                    PhysicalContactInverseTransformPoint(
-                        closestTargetTransform, closest.point);
-                const PhysicalContactVec3 previousTargetSurfacePoint =
-                    PhysicalContactTransformPoint(
-                        g_halo3ContactPreviousTargetTransform,
-                        targetLocalPoint);
-                observedSurfaceReserveMeters =
-                    PhysicalContactObservedSurfaceApproachMeters(
-                        previousTargetSurfacePoint, closest.point, closest.normal,
-                        worldScale, 0.04f);
-            }
-            if (closestUsesAuthoredShape && PhysicalContactFinite(
-                    closestTargetTransform.position))
-            {
-                g_halo3ContactPreviousTargetTransform =
-                    closestTargetTransform;
-                g_halo3ContactPreviousTargetSurfaceHandle = closestHandle;
-                g_halo3ContactPreviousTargetSurfaceValid = true;
-            }
-            else
-            {
-                g_halo3ContactPreviousTargetSurfaceHandle = -1;
-                g_halo3ContactPreviousTargetSurfaceValid = false;
-            }
-            g_halo3ContactBodyObservedReserveMeters.store(
-                observedSurfaceReserveMeters, std::memory_order_relaxed);
             PhysicalContactWallConstraint bodyConstraint =
                 PhysicalContactDynamicBodyOffset(
                     previousWeaponTransform, intendedWeaponTransform,
                     closest.fraction, closest.normal,
                     closestPenetrationMeters,
-                    kHalo3ContactTriangleSurfaceRadiusMeters +
-                        observedSurfaceReserveMeters,
-                    worldScale);
+                    kHalo3ContactTriangleSurfaceRadiusMeters, worldScale);
             if (closestUsesAuthoredShape)
             {
                 PhysicalContactCompoundShape verifiedTargetShape{};
@@ -14831,19 +14621,6 @@ namespace
                     : constrainedBodyObservation,
                 bodyConstraint.offset,
                 bodyConstraint.constrained ? closestHandle : -1);
-            if (bodyConstraint.constrained && closestUsesAuthoredShape &&
-                PhysicalContactTransformFinite(closestTargetTransform))
-            {
-                const PhysicalContactVec3 correctedWeaponPosition =
-                    intendedWeaponTransform.position +
-                    g_halo3ContactWallOffset + g_halo3ContactBodyOffset;
-                g_halo3ContactBodyLocalWeaponAnchor =
-                    PhysicalContactInverseTransformPoint(
-                        closestTargetTransform, correctedWeaponPosition);
-                g_halo3ContactBodyAnchorHandle = closestHandle;
-                g_halo3ContactBodyAnchorValid = PhysicalContactFinite(
-                    g_halo3ContactBodyLocalWeaponAnchor);
-            }
             if (bodyConstraint.constrained &&
                 !visualConstraintUsesFallbackNormal)
                 publishApprovedVisiblePose();
@@ -15816,7 +15593,6 @@ namespace
             "targetTriangles=%u targetDetailed=%u "
             "targetFallback=%u targetConfirmRejects=%u nativeSamples=%u "
             "wallBlocks=%llu wallSetback=%.3fm bodySetback=%.3fm "
-            "bodyReserve=%.3fm "
             "bodyConstraints=%llu bodyFallbackNormalConstraints=%llu "
             "bodyUncertainHolds=%llu bodyPeak=%.3fm "
             "wallRays=%llu "
@@ -15927,8 +15703,6 @@ namespace
             g_halo3ContactWallSetbackMeters.load(
                 std::memory_order_relaxed),
             g_halo3ContactBodySetbackMeters.load(
-                std::memory_order_relaxed),
-            g_halo3ContactBodyObservedReserveMeters.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactBodyConstraints.load(
                 std::memory_order_relaxed),
@@ -16123,8 +15897,6 @@ namespace
                     "correctedPalettes=%llu "
                     "approvedPalettes=%llu heldPalettes=%llu "
                     "directOverlaps=%llu directSeparations=%llu "
-                    "geometryOverlaps=%llu geometrySeparations=%llu "
-                    "confirmedOverlaps=%llu "
                     "solidOverlaps=%llu solidSeparations=%llu "
                     "gapRange=(%.4f %.4f)m",
                     (unsigned long long)
@@ -16150,15 +15922,6 @@ namespace
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleDirectSeparations.load(
-                            std::memory_order_relaxed),
-                    (unsigned long long)
-                        g_halo3ContactDebugVisibleGeometryOverlaps.load(
-                            std::memory_order_relaxed),
-                    (unsigned long long)
-                        g_halo3ContactDebugVisibleGeometrySeparations.load(
-                            std::memory_order_relaxed),
-                    (unsigned long long)
-                        g_halo3ContactDebugVisibleConfirmedOverlaps.load(
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleSolidOverlaps.load(
@@ -16216,6 +15979,7 @@ namespace
             TitleAdapter_PublishHeartbeat(
                 GameTitle::Halo3, runtimeGeneration, cameraNowMs);
             Halo3SampleVehicleState(cameraNowMs);
+            Halo3ProcessPhysicalWeaponContact(cameraNowMs);
             Halo3ProcessLeftHandGrab(cameraNowMs);
         }
         // Low-frequency timing proof paired with vr.cpp's HMD sample-rate log.
@@ -20998,21 +20762,9 @@ namespace
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleMeasurementStarted.store(
             false, std::memory_order_release);
-        g_halo3ContactDebugVisibleActiveStartMs.store(
-            0, std::memory_order_release);
         g_halo3ContactDebugVisibleDirectOverlaps.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleDirectSeparations.store(
-            0, std::memory_order_release);
-        g_halo3ContactDebugVisibleGeometryOverlaps.store(
-            0, std::memory_order_release);
-        g_halo3ContactDebugVisibleGeometrySeparations.store(
-            0, std::memory_order_release);
-        g_halo3ContactDebugVisibleConfirmedOverlaps.store(
-            0, std::memory_order_release);
-        g_halo3ContactDebugVisibleSolidOverlaps.store(
-            0, std::memory_order_release);
-        g_halo3ContactDebugVisibleSolidSeparations.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleMinimumGap.store(
             FLT_MAX, std::memory_order_release);
