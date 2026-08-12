@@ -14660,8 +14660,10 @@ namespace
                     updateBodyConstraint(
                         PhysicalContactDynamicBodyObservation::Blocked,
                         followedOffset, constrainedBodyTargetHandle);
-                    publishBodyFollow(
-                        constrainedBodyTargetHandle);
+                    // The exact corrected palette is already safe. Moving it
+                    // later in the render hook has no collision proof and can
+                    // carry it through a target that changed motion meanwhile.
+                    Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
                     publishApprovedVisiblePose();
                     g_halo3ContactDebounce.EndSample(nowMs);
                     return;
@@ -14768,8 +14770,8 @@ namespace
                                         Blocked,
                                     verifiedGuard.offset,
                                     closestVisualGuardHandle);
-                                publishBodyFollow(
-                                    closestVisualGuardHandle);
+                                Halo3PublishWeaponBodyFollow(
+                                    {}, {}, {}, 0, 0);
                                 publishApprovedVisiblePose();
                                 g_halo3ContactDebounce.EndSample(nowMs);
                                 return;
@@ -15111,7 +15113,7 @@ namespace
                 g_halo3ContactBodyAnchorHandle = closestHandle;
                 g_halo3ContactBodyAnchorValid = PhysicalContactFinite(
                     g_halo3ContactBodyLocalWeaponAnchor);
-                publishBodyFollow(closestHandle);
+                Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
             }
             if (bodyConstraint.constrained &&
                 !visualConstraintUsesFallbackNormal)

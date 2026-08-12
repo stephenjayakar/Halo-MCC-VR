@@ -2177,6 +2177,21 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
+### 2026-08-12 keep approved dynamic-body palette fixed
+
+Candidate `a53135722460093beb1b2d8d878a5cbdae19c83a` added future target
+samples and cleared render follow on direct hits, but the constrained no-hit and
+visual-guard branches still published unverified render extrapolation. Its
+rotating replay failed after 415 palettes with one direct, geometry, confirmed,
+and solid overlap. The preserved log is
+`out/debug-openxr/20260812-161920548Z-rotating-body-gap.log`. That behavior is
+rejected and reverted by `972706c`.
+
+The next candidate makes all three dynamic-body constraint branches publish a
+fixed, collision-approved palette. The render hook no longer moves that palette
+after approval. Target motion is handled only by the next exact worker sweep;
+an uncertain result continues holding the last proven pose.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
