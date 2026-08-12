@@ -314,6 +314,15 @@ function Test-VisibleWeaponGapResult([string]$Text) {
         $directOverlaps -eq 0
 }
 
+function Test-VisibleWeaponGapFailure([string]$Text) {
+    # directOverlaps is cumulative. One measured overlap makes a zero-overlap
+    # run impossible, so stop immediately and preserve the failing evidence.
+    $line = ($Text -split "`r?`n") | Where-Object {
+        $_ -match 'H3 physical contact DEBUG VISIBLE REPLAY:'
+    } | Select-Object -Last 1
+    return $line -and $line -match 'directOverlaps=([1-9][0-9]*)'
+}
+
 function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
         'weapon-scoop' {
@@ -709,6 +718,10 @@ public static class HaloMccVrContactInput {
 
     Wait-Until {
         $text = Get-NewLogText $runtimeLog $startedUtc
+        if ($Test -eq 'visible-weapon-gap' -and
+            (Test-VisibleWeaponGapFailure $text)) {
+            throw 'Halo 3 visible-weapon-gap recorded a cumulative direct overlap.'
+        }
         Test-ValidationResult $text $Test
     } $ValidationTimeoutSeconds "Halo 3 $Test did not reach its pass condition."
 
