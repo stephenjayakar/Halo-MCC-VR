@@ -1553,6 +1553,19 @@ struct PhysicalContactTriangleMeshHit : PhysicalContactConvexHit
     uint16_t targetIndex = 0;
 };
 
+// A zero-radius triangle test can report a coplanar/touching edge that the
+// strictly enclosing contact-skin query rejects because of floating-point
+// branch differences. Real surface penetration must be present in both nested
+// queries at the same pose. A tiny outward probe must also remain in both
+// surfaces before this is called penetration instead of exact touching.
+inline bool PhysicalContactConfirmedSurfacePenetration(
+    bool contactSkinHit, bool zeroRadiusHit,
+    bool outwardContactSkinHit, bool outwardZeroRadiusHit)
+{
+    return contactSkinHit && zeroRadiusHit &&
+        outwardContactSkinHit && outwardZeroRadiusHit;
+}
+
 template <typename IntersectAt, typename IntersectPairAt,
           typename TargetSupport>
 inline PhysicalContactTriangleMeshHit PhysicalContactSweepTriangleMeshInternal(
@@ -2007,6 +2020,34 @@ inline PhysicalContactVec3 PhysicalContactUpdateDynamicBodyOffset(
     // A smoothed intermediate offset can cross back through that same target;
     // release directly to the checked controller pose.
     return {};
+}
+
+// Halo can apply a discrete rigid-body correction while its velocity readback
+// remains near zero. Use the authored contact surface's observed displacement
+// to reserve one more sample of motion along the target-to-weapon normal.
+inline float PhysicalContactObservedSurfaceApproachMeters(
+    PhysicalContactVec3 previousSurfacePoint,
+    PhysicalContactVec3 currentSurfacePoint,
+    PhysicalContactVec3 targetToWeaponNormal,
+    float worldUnitsPerMeter,
+    float maximumReserveMeters = 0.10f)
+{
+    if (!PhysicalContactFinite(previousSurfacePoint) ||
+        !PhysicalContactFinite(currentSurfacePoint) ||
+        !PhysicalContactFinite(targetToWeaponNormal) ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f ||
+        !std::isfinite(maximumReserveMeters) || maximumReserveMeters < 0.0f)
+        return 0.0f;
+    const PhysicalContactVec3 outward = PhysicalContactNormalize(
+        targetToWeaponNormal, {});
+    if (PhysicalContactLengthSquared(outward) <= 1.0e-12f)
+        return 0.0f;
+    const float approachMeters = PhysicalContactDot(
+        currentSurfacePoint - previousSurfacePoint, outward) /
+        worldUnitsPerMeter;
+    return std::isfinite(approachMeters)
+        ? std::clamp(approachMeters, 0.0f, maximumReserveMeters)
+        : 0.0f;
 }
 
 // Keep the rendered kinematic weapon on the target-facing side of an exact
