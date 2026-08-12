@@ -10451,6 +10451,16 @@ int main()
             PhysicalContactHoldRecentDynamicBodySeparation(
                 PhysicalContactDynamicBodyObservation::Separated,
                 0x12340001, 1000, 1061, 60);
+        const float bodySurfaceMotionReserve =
+            PhysicalContactObservedSurfaceMotionReserveMeters(
+                {}, {0.01f, 0.0f, 0.0f}, 0.5f);
+        const float bodySurfaceMotionReserveClamped =
+            PhysicalContactObservedSurfaceMotionReserveMeters(
+                {}, {0.20f, 0.0f, 0.0f}, 0.5f);
+        const float bodySurfaceMotionReserveInvalid =
+            PhysicalContactObservedSurfaceMotionReserveMeters(
+                {}, {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f},
+                0.5f);
         const PhysicalContactVec3 bodyUncertainHeld =
             PhysicalContactUpdateDynamicBodyOffset(
                 {-0.20f, 0, 0}, {},
@@ -10554,6 +10564,9 @@ int main()
                   PhysicalContactDynamicBodyObservation::Uncertain &&
               bodyExpiredSeparation ==
                   PhysicalContactDynamicBodyObservation::Separated &&
+              std::fabs(bodySurfaceMotionReserve - 0.04f) < 1.0e-6f &&
+              std::fabs(bodySurfaceMotionReserveClamped - 0.08f) < 1.0e-6f &&
+              bodySurfaceMotionReserveInvalid == 0.0f &&
               std::fabs(bodyUncertainHeld.x + 0.20f) < 1.0e-6f &&
               std::fabs(bodyUncertainStillHeld.x + 0.20f) < 1.0e-6f &&
               PhysicalContactLengthSquared(bodySeparated) < 1.0e-10f &&
@@ -10595,9 +10608,9 @@ int main()
             "vertices, while larger meshes rotate an evenly spread bounded "
             "face-centre sample set; "
             "dynamic bodies reject only inward travel while preserving slides, "
-            "hold exact correction across an unresolved query gap, accept only "
-            "a directly verified clear final pose, then release directly to "
-            "that checked pose");
+            "hold exact correction across an unresolved query gap, reserve "
+            "observed rigid-surface motion, accept only a directly verified "
+            "clear final pose, then release directly to that checked pose");
 
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&

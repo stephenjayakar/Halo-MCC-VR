@@ -2063,6 +2063,29 @@ inline float PhysicalContactObservedSurfaceApproachMeters(
         : 0.0f;
 }
 
+// A moving rigid body can rotate or slide a different part of its authored
+// surface into the previously approved weapon pose between simulation samples.
+// Normal-only motion misses that case. Reserve two observed surface steps so
+// the last displayed pose remains clear while the next exact solve catches up.
+// The cap keeps a single bad transform from hiding the weapon far from a prop.
+inline float PhysicalContactObservedSurfaceMotionReserveMeters(
+    PhysicalContactVec3 previousSurfacePoint,
+    PhysicalContactVec3 currentSurfacePoint, float worldUnitsPerMeter,
+    float maximumReserveMeters = 0.08f)
+{
+    if (!PhysicalContactFinite(previousSurfacePoint) ||
+        !PhysicalContactFinite(currentSurfacePoint) ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f ||
+        !std::isfinite(maximumReserveMeters) || maximumReserveMeters < 0.0f)
+        return 0.0f;
+    const float surfaceMotionMeters = PhysicalContactLength(
+        currentSurfacePoint - previousSurfacePoint) / worldUnitsPerMeter;
+    return std::isfinite(surfaceMotionMeters)
+        ? std::clamp(surfaceMotionMeters * 2.0f, 0.0f,
+                     maximumReserveMeters)
+        : 0.0f;
+}
+
 // Keep the rendered kinematic weapon on the target-facing side of an exact
 // dynamic-body hit. Only normal travel is rejected, so the controller may still
 // slide along a surface to scoop or carry it. The current pose is the

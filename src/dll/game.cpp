@@ -14745,10 +14745,16 @@ namespace
                     PhysicalContactTransformPoint(
                         g_halo3ContactPreviousTargetTransform,
                         targetLocalPoint);
-                observedSurfaceReserveMeters =
+                const float observedApproachMeters =
                     PhysicalContactObservedSurfaceApproachMeters(
                         previousTargetSurfacePoint, closest.point, closest.normal,
                         worldScale, 0.04f);
+                const float observedMotionMeters =
+                    PhysicalContactObservedSurfaceMotionReserveMeters(
+                        previousTargetSurfacePoint, closest.point, worldScale,
+                        0.08f);
+                observedSurfaceReserveMeters = std::max(
+                    observedApproachMeters, observedMotionMeters);
             }
             if (closestUsesAuthoredShape && PhysicalContactFinite(
                     closestTargetTransform.position))
@@ -14834,8 +14840,8 @@ namespace
                         PhysicalContactVerifiedSeparationOffset(
                             intendedWeaponTransform, closest.normal,
                             bodyConstraint.setbackWorldUnits,
-                            kHalo3ContactVisualGuardClearanceMeters *
-                                worldScale,
+                            (kHalo3ContactVisualGuardClearanceMeters +
+                             observedSurfaceReserveMeters) * worldScale,
                             worldScale, exactOverlap);
                     PhysicalContactWallConstraint followedConstraint{};
                     if (g_halo3ContactBodyAnchorValid &&
