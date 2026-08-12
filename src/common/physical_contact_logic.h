@@ -2372,32 +2372,6 @@ inline float PhysicalContactTargetMeleeThreshold(
         configuredThresholdMetersPerSecond * (2.0f / 3.0f), 0.50f, 4.00f);
 }
 
-// An approved palette can remain visible until the next gameplay sample. A
-// loose body's surface may move toward that palette during the handoff, from
-// both translation and rotation. Reserve only the measured inward component so
-// motion away from the weapon does not create an unnecessary visible gap.
-// Invalid motion evidence uses the bounded maximum instead of guessing small.
-inline float PhysicalContactDynamicVisualClearanceMeters(
-    float targetSurfaceInwardSpeedMetersPerSecond,
-    float baseClearanceMeters = 0.004f,
-    float predictionSeconds = 0.100f,
-    float maximumClearanceMeters = 0.035f)
-{
-    if (!std::isfinite(baseClearanceMeters) ||
-        baseClearanceMeters < 0.0f ||
-        !std::isfinite(predictionSeconds) || predictionSeconds < 0.0f ||
-        !std::isfinite(maximumClearanceMeters) ||
-        maximumClearanceMeters < baseClearanceMeters)
-        return 0.0f;
-    if (!std::isfinite(targetSurfaceInwardSpeedMetersPerSecond) ||
-        targetSurfaceInwardSpeedMetersPerSecond < 0.0f)
-        return maximumClearanceMeters;
-    return std::clamp(
-        baseClearanceMeters +
-            targetSurfaceInwardSpeedMetersPerSecond * predictionSeconds,
-        baseClearanceMeters, maximumClearanceMeters);
-}
-
 inline float PhysicalContactTargetMeleeImpactSpeed(
     bool firstContact, bool enemyWeaponSpeedEligible, uint8_t targetKind,
     PhysicalContactVec3 relativeVelocityMetersPerSecond,

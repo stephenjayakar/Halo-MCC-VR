@@ -10438,17 +10438,6 @@ int main()
             PhysicalContactVerifiedSeparationOffset(
                 verifiedIntended, {-1.0f, 0.0f, 0.0f},
                 0.02f, 0.005f, 0.50f, overlappingUntil);
-        const float visualClearanceStill =
-            PhysicalContactDynamicVisualClearanceMeters(0.0f);
-        const float visualClearanceMoving =
-            PhysicalContactDynamicVisualClearanceMeters(0.20f);
-        const float visualClearanceClamped =
-            PhysicalContactDynamicVisualClearanceMeters(2.0f);
-        const float visualClearanceInvalid =
-            PhysicalContactDynamicVisualClearanceMeters(-1.0f);
-        const float visualClearanceInvalidPolicy =
-            PhysicalContactDynamicVisualClearanceMeters(
-                0.20f, 0.040f, 0.100f, 0.035f);
         bodyIntended.position = {1.0f, 0.0f, 0.0f};
         const PhysicalContactWallConstraint bodyTunnel =
             PhysicalContactDynamicBodyOffset(
@@ -10514,14 +10503,9 @@ int main()
                   1.0e-10f &&
               verifiedSeparation.constrained &&
               !overlappingUntil(verifiedClear) &&
-               verifiedSeparation.setbackWorldUnits > 0.35f &&
-               !verifiedWrongDirection.constrained &&
-               std::fabs(visualClearanceStill - 0.004f) < 1.0e-6f &&
-               std::fabs(visualClearanceMoving - 0.024f) < 1.0e-6f &&
-               std::fabs(visualClearanceClamped - 0.035f) < 1.0e-6f &&
-               std::fabs(visualClearanceInvalid - 0.035f) < 1.0e-6f &&
-               std::fabs(visualClearanceInvalidPolicy) < 1.0e-6f &&
-               bodyTunnel.constrained &&
+              verifiedSeparation.setbackWorldUnits > 0.35f &&
+              !verifiedWrongDirection.constrained &&
+              bodyTunnel.constrained &&
               std::fabs(bodyTunnel.offset.x + 0.51f) < 1.0e-6f &&
               std::fabs(bodyTunnel.offset.y) < 1.0e-6f &&
               bodySlide.constrained &&
@@ -10553,9 +10537,8 @@ int main()
             "face-centre sample set; "
             "dynamic bodies reject only inward travel while preserving slides, "
             "hold exact correction across an unresolved query gap, accept only "
-            "a directly verified clear final pose, reserve bounded clearance "
-            "for measured inward target motion, then release directly to that "
-            "checked pose");
+            "a directly verified clear final pose, then release directly to "
+            "that checked pose");
 
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&
