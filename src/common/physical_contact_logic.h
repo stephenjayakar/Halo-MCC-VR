@@ -193,38 +193,109 @@ inline PhysicalContactVec3 PhysicalContactInverseTransformPoint(
     return PhysicalContactInverseTransformVector(t, world - t.position);
 }
 
-// Advance a body-relative contact point across the short gap between the
-// simulation approval and the palette that consumes it. This is not a physics
-// prediction: it only prevents a fast target from entering a one-frame-old
-// safe weapon pose. Age and distance are both bounded.
-inline PhysicalContactVec3 PhysicalContactBodyFollowDelta(
-    PhysicalContactVec3 pointVelocityWorldUnitsPerSecond,
-    uint64_t sampleMs, uint64_t nowMs, float worldUnitsPerMeter,
-    float maximumAgeSeconds = 0.05f,
-    float maximumDistanceMeters = 0.25f)
+struct PhysicalContactRigidBodyFollow
 {
-    if (!PhysicalContactFinite(pointVelocityWorldUnitsPerSecond) ||
-        !sampleMs || nowMs < sampleMs ||
+    bool valid = false;
+    PhysicalContactVec3 pivot{};
+    PhysicalContactVec3 translation{};
+    PhysicalContactVec3 rotationAxis{1.0f, 0.0f, 0.0f};
+    float rotationRadians = 0.0f;
+};
+
+inline PhysicalContactVec3 PhysicalContactRotateAxisAngle(
+    PhysicalContactVec3 value, PhysicalContactVec3 unitAxis, float radians)
+{
+    if (!PhysicalContactFinite(value) || !PhysicalContactFinite(unitAxis) ||
+        !std::isfinite(radians))
+        return {};
+    const float cosine = std::cos(radians);
+    const float sine = std::sin(radians);
+    return value * cosine + PhysicalContactCross(unitAxis, value) * sine +
+        unitAxis * PhysicalContactDot(unitAxis, value) * (1.0f - cosine);
+}
+
+// Advance the approved weapon by the contacted body's complete rigid motion
+// across the short simulation-to-palette gap. The former point-velocity-only
+// approximation moved the weapon root but did not rotate its long geometry, so
+// a turning crate or vehicle could rotate a surface back through the barrel.
+// Time, translation, and rotation are all bounded.
+inline PhysicalContactRigidBodyFollow PhysicalContactBuildRigidBodyFollow(
+    PhysicalContactVec3 linearVelocityWorldUnitsPerSecond,
+    PhysicalContactVec3 angularVelocityRadiansPerSecond,
+    PhysicalContactVec3 bodyPivot, uint64_t sampleMs, uint64_t nowMs,
+    float worldUnitsPerMeter, float maximumAgeSeconds = 0.05f,
+    float maximumDistanceMeters = 0.25f,
+    float maximumRotationRadians = 0.35f)
+{
+    PhysicalContactRigidBodyFollow result{};
+    if (!PhysicalContactFinite(linearVelocityWorldUnitsPerSecond) ||
+        !PhysicalContactFinite(angularVelocityRadiansPerSecond) ||
+        !PhysicalContactFinite(bodyPivot) || !sampleMs || nowMs < sampleMs ||
         !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f ||
         !std::isfinite(maximumAgeSeconds) || maximumAgeSeconds <= 0.0f ||
         maximumAgeSeconds > 0.1f ||
         !std::isfinite(maximumDistanceMeters) ||
-        maximumDistanceMeters <= 0.0f || maximumDistanceMeters > 1.0f)
-        return {};
+        maximumDistanceMeters <= 0.0f || maximumDistanceMeters > 1.0f ||
+        !std::isfinite(maximumRotationRadians) ||
+        maximumRotationRadians <= 0.0f || maximumRotationRadians > 1.0f)
+        return result;
     const float elapsedSeconds =
         static_cast<float>(nowMs - sampleMs) * 0.001f;
     if (!std::isfinite(elapsedSeconds) ||
         elapsedSeconds > maximumAgeSeconds)
-        return {};
-    PhysicalContactVec3 delta =
-        pointVelocityWorldUnitsPerSecond * elapsedSeconds;
+        return result;
+    PhysicalContactVec3 translation =
+        linearVelocityWorldUnitsPerSecond * elapsedSeconds;
     const float maximumDistance = maximumDistanceMeters * worldUnitsPerMeter;
-    const float distance = PhysicalContactLength(delta);
-    if (!PhysicalContactFinite(delta) || !std::isfinite(distance))
-        return {};
+    const float distance = PhysicalContactLength(translation);
+    if (!PhysicalContactFinite(translation) || !std::isfinite(distance))
+        return result;
     if (distance > maximumDistance)
-        delta = delta * (maximumDistance / distance);
-    return PhysicalContactFinite(delta) ? delta : PhysicalContactVec3{};
+        translation = translation * (maximumDistance / distance);
+
+    const float angularSpeed = PhysicalContactLength(
+        angularVelocityRadiansPerSecond);
+    if (!std::isfinite(angularSpeed))
+        return result;
+    float rotationRadians = std::min(
+        angularSpeed * elapsedSeconds, maximumRotationRadians);
+    PhysicalContactVec3 rotationAxis{1.0f, 0.0f, 0.0f};
+    if (angularSpeed > 1.0e-6f)
+        rotationAxis = angularVelocityRadiansPerSecond * (1.0f / angularSpeed);
+    else
+        rotationRadians = 0.0f;
+    if (!PhysicalContactFinite(translation) ||
+        !PhysicalContactFinite(rotationAxis) ||
+        !std::isfinite(rotationRadians))
+        return result;
+    result.valid = true;
+    result.pivot = bodyPivot;
+    result.translation = translation;
+    result.rotationAxis = rotationAxis;
+    result.rotationRadians = rotationRadians;
+    return result;
+}
+
+inline PhysicalContactVec3 PhysicalContactApplyRigidBodyFollowPoint(
+    const PhysicalContactRigidBodyFollow& follow,
+    PhysicalContactVec3 worldPoint)
+{
+    if (!follow.valid || !PhysicalContactFinite(worldPoint))
+        return worldPoint;
+    return follow.pivot + follow.translation +
+        PhysicalContactRotateAxisAngle(
+            worldPoint - follow.pivot, follow.rotationAxis,
+            follow.rotationRadians);
+}
+
+inline PhysicalContactVec3 PhysicalContactApplyRigidBodyFollowVector(
+    const PhysicalContactRigidBodyFollow& follow,
+    PhysicalContactVec3 worldVector)
+{
+    return follow.valid
+        ? PhysicalContactRotateAxisAngle(
+              worldVector, follow.rotationAxis, follow.rotationRadians)
+        : worldVector;
 }
 
 inline bool PhysicalContactSegmentIntersectsExpandedAabb(

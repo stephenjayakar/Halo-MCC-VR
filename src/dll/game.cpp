@@ -1062,30 +1062,42 @@ namespace
         std::atomic<uint32_t> sequence{0};
         std::atomic<uint64_t> sampleMs{0};
         std::atomic<uint64_t> poseSerial{0};
-        std::atomic<float> pointVelocity[3]{};
+        std::atomic<float> linearVelocity[3]{};
+        std::atomic<float> angularVelocity[3]{};
+        std::atomic<float> pivot[3]{};
     };
     Halo3WeaponBodyFollowPublication g_halo3WeaponBodyFollow;
 
     void Halo3PublishWeaponBodyFollow(
-        PhysicalContactVec3 pointVelocity, uint64_t sampleMs,
-        uint64_t poseSerial)
+        PhysicalContactVec3 linearVelocity,
+        PhysicalContactVec3 angularVelocity, PhysicalContactVec3 pivot,
+        uint64_t sampleMs, uint64_t poseSerial)
     {
         auto& published = g_halo3WeaponBodyFollow;
         published.sequence.fetch_add(1, std::memory_order_acq_rel);
         published.sampleMs.store(sampleMs, std::memory_order_relaxed);
         published.poseSerial.store(poseSerial, std::memory_order_relaxed);
-        published.pointVelocity[0].store(
-            pointVelocity.x, std::memory_order_relaxed);
-        published.pointVelocity[1].store(
-            pointVelocity.y, std::memory_order_relaxed);
-        published.pointVelocity[2].store(
-            pointVelocity.z, std::memory_order_relaxed);
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            published.linearVelocity[axis].store(
+                axis == 0 ? linearVelocity.x
+                          : (axis == 1 ? linearVelocity.y : linearVelocity.z),
+                std::memory_order_relaxed);
+            published.angularVelocity[axis].store(
+                axis == 0 ? angularVelocity.x
+                          : (axis == 1 ? angularVelocity.y : angularVelocity.z),
+                std::memory_order_relaxed);
+            published.pivot[axis].store(
+                axis == 0 ? pivot.x : (axis == 1 ? pivot.y : pivot.z),
+                std::memory_order_relaxed);
+        }
         published.sequence.fetch_add(1, std::memory_order_release);
     }
 
     bool Halo3ReadWeaponBodyFollow(
-        PhysicalContactVec3& pointVelocity, uint64_t& sampleMs,
-        uint64_t& poseSerial)
+        PhysicalContactVec3& linearVelocity,
+        PhysicalContactVec3& angularVelocity, PhysicalContactVec3& pivot,
+        uint64_t& sampleMs, uint64_t& poseSerial)
     {
         auto& published = g_halo3WeaponBodyFollow;
         for (int attempt = 0; attempt < 2; ++attempt)
@@ -1096,13 +1108,23 @@ namespace
                 continue;
             sampleMs = published.sampleMs.load(std::memory_order_relaxed);
             poseSerial = published.poseSerial.load(std::memory_order_relaxed);
-            pointVelocity = {
-                published.pointVelocity[0].load(std::memory_order_relaxed),
-                published.pointVelocity[1].load(std::memory_order_relaxed),
-                published.pointVelocity[2].load(std::memory_order_relaxed)};
+            linearVelocity = {
+                published.linearVelocity[0].load(std::memory_order_relaxed),
+                published.linearVelocity[1].load(std::memory_order_relaxed),
+                published.linearVelocity[2].load(std::memory_order_relaxed)};
+            angularVelocity = {
+                published.angularVelocity[0].load(std::memory_order_relaxed),
+                published.angularVelocity[1].load(std::memory_order_relaxed),
+                published.angularVelocity[2].load(std::memory_order_relaxed)};
+            pivot = {
+                published.pivot[0].load(std::memory_order_relaxed),
+                published.pivot[1].load(std::memory_order_relaxed),
+                published.pivot[2].load(std::memory_order_relaxed)};
             if (published.sequence.load(std::memory_order_acquire) == before)
                 return sampleMs != 0 && poseSerial != 0 &&
-                    PhysicalContactFinite(pointVelocity);
+                    PhysicalContactFinite(linearVelocity) &&
+                    PhysicalContactFinite(angularVelocity) &&
+                    PhysicalContactFinite(pivot);
         }
         return false;
     }
@@ -5730,7 +5752,9 @@ namespace
                     memcpy(destination, approvedNodes.data(),
                            static_cast<size_t>(renderNodeCount) *
                                sizeof(BoneMatrix));
-                    PhysicalContactVec3 bodyPointVelocity{};
+                    PhysicalContactVec3 bodyLinearVelocity{};
+                    PhysicalContactVec3 bodyAngularVelocity{};
+                    PhysicalContactVec3 bodyPivot{};
                     uint64_t bodyFollowMs = 0;
                     uint64_t bodyFollowSerial = 0;
                     const float worldScale =
@@ -5738,22 +5762,39 @@ namespace
                     if (approvedCorrected && std::isfinite(worldScale) &&
                         worldScale >= 0.05f && worldScale <= 2.0f &&
                         Halo3ReadWeaponBodyFollow(
-                            bodyPointVelocity, bodyFollowMs,
+                            bodyLinearVelocity, bodyAngularVelocity, bodyPivot,
+                            bodyFollowMs,
                             bodyFollowSerial) &&
                         bodyFollowSerial == approvedSerial)
                     {
-                        const PhysicalContactVec3 bodyFollowDelta =
-                            PhysicalContactBodyFollowDelta(
-                                bodyPointVelocity, bodyFollowMs, nowMs,
-                                worldScale);
+                        const PhysicalContactRigidBodyFollow bodyFollow =
+                            PhysicalContactBuildRigidBodyFollow(
+                                bodyLinearVelocity, bodyAngularVelocity,
+                                bodyPivot, bodyFollowMs, nowMs, worldScale);
                         for (int node = 0; node < renderNodeCount; ++node)
                         {
-                            destination[node].translation[0] +=
-                                bodyFollowDelta.x;
-                            destination[node].translation[1] +=
-                                bodyFollowDelta.y;
-                            destination[node].translation[2] +=
-                                bodyFollowDelta.z;
+                            PhysicalContactVec3 nodePosition =
+                                PhysicalContactApplyRigidBodyFollowPoint(
+                                    bodyFollow,
+                                    {destination[node].translation[0],
+                                     destination[node].translation[1],
+                                     destination[node].translation[2]});
+                            destination[node].translation[0] = nodePosition.x;
+                            destination[node].translation[1] = nodePosition.y;
+                            destination[node].translation[2] = nodePosition.z;
+                            for (int column = 0; column < 3; ++column)
+                            {
+                                const int index = column * 3;
+                                const PhysicalContactVec3 rotated =
+                                    PhysicalContactApplyRigidBodyFollowVector(
+                                        bodyFollow,
+                                        {destination[node].rotation[index],
+                                         destination[node].rotation[index + 1],
+                                         destination[node].rotation[index + 2]});
+                                destination[node].rotation[index] = rotated.x;
+                                destination[node].rotation[index + 1] = rotated.y;
+                                destination[node].rotation[index + 2] = rotated.z;
+                            }
                         }
                     }
                     displayedSerial = approvedSerial;
@@ -11137,7 +11178,7 @@ namespace
         g_halo3ContactBodyLocalWeaponAnchor = {};
         g_halo3ContactBodyAnchorHandle = -1;
         g_halo3ContactBodyAnchorValid = false;
-        Halo3PublishWeaponBodyFollow({}, 0, 0);
+        Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
         g_halo3ContactPreviousWallTransform = {};
         g_halo3ContactWallWeaponHandle = -1;
         g_halo3ContactPreviousWallPoseValid = false;
@@ -13987,7 +14028,7 @@ namespace
                         PhysicalContactDynamicBodyObservation::Separated &&
                     PhysicalContactLengthSquared(
                         g_halo3ContactBodyOffset) <= 1.0e-10f)
-                    Halo3PublishWeaponBodyFollow({}, 0, 0);
+                    Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
             };
             const auto publishBodyFollow = [&] (
                 int32_t targetHandle,
@@ -14004,13 +14045,11 @@ namespace
                     linear[0], linear[1], linear[2]};
                 const PhysicalContactVec3 angularVelocity{
                     angular[0], angular[1], angular[2]};
-                const PhysicalContactVec3 pointVelocity = linearVelocity +
-                    PhysicalContactCross(
-                        angularVelocity,
-                        correctedWeaponPosition - targetTransform.position);
-                if (PhysicalContactFinite(pointVelocity))
+                if (PhysicalContactFinite(linearVelocity) &&
+                    PhysicalContactFinite(angularVelocity))
                     Halo3PublishWeaponBodyFollow(
-                        pointVelocity, nowMs, proposalSerial);
+                        linearVelocity, angularVelocity,
+                        targetTransform.position, nowMs, proposalSerial);
             };
             if (weaponHandle != g_halo3ContactWeaponHandle)
             {
@@ -14027,7 +14066,7 @@ namespace
                 g_halo3ContactBodySetbackMeters.store(
                     0.0f, std::memory_order_relaxed);
                 Halo3PublishWeaponWallOffset(g_halo3ContactWallOffset, nowMs);
-                Halo3PublishWeaponBodyFollow({}, 0, 0);
+                Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
             }
             if (!g_halo3ContactPreviousPoseValid)
             {

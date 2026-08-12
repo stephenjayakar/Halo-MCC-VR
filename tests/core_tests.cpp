@@ -10524,19 +10524,27 @@ int main()
         const PhysicalContactWallConstraint bodyInvalid =
             PhysicalContactDynamicBodyOffset(
                 bodyPrevious, bodyIntended, 0.0f, {}, 0.10f, 0.01f, 1.0f);
-        const PhysicalContactVec3 bodyFollowDelta =
-            PhysicalContactBodyFollowDelta(
-                {6.0f, 0.0f, 0.0f}, 1000, 1017, 0.5f);
-        const PhysicalContactVec3 bodyFollowClamped =
-            PhysicalContactBodyFollowDelta(
-                {100.0f, 0.0f, 0.0f}, 1000, 1040, 0.5f);
-        const PhysicalContactVec3 bodyFollowStale =
-            PhysicalContactBodyFollowDelta(
-                {6.0f, 0.0f, 0.0f}, 1000, 1051, 0.5f);
-        const PhysicalContactVec3 bodyFollowInvalid =
-            PhysicalContactBodyFollowDelta(
-                {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f},
+        const PhysicalContactRigidBodyFollow bodyFollow =
+            PhysicalContactBuildRigidBodyFollow(
+                {6.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 10.0f}, {},
                 1000, 1017, 0.5f);
+        const PhysicalContactVec3 bodyFollowPoint =
+            PhysicalContactApplyRigidBodyFollowPoint(
+                bodyFollow, {0.0f, 1.0f, 0.0f});
+        const PhysicalContactVec3 bodyFollowVector =
+            PhysicalContactApplyRigidBodyFollowVector(
+                bodyFollow, {1.0f, 0.0f, 0.0f});
+        const PhysicalContactRigidBodyFollow bodyFollowClamped =
+            PhysicalContactBuildRigidBodyFollow(
+                {100.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 100.0f}, {},
+                1000, 1040, 0.5f);
+        const PhysicalContactRigidBodyFollow bodyFollowStale =
+            PhysicalContactBuildRigidBodyFollow(
+                {6.0f, 0.0f, 0.0f}, {}, {}, 1000, 1051, 0.5f);
+        const PhysicalContactRigidBodyFollow bodyFollowInvalid =
+            PhysicalContactBuildRigidBodyFollow(
+                {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f},
+                {}, {}, 1000, 1017, 0.5f);
         Check(wallTip.constrained &&
               std::fabs(wallTip.setbackWorldUnits - 0.60f) < 1.0e-6f &&
               std::fabs(wallTip.offset.x + 0.60f) < 1.0e-6f &&
@@ -10596,10 +10604,19 @@ int main()
               bodyClamped.constrained &&
               std::fabs(bodyClamped.setbackWorldUnits - 0.5f) < 1.0e-6f &&
               !bodyInvalid.constrained &&
-              std::fabs(bodyFollowDelta.x - 0.102f) < 1.0e-6f &&
-              std::fabs(bodyFollowClamped.x - 0.125f) < 1.0e-6f &&
-              PhysicalContactLengthSquared(bodyFollowStale) < 1.0e-10f &&
-              PhysicalContactLengthSquared(bodyFollowInvalid) < 1.0e-10f &&
+              bodyFollow.valid &&
+              std::fabs(bodyFollow.translation.x - 0.102f) < 1.0e-6f &&
+              std::fabs(bodyFollow.rotationRadians - 0.17f) < 1.0e-6f &&
+              std::fabs(bodyFollowPoint.x -
+                            (0.102f - std::sin(0.17f))) < 1.0e-6f &&
+              std::fabs(bodyFollowPoint.y - std::cos(0.17f)) < 1.0e-6f &&
+              std::fabs(bodyFollowVector.x - std::cos(0.17f)) < 1.0e-6f &&
+              std::fabs(bodyFollowVector.y - std::sin(0.17f)) < 1.0e-6f &&
+              bodyFollowClamped.valid &&
+              std::fabs(bodyFollowClamped.translation.x - 0.125f) < 1.0e-6f &&
+              std::fabs(bodyFollowClamped.rotationRadians - 0.35f) <
+                  1.0e-6f &&
+              !bodyFollowStale.valid && !bodyFollowInvalid.valid &&
               PhysicalContactWallTriangleCentroidBudget(20, 222, 64) ==
                   44 &&
               PhysicalContactWallTriangleCentroidBudget(20, 36, 64) ==
@@ -10620,8 +10637,8 @@ int main()
             "vertices, while larger meshes rotate an evenly spread bounded "
             "face-centre sample set; "
             "dynamic bodies reject only inward travel while preserving slides, "
-            "hold exact correction across an unresolved query gap, bound the "
-            "one-frame moving-body display follow, accept only "
+            "hold exact correction across an unresolved query gap, follow the "
+            "bounded translation and rotation of a moving body, accept only "
             "a directly verified clear final pose, then release directly to "
             "that checked pose");
 

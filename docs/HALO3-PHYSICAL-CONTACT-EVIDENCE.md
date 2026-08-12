@@ -1755,6 +1755,28 @@ rejection are unchanged. Pure coverage proves that a `0.75 m/s` biped hit is
 melee while the same Mongoose contact remains physics-only. Headset acceptance
 remains pending.
 
+### 2026-08-12 rotating-body render follow-up
+
+The user reported that a weapon could still clip through an object after a
+nudge. Source `68e7b56` followed the contacted body's surface velocity across
+the short simulation-to-render delay, but it applied that velocity as one
+translation to every weapon node. That is exact for linear body motion and only
+first-order exact for one contact point during rotation. A long visible barrel
+kept its old orientation while a crate, loose weapon, or vehicle rotated, so a
+different part of the moving surface could still enter it before the next exact
+solve.
+
+The replacement publishes the native body's linear velocity, angular velocity,
+and pivot with the exact approved pose serial. The palette consumer advances
+every visible weapon node by the same bounded rigid transform: translation plus
+axis-angle rotation about the body pivot. It also rotates every node basis, so
+the visible weapon remains rigid instead of merely moving its node positions.
+The existing `50 ms`, `0.25 m`, and pose-serial limits remain; rotation adds a
+`0.35 rad` cap. Invalid, stale, mismatched, or unconstrained publications do
+nothing. Pure tests cover combined translation and rotation, the full weapon
+basis, caps, stale data, and non-finite rejection. Exact runtime geometry and a
+real headset remain the final acceptance tests.
+
 ### Dynamic-body separation diagnosis
 
 The same preserved Quest headset session proves that the old fixed 50 ms body
