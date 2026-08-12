@@ -1345,6 +1345,26 @@ inline PhysicalContactTrianglePair PhysicalContactTriangleMeshCompoundIntersect(
     return result;
 }
 
+inline bool PhysicalContactCompoundsIntersect(
+    const PhysicalContactCompoundShape& a,
+    const PhysicalContactTransform& transformA,
+    const PhysicalContactCompoundShape& b,
+    const PhysicalContactTransform& transformB)
+{
+    if (!PhysicalContactCompoundValid(a) ||
+        !PhysicalContactTransformFinite(transformA) ||
+        !PhysicalContactCompoundValid(b) ||
+        !PhysicalContactTransformFinite(transformB))
+        return false;
+    for (uint16_t childA = 0; childA < a.childCount; ++childA)
+        for (uint16_t childB = 0; childB < b.childCount; ++childB)
+            if (PhysicalContactConvexIntersect(
+                    a.children[childA], transformA,
+                    b.children[childB], transformB))
+                return true;
+    return false;
+}
+
 struct PhysicalContactConvexHit
 {
     bool hit = false;
@@ -2008,6 +2028,86 @@ inline PhysicalContactWallConstraint PhysicalContactDynamicBodyOffset(
 
     result.offset = outward * setback;
     result.setbackWorldUnits = setback;
+    result.constrained = PhysicalContactFinite(result.offset);
+    return result;
+}
+
+// A triangle surface query cannot distinguish empty space from the inside of
+// a closed body. Resolve visual penetration against the authored solid convex
+// compounds instead. The selected contact normal is only a bounded search
+// direction; the returned final pose is directly proven outside every solid
+// child. Fixed query counts keep this safe for the contact callback.
+template <typename IntersectsAt>
+inline PhysicalContactWallConstraint PhysicalContactSolidSeparationOffset(
+    const PhysicalContactTransform& intendedWeaponTransform,
+    PhysicalContactVec3 outwardDirection,
+    float startingOffsetWorldUnits,
+    float clearanceWorldUnits,
+    float maximumOffsetWorldUnits,
+    IntersectsAt intersectsAt)
+{
+    PhysicalContactWallConstraint result{};
+    if (!PhysicalContactTransformFinite(intendedWeaponTransform) ||
+        !PhysicalContactFinite(outwardDirection) ||
+        !std::isfinite(startingOffsetWorldUnits) ||
+        startingOffsetWorldUnits < 0.0f ||
+        !std::isfinite(clearanceWorldUnits) || clearanceWorldUnits < 0.0f ||
+        !std::isfinite(maximumOffsetWorldUnits) ||
+        maximumOffsetWorldUnits <= 0.0f ||
+        clearanceWorldUnits > maximumOffsetWorldUnits)
+        return result;
+    const PhysicalContactVec3 outward = PhysicalContactNormalize(
+        outwardDirection, {});
+    if (PhysicalContactLengthSquared(outward) <= 1.0e-12f ||
+        !intersectsAt(intendedWeaponTransform))
+        return result;
+
+    const auto overlapsAtDistance = [&](float distance) {
+        PhysicalContactTransform candidate = intendedWeaponTransform;
+        candidate.position = candidate.position + outward * distance;
+        return intersectsAt(candidate);
+    };
+    float low = 0.0f;
+    float high = std::clamp(
+        std::max(startingOffsetWorldUnits, clearanceWorldUnits),
+        1.0e-5f, maximumOffsetWorldUnits);
+    bool highIsClear = !overlapsAtDistance(high);
+    for (int expansion = 0; expansion < 6 && !highIsClear; ++expansion)
+    {
+        low = high;
+        const float expanded = std::min(
+            maximumOffsetWorldUnits,
+            std::max(high * 2.0f, high + clearanceWorldUnits));
+        if (expanded <= high + 1.0e-6f)
+            break;
+        high = expanded;
+        highIsClear = !overlapsAtDistance(high);
+    }
+    if (!highIsClear && high < maximumOffsetWorldUnits)
+    {
+        low = high;
+        high = maximumOffsetWorldUnits;
+        highIsClear = !overlapsAtDistance(high);
+    }
+    if (!highIsClear)
+        return result;
+
+    for (int iteration = 0; iteration < 10; ++iteration)
+    {
+        const float middle = (low + high) * 0.5f;
+        if (overlapsAtDistance(middle))
+            low = middle;
+        else
+            high = middle;
+    }
+    const float padded = std::min(
+        maximumOffsetWorldUnits, high + clearanceWorldUnits);
+    if (padded > high && !overlapsAtDistance(padded))
+        high = padded;
+    if (overlapsAtDistance(high))
+        return result;
+    result.offset = outward * high;
+    result.setbackWorldUnits = high;
     result.constrained = PhysicalContactFinite(result.offset);
     return result;
 }

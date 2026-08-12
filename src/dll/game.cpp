@@ -13506,6 +13506,8 @@ namespace
             PhysicalContactConvexShape closestWeaponShape{};
             PhysicalContactConvexShape closestTargetShape{};
             PhysicalContactTransform closestTargetTransform{};
+            PhysicalContactCompoundShape closestTargetCompound{};
+            bool closestTargetCompoundValid = false;
             uint32_t closestTargetShapeSource = 0;
             uint32_t closestTargetTriangleCount = 0;
             int32_t closestTargetBodyIndex = -1;
@@ -13844,6 +13846,9 @@ namespace
                 closestWeaponShape = authoredWeaponShape;
                 closestTargetShape = authoredTargetShape;
                 closestTargetTransform = authoredTargetTransform;
+                closestTargetCompound = targetShape;
+                closestTargetCompoundValid =
+                    PhysicalContactCompoundValid(targetShape);
                 closestTargetShapeSource = targetShapeSource;
                 closestTargetTriangleCount = targetTriangleCount;
                 closestTargetBodyIndex = targetBodyIndex;
@@ -14047,12 +14052,29 @@ namespace
                 // material point used to measure rigid weapon velocity.
                 closest.point = targetPoint;
             }
-            const PhysicalContactWallConstraint bodyConstraint =
+            PhysicalContactWallConstraint bodyConstraint =
                 PhysicalContactDynamicBodyOffset(
                     previousWeaponTransform, intendedWeaponTransform,
                     closest.fraction, closest.normal,
                     closestPenetrationMeters,
                     kHalo3ContactTriangleSurfaceRadiusMeters, worldScale);
+            if (closestTargetShapeSource != 3 &&
+                closestTargetCompoundValid)
+            {
+                const auto solidOverlap =
+                    [&](const PhysicalContactTransform& candidate) {
+                        return PhysicalContactCompoundsIntersect(
+                            weaponShape, candidate,
+                            closestTargetCompound, closestTargetTransform);
+                    };
+                const PhysicalContactWallConstraint solidConstraint =
+                    PhysicalContactSolidSeparationOffset(
+                        intendedWeaponTransform, closest.normal,
+                        bodyConstraint.setbackWorldUnits,
+                        0.005f * worldScale, worldScale, solidOverlap);
+                if (solidConstraint.constrained)
+                    bodyConstraint = solidConstraint;
+            }
             updateBodyConstraint(
                 bodyConstraint.constrained
                     ? PhysicalContactDynamicBodyObservation::Blocked

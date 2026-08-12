@@ -10363,6 +10363,34 @@ int main()
                 1.0f / 120.0f, 0.5f);
         PhysicalContactTransform bodyPrevious{};
         PhysicalContactTransform bodyIntended{};
+        PhysicalContactCompoundShape solidWeapon{};
+        solidWeapon.childCount = 1;
+        solidWeapon.children[0] = prop;
+        PhysicalContactCompoundShape solidTarget{};
+        solidTarget.childCount = 2;
+        solidTarget.children[0] = prop;
+        solidTarget.children[1] = prop;
+        for (uint16_t vertex = 0;
+             vertex < solidTarget.children[1].vertexCount; ++vertex)
+            solidTarget.children[1].vertices[vertex].x += 1.25f;
+        PhysicalContactTransform solidWeaponInside{};
+        solidWeaponInside.position = {0.05f, 0.0f, 0.0f};
+        const PhysicalContactTransform solidTargetTransform{};
+        const auto solidOverlap = [&](const PhysicalContactTransform& pose) {
+            return PhysicalContactCompoundsIntersect(
+                solidWeapon, pose, solidTarget, solidTargetTransform);
+        };
+        const PhysicalContactWallConstraint solidSeparation =
+            PhysicalContactSolidSeparationOffset(
+                solidWeaponInside, {-1.0f, 0.0f, 0.0f},
+                0.01f, 0.005f, 4.0f, solidOverlap);
+        PhysicalContactTransform solidSeparated = solidWeaponInside;
+        solidSeparated.position =
+            solidSeparated.position + solidSeparation.offset;
+        const PhysicalContactWallConstraint solidWrongDirection =
+            PhysicalContactSolidSeparationOffset(
+                solidWeaponInside, {1.0f, 0.0f, 0.0f},
+                0.01f, 0.005f, 0.05f, solidOverlap);
         bodyIntended.position = {1.0f, 0.0f, 0.0f};
         const PhysicalContactWallConstraint bodyTunnel =
             PhysicalContactDynamicBodyOffset(
@@ -10427,6 +10455,10 @@ int main()
               std::fabs(bodyReblocked.x + 0.35f) < 1.0e-6f &&
               PhysicalContactLengthSquared(bodyInvalidObservation) <
                   1.0e-10f &&
+              solidOverlap(solidWeaponInside) &&
+              solidSeparation.constrained &&
+              !solidOverlap(solidSeparated) &&
+              !solidWrongDirection.constrained &&
               bodyTunnel.constrained &&
               std::fabs(bodyTunnel.offset.x + 0.51f) < 1.0e-6f &&
               std::fabs(bodyTunnel.offset.y) < 1.0e-6f &&

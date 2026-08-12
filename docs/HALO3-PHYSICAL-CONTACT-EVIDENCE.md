@@ -1848,6 +1848,18 @@ the byte-identical real-headset settings hash
 `F8B2C009AE05A2AC796D3458B9AA8B072A5BEA97CA8EC5A74FAA5DD585DBAB9E`.
 Headset acceptance remains pending.
 
+The replacement keeps triangle geometry for the precise swept contact point,
+but resolves visual penetration against the complete authored solid compounds.
+Each collision BSP is Halo's own convex body. Testing every weapon BSP against
+every target BSP detects both surface crossings and full containment, unlike a
+triangle-only query that calls the inside of a closed object empty. The bounded
+outward search publishes a correction only after the final complete compound
+pose is clear. Animated multi-node bodies keep their separate melee path. A
+regression starts a solid weapon fully inside one child of a two-child target,
+requires a clear final pose, and proves that a direction which cannot leave the
+body inside the one-metre cap is rejected. The strict sustained Valhalla replay
+remains the runtime gate.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
