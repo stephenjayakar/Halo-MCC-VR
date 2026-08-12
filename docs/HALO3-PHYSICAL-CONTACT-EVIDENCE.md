@@ -2177,6 +2177,27 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
+### 2026-08-12 moving-target approval sweep
+
+Candidate `c7cfa56c7348baef5f65c08fd6144e417abc39f4` replaced public
+velocity with consecutive exact target transforms, but still extrapolated an
+already-approved weapon pose inside the render hook. Its rotating loose-weapon
+replay failed after 1,836 exact palettes with five direct, geometry, confirmed,
+and solid overlaps. The preserved log is
+`out/debug-openxr/20260812-161208726Z-rotating-body-gap.log`, SHA-256
+`351328459E0C439C228088ACBF879D0C3909330C941106B08019A9BD343507E8`.
+That behavior is rejected and reverted by `ecaf154`.
+
+The next candidate leaves the approved palette unchanged in the render hook.
+Before approval, its exact separation predicate tests the complete weapon
+geometry against the target's current authored transform and four bounded
+future transforms spanning three measured target-transform steps. The solver
+therefore finds one pose clear of the short rigid target sweep, rather than
+moving a previously checked pose without collision evidence. Translation is
+capped at 0.12 m and rotation at 0.50 rad; invalid history simply retains the
+proven current-transform test. No render-hot collision query, hook, signature,
+engine write, allocation, or lock is added.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

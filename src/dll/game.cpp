@@ -14951,9 +14951,12 @@ namespace
                 closest.point = targetPoint;
             }
             float observedSurfaceReserveMeters = 0.0f;
-            if (closestUsesAuthoredShape &&
+            const bool targetMotionHistoryValid = closestUsesAuthoredShape &&
                 g_halo3ContactPreviousTargetSurfaceValid &&
-                g_halo3ContactPreviousTargetSurfaceHandle == closestHandle)
+                g_halo3ContactPreviousTargetSurfaceHandle == closestHandle;
+            const PhysicalContactTransform previousTargetTransform =
+                g_halo3ContactPreviousTargetTransform;
+            if (targetMotionHistoryValid)
             {
                 const PhysicalContactVec3 targetLocalPoint =
                     PhysicalContactInverseTransformPoint(
@@ -15013,8 +15016,9 @@ namespace
                 if (verifiedGeometry &&
                     PhysicalContactTransformFinite(verifiedTargetTransform))
                 {
-                    const auto exactOverlap =
-                        [&](const PhysicalContactTransform& candidate) {
+                    const auto overlapAtTargetTransform = [&] (
+                        const PhysicalContactTransform& candidate,
+                        const PhysicalContactTransform& targetTransform) {
                             bool surfaceOverlap = false;
                             if (collisionShape &&
                                 PhysicalContactTriangleMeshValid(
@@ -15027,7 +15031,7 @@ namespace
                                     ? PhysicalContactSweepTriangleMeshes(
                                           weaponTriangleMesh, candidate,
                                           candidate, verifiedTargetMesh,
-                                          verifiedTargetTransform,
+                                          targetTransform,
                                           kHalo3ContactTriangleStepMeters *
                                               worldScale,
                                           kHalo3ContactVisualGuardRadiusMeters *
@@ -15035,7 +15039,7 @@ namespace
                                     : PhysicalContactSweepTriangleMeshCompound(
                                           weaponTriangleMesh, candidate,
                                           candidate, verifiedTargetShape,
-                                          verifiedTargetTransform,
+                                          targetTransform,
                                           kHalo3ContactTriangleStepMeters *
                                               worldScale,
                                           kHalo3ContactVisualGuardRadiusMeters *
@@ -15045,7 +15049,30 @@ namespace
                                 PhysicalContactCompoundsIntersect(
                                     weaponShape, candidate,
                                     verifiedTargetShape,
-                                    verifiedTargetTransform);
+                                    targetTransform);
+                        };
+                    const auto exactOverlap =
+                        [&](const PhysicalContactTransform& candidate) {
+                            if (overlapAtTargetTransform(
+                                    candidate, verifiedTargetTransform))
+                                return true;
+                            if (!targetMotionHistoryValid)
+                                return false;
+                            constexpr float kFutureMultipliers[] = {
+                                0.75f, 1.5f, 2.25f, 3.0f};
+                            for (float multiplier : kFutureMultipliers)
+                            {
+                                PhysicalContactTransform predictedTarget{};
+                                if (PhysicalContactPredictRigidTransform(
+                                        previousTargetTransform,
+                                        verifiedTargetTransform, multiplier,
+                                        0.12f * worldScale, 0.50f,
+                                        predictedTarget) &&
+                                    overlapAtTargetTransform(
+                                        candidate, predictedTarget))
+                                    return true;
+                            }
+                            return false;
                         };
                     const PhysicalContactWallConstraint verifiedConstraint =
                         PhysicalContactVerifiedSeparationOffset(
@@ -15111,7 +15138,10 @@ namespace
                 g_halo3ContactBodyAnchorHandle = closestHandle;
                 g_halo3ContactBodyAnchorValid = PhysicalContactFinite(
                     g_halo3ContactBodyLocalWeaponAnchor);
-                publishBodyFollow(closestHandle);
+                // The approved pose was checked against the target's bounded
+                // future rigid sweep. Do not move it afterward in the render
+                // hook, where no collision query is allowed.
+                Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
             }
             if (bodyConstraint.constrained &&
                 !visualConstraintUsesFallbackNormal)

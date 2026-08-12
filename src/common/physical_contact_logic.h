@@ -298,6 +298,72 @@ inline PhysicalContactVec3 PhysicalContactApplyRigidBodyFollowVector(
         : worldVector;
 }
 
+// Predict one bounded fraction of the exact rigid transform delta. This is
+// used only inside collision approval: the candidate weapon pose must be clear
+// of the target now and throughout the short worker-to-render horizon.
+inline bool PhysicalContactPredictRigidTransform(
+    const PhysicalContactTransform& previous,
+    const PhysicalContactTransform& current, float deltaMultiplier,
+    float maximumTranslationWorldUnits, float maximumRotationRadians,
+    PhysicalContactTransform& predicted)
+{
+    predicted = {};
+    if (!PhysicalContactTransformFinite(previous) ||
+        !PhysicalContactTransformFinite(current) ||
+        !std::isfinite(deltaMultiplier) || deltaMultiplier <= 0.0f ||
+        deltaMultiplier > 4.0f ||
+        !std::isfinite(maximumTranslationWorldUnits) ||
+        maximumTranslationWorldUnits <= 0.0f ||
+        !std::isfinite(maximumRotationRadians) ||
+        maximumRotationRadians <= 0.0f ||
+        std::fabs(previous.scale - current.scale) > 1.0e-3f)
+        return false;
+
+    PhysicalContactVec3 translation =
+        (current.position - previous.position) * deltaMultiplier;
+    const float translationLength = PhysicalContactLength(translation);
+    if (!PhysicalContactFinite(translation) ||
+        !std::isfinite(translationLength))
+        return false;
+    if (translationLength > maximumTranslationWorldUnits)
+        translation = translation *
+            (maximumTranslationWorldUnits / translationLength);
+
+    const PhysicalContactVec3 sineAxisTwice =
+        PhysicalContactCross(previous.forward, current.forward) +
+        PhysicalContactCross(previous.left, current.left) +
+        PhysicalContactCross(previous.up, current.up);
+    const float sine = 0.5f * PhysicalContactLength(sineAxisTwice);
+    const float cosine = std::clamp(
+        0.5f * (PhysicalContactDot(previous.forward, current.forward) +
+                PhysicalContactDot(previous.left, current.left) +
+                PhysicalContactDot(previous.up, current.up) - 1.0f),
+        -1.0f, 1.0f);
+    const float angle = std::atan2(sine, cosine);
+    if (!PhysicalContactFinite(sineAxisTwice) || !std::isfinite(sine) ||
+        !std::isfinite(angle) ||
+        (angle > 1.0e-6f && sine <= 1.0e-6f))
+        return false;
+    PhysicalContactVec3 axis{1.0f, 0.0f, 0.0f};
+    float predictedAngle = 0.0f;
+    if (sine > 1.0e-6f && angle > 1.0e-6f)
+    {
+        axis = sineAxisTwice * (1.0f / (2.0f * sine));
+        predictedAngle = std::min(
+            angle * deltaMultiplier, maximumRotationRadians);
+    }
+
+    predicted = current;
+    predicted.position = current.position + translation;
+    predicted.forward = PhysicalContactRotateAxisAngle(
+        current.forward, axis, predictedAngle);
+    predicted.left = PhysicalContactRotateAxisAngle(
+        current.left, axis, predictedAngle);
+    predicted.up = PhysicalContactRotateAxisAngle(
+        current.up, axis, predictedAngle);
+    return PhysicalContactTransformFinite(predicted);
+}
+
 inline bool PhysicalContactSegmentIntersectsExpandedAabb(
     PhysicalContactVec3 start, PhysicalContactVec3 end,
     PhysicalContactVec3 minimum, PhysicalContactVec3 maximum,
