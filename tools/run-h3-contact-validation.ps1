@@ -230,7 +230,7 @@ function Test-SlowResult([string]$Text, [int]$Kind, [bool]$RequireScoop) {
         "H3 physical contact DEBUG RIG:.*kind=$Kind.*validated=1"
 }
 
-function Test-VehicleNudgeResult([string]$Text) {
+function Test-VehicleReleaseResult([string]$Text) {
     if ($Text -match 'H3 physical contact status:.*melees=[1-9][0-9]*') {
         return $false
     }
@@ -249,28 +249,9 @@ function Test-VehicleNudgeResult([string]$Text) {
         $latestStatus -notmatch 'meleeStatus=0 ') {
         return $false
     }
-    # A successful no-clipping hold can remain in one continuous contact for
-    # the whole replay. Requiring releases here made the validator reject the
-    # intended result after the moving-body contact hold was added. Prove the
-    # safer contract instead: the exact Mongoose moved, every observed command
-    # was applied, its native mass and dynamic motion type were used, a bounded
-    # non-zero impulse was produced, and no melee was queued or applied.
-    $rigMoved = $false
-    $rigLines = $Text -split "`r?`n" | Where-Object {
-        $_ -match 'H3 physical contact DEBUG RIG:.*kind=1.*moved=([0-9]+(?:\.[0-9]+)?)'
-    }
-    foreach ($line in $rigLines) {
-        $null = $line -match 'moved=([0-9]+(?:\.[0-9]+)?)'
-        if ([double]$Matches[1] -ge 0.15) {
-            $rigMoved = $true
-            break
-        }
-    }
-    if (-not $rigMoved) { return $false }
-
     $lines = $Text -split "`r?`n" | Where-Object {
         $_ -match 'H3 physical contact status:' -and
-        $_ -match 'impulses=([1-9][0-9]*) releases=([0-9]+) melees=0 ' -and
+        $_ -match 'impulses=([1-9][0-9]*) releases=([1-9][0-9]*) melees=0 ' -and
         $_ -match 'command=([1-9][0-9]*) applied=([1-9][0-9]*) commandStatus=2' -and
         $_ -match 'target=0x(?!FFFFFFFF)[0-9A-F]+ kind=1 ' -and
         $_ -match 'targetMass=([0-9]+(?:\.[0-9]+)?) targetMotion=4 ' -and
@@ -383,7 +364,7 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
         }
         'vehicle-nudge' {
             return (Test-DynamicBodyConstraintSeen $Text) -and
-                (Test-VehicleNudgeResult $Text)
+                (Test-VehicleReleaseResult $Text)
         }
         'visible-weapon-nudge' {
             return (Test-DetailedTargetGeometrySeen $Text) -and
