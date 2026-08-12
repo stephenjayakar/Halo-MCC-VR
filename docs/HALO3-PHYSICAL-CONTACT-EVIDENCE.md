@@ -2234,16 +2234,3 @@ palette consumer already rejects approvals older than 100 ms. A render-palette
 gap can therefore safely stop contact work without clearing the approval; true
 tracking, gameplay, lifecycle, vehicle, and weapon failures retain their
 immediate resets.
-
-## Rotating approval/follow publication diagnosis
-
-The exact `b2cc76c` rotating-body replay failed after 3,989 exact palettes.
-It recorded one confirmed rendered triangle overlap while the same target was
-still receiving exact constraints and a nonzero visual setback. The safe-pose
-approval and its target rigid-body follow are separate lock-free publications.
-A renderer can therefore observe different proposal serials during the short
-interval between those two writes and omit rigid follow for one palette. The
-next diagnostic candidate changes no pose or collision behavior; it counts
-only those approval/follow serial mismatches during the existing opt-in
-rotating replay. Runtime evidence must confirm or reject this explanation
-before the publications are combined.
