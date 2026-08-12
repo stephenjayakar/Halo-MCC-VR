@@ -2224,53 +2224,6 @@ inline float PhysicalContactObservedSurfaceApproachMeters(
         : 0.0f;
 }
 
-// Reserve the volume a moving rigid body can sweep before an approved weapon
-// palette expires. Linear travel and the exact rotational chord are combined;
-// the result is bounded so corrupt velocity or bounds data can never create an
-// unbounded visual setback. Inputs use Halo world units except angular speed.
-inline float PhysicalContactMovingTargetGuardRadiusMeters(
-    float baseGuardMeters,
-    PhysicalContactVec3 linearVelocityWorldUnitsPerSecond,
-    PhysicalContactVec3 angularVelocityRadiansPerSecond,
-    float targetBoundRadiusWorldUnits, float worldUnitsPerMeter,
-    float horizonSeconds = 0.10f, float maximumReserveMeters = 0.12f)
-{
-    if (!std::isfinite(baseGuardMeters) || baseGuardMeters < 0.0f ||
-        baseGuardMeters > 0.05f ||
-        !PhysicalContactFinite(linearVelocityWorldUnitsPerSecond) ||
-        !PhysicalContactFinite(angularVelocityRadiansPerSecond) ||
-        !std::isfinite(targetBoundRadiusWorldUnits) ||
-        targetBoundRadiusWorldUnits < 0.0f ||
-        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f ||
-        !std::isfinite(horizonSeconds) || horizonSeconds <= 0.0f ||
-        horizonSeconds > 0.10f || !std::isfinite(maximumReserveMeters) ||
-        maximumReserveMeters < 0.0f || maximumReserveMeters > 0.25f)
-        return baseGuardMeters;
-
-    const float linearSpeedMetersPerSecond = PhysicalContactLength(
-        linearVelocityWorldUnitsPerSecond) / worldUnitsPerMeter;
-    const float angularSpeedRadiansPerSecond = PhysicalContactLength(
-        angularVelocityRadiansPerSecond);
-    const float targetBoundRadiusMeters =
-        targetBoundRadiusWorldUnits / worldUnitsPerMeter;
-    if (!std::isfinite(linearSpeedMetersPerSecond) ||
-        !std::isfinite(angularSpeedRadiansPerSecond) ||
-        !std::isfinite(targetBoundRadiusMeters))
-        return baseGuardMeters;
-
-    const float rotationRadians = std::min(
-        angularSpeedRadiansPerSecond * horizonSeconds,
-        3.14159265358979323846f);
-    const float rotationalChordMeters =
-        2.0f * targetBoundRadiusMeters *
-        std::sin(rotationRadians * 0.5f);
-    const float reserveMeters = std::clamp(
-        linearSpeedMetersPerSecond * horizonSeconds +
-            rotationalChordMeters,
-        0.0f, maximumReserveMeters);
-    return baseGuardMeters + reserveMeters;
-}
-
 // Keep the rendered kinematic weapon on the target-facing side of an exact
 // dynamic-body hit. Only normal travel is rejected, so the controller may still
 // slide along a surface to scoop or carry it. The current pose is the

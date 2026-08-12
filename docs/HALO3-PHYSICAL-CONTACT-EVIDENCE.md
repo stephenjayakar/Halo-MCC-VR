@@ -2234,23 +2234,3 @@ palette consumer already rejects approvals older than 100 ms. A render-palette
 gap can therefore safely stop contact work without clearing the approval; true
 tracking, gameplay, lifecycle, vehicle, and weapon failures retain their
 immediate resets.
-
-## Moving-target visual guard
-
-The exact `b2cc76c` rotating-body replay failed after 3,989 exact palettes
-with one confirmed rendered triangle overlap. A diagnostic-only follow-up
-counted zero safe-pose/body-follow serial mismatches and failed even earlier:
-two confirmed overlaps after 218 palettes. That disproves the separate-snapshot
-race explanation. At the failure the target was rotating at `1.5 rad/s`, while
-the fixed visual guard covered only 8 mm plus 4 mm clearance and the approved
-palette may remain valid for 100 ms.
-
-The next isolated behavior expands only the visual guard for a moving rigid
-body. It combines the body's bounded linear travel with the exact rotational
-chord of its native bounding radius across the existing 100 ms approval life.
-The added reserve is capped at 120 mm and the total query radius is also capped
-to the collision routine's validated 0.05-world-unit limit. Stationary objects
-retain the existing 8 mm guard, physical contact remains at 1.25 mm, and
-impulse, mass, melee, input, and authored geometry selection are unchanged.
-Pure coverage checks stationary, rotating, clamped, and invalid inputs. Exact
-rotating replay and headset acceptance remain pending.

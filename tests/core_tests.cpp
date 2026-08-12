@@ -9260,19 +9260,6 @@ int main()
             PhysicalContactObservedSurfaceApproachMeters(
                 {0.03f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f},
                 {1.0f, 0.0f, 0.0f}, 2.0f, 0.04f);
-        const float stationaryTargetGuard =
-            PhysicalContactMovingTargetGuardRadiusMeters(
-                0.008f, {}, {}, 0.50f, 1.0f);
-        const float rotatingTargetGuard =
-            PhysicalContactMovingTargetGuardRadiusMeters(
-                0.008f, {}, {0.0f, 0.0f, 1.5f}, 0.50f, 1.0f);
-        const float clampedMovingTargetGuard =
-            PhysicalContactMovingTargetGuardRadiusMeters(
-                0.008f, {10.0f, 0.0f, 0.0f},
-                {0.0f, 0.0f, 10.0f}, 2.0f, 1.0f);
-        const float invalidMovingTargetGuard =
-            PhysicalContactMovingTargetGuardRadiusMeters(
-                0.008f, {NAN, 0.0f, 0.0f}, {}, 0.50f, 1.0f);
 
         PhysicalContactTriangleMesh separatedSurfaceMesh{};
         separatedSurfaceMesh.triangleCount = 2;
@@ -9316,11 +9303,6 @@ int main()
               !triangleMeshGrazingMiss.hit &&
               !exactNearSurfaceClear.hit && guardedNearSurfaceHit.hit &&
               contactSkinNearTouch.hit && !zeroRadiusNearTouch.hit &&
-              std::fabs(stationaryTargetGuard - 0.008f) < 1.0e-6f &&
-              rotatingTargetGuard > 0.082f &&
-              rotatingTargetGuard < 0.084f &&
-              std::fabs(clampedMovingTargetGuard - 0.128f) < 1.0e-6f &&
-              std::fabs(invalidMovingTargetGuard - 0.008f) < 1.0e-6f &&
               !PhysicalContactConfirmedSurfacePenetration(
                   false, false, false, false) &&
               !PhysicalContactConfirmedSurfacePenetration(
