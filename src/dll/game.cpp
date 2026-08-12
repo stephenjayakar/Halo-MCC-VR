@@ -5664,7 +5664,7 @@ namespace
                                     correction, correctionMs) &&
                                 PhysicalContactPublishedOffsetUsable(
                                     correction, correctionMs, nowMs,
-                                    worldScale, 4.0f) &&
+                                    worldScale) &&
                                 PhysicalContactLengthSquared(correction) >
                                     1.0e-10f)
                             {
@@ -14990,7 +14990,6 @@ namespace
                     kHalo3ContactTriangleSurfaceRadiusMeters +
                         observedSurfaceReserveMeters,
                     worldScale);
-            bool rotationEnvelopeConstrained = false;
             if (closestUsesAuthoredShape)
             {
                 PhysicalContactCompoundShape verifiedTargetShape{};
@@ -15014,42 +15013,6 @@ namespace
                 if (verifiedGeometry &&
                     PhysicalContactTransformFinite(verifiedTargetTransform))
                 {
-                    if (closestTargetShapeSource != 3 &&
-                        g_halo3ObjectGetVelocities)
-                    {
-                        float envelopeLinear[3]{}, envelopeAngular[3]{};
-                        g_halo3ObjectGetVelocities(
-                            closestHandle, envelopeLinear, envelopeAngular);
-                        const PhysicalContactVec3 angularVelocity{
-                            envelopeAngular[0], envelopeAngular[1],
-                            envelopeAngular[2]};
-                        const float targetRadius =
-                            PhysicalContactRotationInvariantRadius(
-                                verifiedTargetShape,
-                                &verifiedTargetMesh) *
-                            verifiedTargetTransform.scale;
-                        const float rotationalSurfaceSpeedMeters =
-                            PhysicalContactLength(angularVelocity) *
-                            targetRadius / worldScale;
-                        if (PhysicalContactFinite(angularVelocity) &&
-                            std::isfinite(rotationalSurfaceSpeedMeters) &&
-                            rotationalSurfaceSpeedMeters >= 0.05f)
-                        {
-                            const PhysicalContactWallConstraint envelope =
-                                PhysicalContactRotationInvariantChildSphereOffset(
-                                    weaponShape, intendedWeaponTransform,
-                                    verifiedTargetTransform.position,
-                                    targetRadius,
-                                    kHalo3ContactVisualGuardClearanceMeters *
-                                        worldScale,
-                                    4.0f * worldScale);
-                            if (envelope.constrained)
-                            {
-                                bodyConstraint = envelope;
-                                rotationEnvelopeConstrained = true;
-                            }
-                        }
-                    }
                     const auto exactOverlap =
                         [&](const PhysicalContactTransform& candidate) {
                             bool surfaceOverlap = false;
@@ -15118,14 +15081,7 @@ namespace
                                 followedLength;
                         }
                     }
-                    if (rotationEnvelopeConstrained)
-                    {
-                        // This is a conservative emergency envelope for a
-                        // root body rotating quickly enough to cross the
-                        // worker/render handoff. Exact geometry remains the
-                        // ordinary path for all other contacts.
-                    }
-                    else if (followedConstraint.constrained)
+                    if (followedConstraint.constrained)
                         bodyConstraint = followedConstraint;
                     else if (verifiedConstraint.constrained)
                     {
