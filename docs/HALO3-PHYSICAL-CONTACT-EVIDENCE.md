@@ -2202,3 +2202,13 @@ the current signed SteamVR `vrclient_x64.dll` imports
 process-local `XR_RUNTIME_JSON` override proved the installed Oculus 1.201.0
 runtime initializes, but no headset was connected, so this is launch evidence
 only and not physical-contact acceptance.
+### 2026-08-12 rotating-body envelope limit probe
+
+- Candidate `786d40f` still recorded one confirmed overlap after 3,320
+  palettes. Its correction repeatedly reached the prior hard maximum
+  (`bodyPeak=1.000m`) before that overlap. Preserved log:
+  `out/debug-openxr/20260812-174100814Z-rotating-body-gap.log`, SHA-256
+  `569BF24983DE1A70EC99FC4E231AD4ACDE26BDEC163E8CDF8BB2A7E9BFA110DA`.
+- This candidate raises only the fast-rotating-root emergency envelope and its
+  bounded debug publication from 1 m to 4 m. The exact-geometry path, impulses,
+  melee, static-wall constraints, and animated-body handling are unchanged.
