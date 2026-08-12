@@ -1891,6 +1891,30 @@ rendered triangle geometry. The counters are environment-gated, lock-free and
 allocation-free in the existing debug path; they do not alter a pose, physics,
 melee, input, or production feature state.
 
+That diagnostic ran as source `e8a5351926074cf9c53e723f00bb09306167c57e`
+from package
+`out/candidates/e8a5351-h3-physical-contact-20260812-040607392Z`, with DLL
+SHA-256 `4CCE0AD8DBAC6A26E852785B140F824F03D787B45B383FFD33ACF6AE5E0F9303`.
+Its preserved log is
+`out/debug-openxr/20260812-040658061Z-visible-weapon-gap.log`, SHA-256
+`5145B164D5432FE14D49CAC95D91F4180FB6D47F1B4CDFC186C7A0C3A8D06D4B`.
+The first failing cumulative report recorded four direct triangle overlaps but
+only one solid-compound overlap after 217 exact palettes. A solid hull is
+therefore not an exact substitute for the rendered collision surface. A final
+pose is safe only when both the complete triangle surface and every authored
+solid child report separation. SteamVR was restored to the normal settings
+hash above.
+
+The replacement uses that measured union as its final proof. Triangle sweeps
+still select the exact contact point and reliable impulse normal. A closed-
+solid containment hit is admitted only as a visual contact and cannot drive an
+impulse or melee. For a selected rigid target, a bounded outward search tests
+each candidate pose against both the complete visible weapon/target triangle
+surfaces and the complete authored solid compounds. It publishes a correction
+only after both are clear; failure holds the prior constraint instead of
+falling back to an approximate plane. Multi-node animated enemy contact keeps
+its separate native melee path.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

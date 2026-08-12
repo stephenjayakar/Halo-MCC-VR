@@ -13739,6 +13739,26 @@ namespace
                                     targetTriangleMesh.triangles[
                                         meshHit.targetIndex]);
                         }
+                        else if (!requiresNativeConfirmation)
+                        {
+                            // A triangle surface query reports no hit when a
+                            // closed weapon body is wholly contained. Admit
+                            // that exact solid state as visual-only contact;
+                            // its unswept normal cannot drive native physics.
+                            const PhysicalContactCompoundHit solidOverlap =
+                                PhysicalContactSweepCompound(
+                                    weaponShape, intendedWeaponTransform,
+                                    intendedWeaponTransform, targetShape,
+                                    authoredTargetTransform);
+                            if (solidOverlap.hit)
+                            {
+                                authored = solidOverlap;
+                                authoredWeaponShape = weaponShape.children[
+                                    solidOverlap.weaponChild];
+                                authoredTargetShape = targetShape.children[
+                                    solidOverlap.targetChild];
+                            }
+                        }
                     }
                     else
                         authored = PhysicalContactSweepCompound(
@@ -13797,6 +13817,22 @@ namespace
                                         meshHit.weaponTriangle]);
                             authoredTargetShape =
                                 targetShape.children[meshHit.targetIndex];
+                        }
+                        else
+                        {
+                            const PhysicalContactCompoundHit solidOverlap =
+                                PhysicalContactSweepCompound(
+                                    weaponShape, intendedWeaponTransform,
+                                    intendedWeaponTransform, targetShape,
+                                    authoredTargetTransform);
+                            if (solidOverlap.hit)
+                            {
+                                authored = solidOverlap;
+                                authoredWeaponShape = weaponShape.children[
+                                    solidOverlap.weaponChild];
+                                authoredTargetShape = targetShape.children[
+                                    solidOverlap.targetChild];
+                            }
                         }
                     }
                     else
@@ -14061,12 +14097,90 @@ namespace
                 // material point used to measure rigid weapon velocity.
                 closest.point = targetPoint;
             }
-            const PhysicalContactWallConstraint bodyConstraint =
+            PhysicalContactWallConstraint bodyConstraint =
                 PhysicalContactDynamicBodyOffset(
                     previousWeaponTransform, intendedWeaponTransform,
                     closest.fraction, closest.normal,
                     closestPenetrationMeters,
                     kHalo3ContactTriangleSurfaceRadiusMeters, worldScale);
+            if (closestUsesAuthoredShape &&
+                closestTargetShapeSource != 3)
+            {
+                // Re-resolve the selected target after the closest-hit pass so
+                // the final visible correction can be checked against both
+                // representations proven by the diagnostic replay. Lifetimes
+                // do not overlap the loop scratch above, so this adds no hot-
+                // path allocation and lets the compiler reuse fixed storage.
+                PhysicalContactCompoundShape verifiedTargetShape{};
+                PhysicalContactTriangleMesh verifiedTargetMesh{};
+                PhysicalContactTransform verifiedTargetTransform{};
+                bool verifiedRequiresNativeConfirmation = false;
+                bool verifiedGeometry =
+                    Halo3ContactDetailedTargetShape(
+                        closestHandle, closestData, verifiedTargetShape,
+                        verifiedTargetTransform,
+                        verifiedRequiresNativeConfirmation,
+                        &verifiedTargetMesh);
+                if (!verifiedGeometry)
+                {
+                    verifiedGeometry = Halo3ContactShapeForObject(
+                        closestData, verifiedTargetShape);
+                    if (verifiedGeometry)
+                        verifiedTargetTransform =
+                            Halo3ContactObjectTransform(closestData);
+                }
+                if (verifiedGeometry &&
+                    PhysicalContactTransformFinite(
+                        verifiedTargetTransform))
+                {
+                    const auto exactOverlap =
+                        [&](const PhysicalContactTransform& candidate) {
+                            bool surfaceOverlap = false;
+                            if (collisionShape &&
+                                PhysicalContactTriangleMeshValid(
+                                    weaponTriangleMesh))
+                            {
+                                surfaceOverlap =
+                                    PhysicalContactTriangleMeshValid(
+                                        verifiedTargetMesh)
+                                    ? PhysicalContactSweepTriangleMeshes(
+                                          weaponTriangleMesh, candidate,
+                                          candidate, verifiedTargetMesh,
+                                          verifiedTargetTransform,
+                                          kHalo3ContactTriangleStepMeters *
+                                              worldScale,
+                                          kHalo3ContactTriangleSurfaceRadiusMeters *
+                                              worldScale).hit
+                                    : PhysicalContactSweepTriangleMeshCompound(
+                                          weaponTriangleMesh, candidate,
+                                          candidate, verifiedTargetShape,
+                                          verifiedTargetTransform,
+                                          kHalo3ContactTriangleStepMeters *
+                                              worldScale,
+                                          kHalo3ContactTriangleSurfaceRadiusMeters *
+                                              worldScale).hit;
+                            }
+                            return surfaceOverlap ||
+                                PhysicalContactCompoundsIntersect(
+                                    weaponShape, candidate,
+                                    verifiedTargetShape,
+                                    verifiedTargetTransform);
+                        };
+                    const PhysicalContactWallConstraint verifiedConstraint =
+                        PhysicalContactVerifiedSeparationOffset(
+                            intendedWeaponTransform, closest.normal,
+                            bodyConstraint.setbackWorldUnits,
+                            0.005f * worldScale, worldScale, exactOverlap);
+                    bodyConstraint = verifiedConstraint;
+                }
+                else
+                {
+                    // Do not publish an approximate pose when the exact target
+                    // cannot be re-read. Existing constraints remain held by
+                    // the uncertain-target state below.
+                    bodyConstraint = {};
+                }
+            }
             updateBodyConstraint(
                 bodyConstraint.constrained
                     ? PhysicalContactDynamicBodyObservation::Blocked
