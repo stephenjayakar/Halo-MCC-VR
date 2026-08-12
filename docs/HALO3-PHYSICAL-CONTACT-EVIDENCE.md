@@ -2177,6 +2177,31 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
+### 2026-08-12 exact root-body render follow
+
+Candidate `f9143d5b72dccbbbe4db1f42ad3863f54113a174` tried to stop a
+contacted root body's angular velocity while constrained.  Its strict rotating
+loose-weapon replay still recorded ten displayed triangle, geometry, confirmed
+and solid overlaps after 604 exact palettes.  The preserved rejected log is
+`out/debug-openxr/20260812-163927335Z-rotating-body-gap.log`, SHA-256
+`B3FF1B69D045ACD5B39D409912F2FE3B95FC3AE5F4BCBFF6F3E1008E4D2D07CD`.
+That behavior is rejected and reverted by `9d519c9`.
+
+The failure isolates the remaining gap to worker-to-render target motion.  The
+worker's approved weapon pose had a positive reported clearance, but the
+rendered target had rotated before the palette consumed it.  More setback,
+fixed palettes, and velocity extrapolation cannot prove that later pair of
+transforms clear.
+
+The next candidate publishes the exact root-body transform that collision used
+with the approved weapon-pose serial.  In the existing final palette hook, it
+validates the same object datum and reads that root body's current proven
+transform.  It then applies the exact transform delta to every approved weapon
+node.  Translation is bounded to 0.25 m and rotation to 0.50 rad; invalid,
+stale, recycled, animated-limb, or excessive motion retains the established
+bounded velocity fallback.  This adds no hook, signature, allocation, lock,
+logging, file I/O, or game-state write to the render path.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

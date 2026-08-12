@@ -10546,6 +10546,25 @@ int main()
             PhysicalContactBuildRigidBodyFollow(
                 {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f},
                 {}, {}, 1000, 1017, 0.5f);
+        PhysicalContactTransform exactFollowApproved{};
+        PhysicalContactTransform exactFollowCurrent{};
+        exactFollowCurrent.position = {0.05f, -0.025f, 0.0f};
+        exactFollowCurrent.forward = {
+            std::cos(0.17f), std::sin(0.17f), 0.0f};
+        exactFollowCurrent.left = {
+            -std::sin(0.17f), std::cos(0.17f), 0.0f};
+        const bool exactFollowUsable = PhysicalContactExactRigidFollowUsable(
+            exactFollowApproved, exactFollowCurrent, 0.5f);
+        const PhysicalContactVec3 exactFollowPoint =
+            PhysicalContactApplyExactRigidFollowPoint(
+                exactFollowApproved, exactFollowCurrent,
+                {0.0f, 1.0f, 0.0f});
+        const PhysicalContactVec3 exactFollowVector =
+            PhysicalContactApplyExactRigidFollowVector(
+                exactFollowApproved, exactFollowCurrent,
+                {1.0f, 0.0f, 0.0f});
+        PhysicalContactTransform exactFollowTooFar = exactFollowCurrent;
+        exactFollowTooFar.position = {0.20f, 0.0f, 0.0f};
         Check(wallTip.constrained &&
               std::fabs(wallTip.setbackWorldUnits - 0.60f) < 1.0e-6f &&
               std::fabs(wallTip.offset.x + 0.60f) < 1.0e-6f &&
@@ -10619,6 +10638,15 @@ int main()
               std::fabs(bodyFollowClamped.rotationRadians - 0.35f) <
                   1.0e-6f &&
               !bodyFollowStale.valid && !bodyFollowInvalid.valid &&
+              exactFollowUsable &&
+              std::fabs(exactFollowPoint.x -
+                            (0.05f - std::sin(0.17f))) < 1.0e-6f &&
+              std::fabs(exactFollowPoint.y -
+                            (-0.025f + std::cos(0.17f))) < 1.0e-6f &&
+              std::fabs(exactFollowVector.x - std::cos(0.17f)) < 1.0e-6f &&
+              std::fabs(exactFollowVector.y - std::sin(0.17f)) < 1.0e-6f &&
+              !PhysicalContactExactRigidFollowUsable(
+                  exactFollowApproved, exactFollowTooFar, 0.5f) &&
               PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
                       .centreCount == 22 &&
               PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
