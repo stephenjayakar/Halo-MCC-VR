@@ -2177,6 +2177,25 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
+### 2026-08-12 tight rotation-invariant body clearance
+
+Candidate `9dd5e8cf6237011af0c801a0637cf0e9e46b0bd0` enclosed the whole
+held weapon around its offset model origin.  It reduced the rotating replay to
+three displayed overlaps, but some requested offsets exceeded the established
+1 m safety cap and fell back to the older exact-pose solver.  Its preserved log
+is `out/debug-openxr/20260812-170450848Z-rotating-body-gap.log`, SHA-256
+`C172CD0D7CD097DA0BED396C4EA879ACEDA20855F9E3F46BC9747BB0A76B985F`.
+That behavior is rejected and reverted by `0e1c885`.
+
+The replacement keeps the authored target's rotation-invariant sphere but
+encloses each authored held-weapon convex child around its own vertex centroid.
+It solves one shared outward translation that puts every tight child sphere
+outside the target sphere plus the existing 4 mm guard clearance.  Empty space
+between the weapon geometry and its model origin no longer consumes the 1 m
+safety budget.  The conservative path still activates only for a contacted
+root body whose angular surface speed is at least 0.05 m/s; ordinary nudging
+continues to use exact surfaces.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
