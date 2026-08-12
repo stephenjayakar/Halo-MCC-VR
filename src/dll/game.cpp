@@ -994,6 +994,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactDebugVisibleConfirmedOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleSolidSeparations{0};
+    std::atomic<uint64_t> g_halo3ContactDebugBodyFollowSerialMismatches{0};
     std::atomic<uint32_t> g_halo3ContactDebugLastResetReason{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
     std::atomic<float> g_halo3ContactDebugVisibleMaximumGap{-FLT_MAX};
@@ -5762,12 +5763,23 @@ namespace
                     uint64_t bodyFollowSerial = 0;
                     const float worldScale =
                         g_worldScale.load(std::memory_order_relaxed);
+                    bool haveBodyFollow = false;
                     if (approvedCorrected && std::isfinite(worldScale) &&
-                        worldScale >= 0.05f && worldScale <= 2.0f &&
-                        Halo3ReadWeaponBodyFollow(
+                        worldScale >= 0.05f && worldScale <= 2.0f)
+                    {
+                        haveBodyFollow = Halo3ReadWeaponBodyFollow(
                             bodyLinearVelocity, bodyAngularVelocity, bodyPivot,
-                            bodyFollowMs,
-                            bodyFollowSerial) &&
+                            bodyFollowMs, bodyFollowSerial);
+                        if (haveBodyFollow &&
+                            bodyFollowSerial != approvedSerial &&
+                            g_halo3ContactDebugRotatingTarget.load(
+                                std::memory_order_relaxed))
+                        {
+                            g_halo3ContactDebugBodyFollowSerialMismatches
+                                .fetch_add(1, std::memory_order_relaxed);
+                        }
+                    }
+                    if (haveBodyFollow &&
                         bodyFollowSerial == approvedSerial)
                     {
                         const PhysicalContactRigidBodyFollow bodyFollow =
@@ -16403,7 +16415,8 @@ namespace
                     "geometryOverlaps=%llu geometrySeparations=%llu "
                     "confirmedOverlaps=%llu "
                     "solidOverlaps=%llu solidSeparations=%llu "
-                    "rotatingCommands=%llu resetReason=%u "
+                    "rotatingCommands=%llu followSerialMismatches=%llu "
+                    "resetReason=%u "
                     "gapRange=(%.4f %.4f)m",
                     (unsigned long long)
                         g_halo3ContactDebugVisiblePalettes.load(
@@ -16446,6 +16459,9 @@ namespace
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugRotatingTargetCommands.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugBodyFollowSerialMismatches.load(
                             std::memory_order_relaxed),
                     g_halo3ContactDebugLastResetReason.load(
                         std::memory_order_relaxed),
@@ -21311,6 +21327,8 @@ namespace
         g_halo3ContactDebugVisibleSolidOverlaps.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleSolidSeparations.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugBodyFollowSerialMismatches.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleMinimumGap.store(
             FLT_MAX, std::memory_order_release);
