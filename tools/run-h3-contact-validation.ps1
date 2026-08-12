@@ -293,6 +293,27 @@ function Test-LeftGrabResult([string]$Text) {
         'H3 physical contact DEBUG RIG:.*kind=3.*validated=1.*peakLift=(?!0\.000m)([0-9]+\.[0-9]{3})m.*peakCarry=(?!0\.000m)([0-9]+\.[0-9]{3})m.*releaseSpeed=(?!0\.000m/s)([0-9]+\.[0-9]{3})m/s'
 }
 
+function Test-VisibleWeaponGapResult([string]$Text) {
+    # These counters are cumulative. Judge only the newest sample and require
+    # a sustained replay. An earlier zero-overlap line is not a completed pass.
+    $line = ($Text -split "`r?`n") | Where-Object {
+        $_ -match 'H3 physical contact DEBUG VISIBLE REPLAY:'
+    } | Select-Object -Last 1
+    if (-not $line) { return $false }
+    if ($line -notmatch
+        'exactPalettes=([0-9]+).*correctedPalettes=([0-9]+).*directOverlaps=([0-9]+) directSeparations=([0-9]+)') {
+        return $false
+    }
+    $exactPalettes = [int]$Matches[1]
+    $correctedPalettes = [int]$Matches[2]
+    $directOverlaps = [int]$Matches[3]
+    $directSeparations = [int]$Matches[4]
+    return $exactPalettes -ge 900 -and
+        $correctedPalettes -ge 250 -and
+        $directSeparations -ge 400 -and
+        $directOverlaps -eq 0
+}
+
 function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
         'weapon-scoop' {
@@ -322,8 +343,7 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
         }
         'visible-weapon-gap' {
             return (Test-DetailedTargetGeometrySeen $Text) -and
-                $Text -match
-                    'H3 physical contact DEBUG VISIBLE REPLAY:.*exactPalettes=([1-9][0-9]*).*correctedPalettes=([1-9][0-9]*).*directOverlaps=0 directSeparations=([1-9][0-9]*)'
+                (Test-VisibleWeaponGapResult $Text)
         }
         'wall' {
             return $Text -match

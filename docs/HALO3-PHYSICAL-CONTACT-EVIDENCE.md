@@ -1825,6 +1825,29 @@ real-headset settings hash
 `F8B2C009AE05A2AC796D3458B9AA8B072A5BEA97CA8EC5A74FAA5DD585DBAB9E`.
 Headset acceptance remains pending.
 
+Candidate `f72a54581f290a7a271368fb7ff8701ee259d086` then used the
+contact normal only as a search direction and checked each candidate pose with
+the complete exact weapon-versus-target query. Its package was
+`out/candidates/f72a545-h3-physical-contact-20260812-024244071Z`, with DLL
+SHA-256 `268FFC6E83BB59FA8BCE96F1A40A5857F25EE7960E3DF86D16E70F9B0F145575`.
+The preserved Valhalla Forge replay is
+`out/debug-openxr/20260812-024325812Z-visible-weapon-gap.log`, SHA-256
+`5A82B2F6D0A778FE079AF51313DF63DA7D87318797C07DAF5EAEA985F43A379E`.
+It disproved that solver too: the first report had zero overlaps after only 27
+palettes, but the cumulative count rose to 103 overlaps after 1,911 palettes
+and 651 corrected palettes. The validator incorrectly marked the run passed
+because it matched that early zero-overlap report. The runtime behavior was
+reverted by `f7e4e13`; its result is rejected regardless of the stale JSON
+`passed` field.
+
+The strict gate now reads only the newest cumulative replay report and does not
+pass until at least 900 exact palettes, 250 corrected palettes and 400 direct
+separations have run with zero cumulative direct overlaps. A transient clean
+prefix can no longer approve a solver that clips later. SteamVR was restored to
+the byte-identical real-headset settings hash
+`F8B2C009AE05A2AC796D3458B9AA8B072A5BEA97CA8EC5A74FAA5DD585DBAB9E`.
+Headset acceptance remains pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
