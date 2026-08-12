@@ -1737,6 +1737,24 @@ cooldown remains intact. Runtime counters distinguish later-sample admissions
 (`enemySustainedMelees`) and no-plane admissions
 (`enemyFallbackNormalMelees`). Headset acceptance remains pending.
 
+### 2026-08-12 enemy-only threshold follow-up
+
+The user tested installed source `68e7b56` in Halo 3 Campaign and reported that
+meleeing enemies was still too hard. The exact animated-body path, later-sample
+armed admission, unreliable-normal fallback, and native melee routing were all
+already present in that source. The remaining deliberate difficulty control was
+the enemy threshold: the default `1.50 m/s` configuration became `1.00 m/s` for
+bipeds, creatures, and giants.
+
+The next candidate halves the configured threshold for those three enemy kinds,
+so the default becomes `0.75 m/s`, with the existing `0.50 m/s` lower clamp.
+Vehicles, loose objects, and props still require the full configured threshold
+and retain their strict first-contact inward-normal rule. The exact target latch,
+`250 ms` global cooldown, tracked-weapon-speed requirement, and `8 m/s` spike
+rejection are unchanged. Pure coverage proves that a `0.75 m/s` biped hit is
+melee while the same Mongoose contact remains physics-only. Headset acceptance
+remains pending.
+
 ### Dynamic-body separation diagnosis
 
 The same preserved Quest headset session proves that the old fixed 50 ms body

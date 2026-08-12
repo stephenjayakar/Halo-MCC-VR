@@ -9728,15 +9728,23 @@ int main()
               !PhysicalContactTargetMeleeSpeedEligible(false, 1, true) &&
               PhysicalContactTargetMeleeSpeedEligible(true, 1, true) &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 0) -
-                            1.00f) < 1.0e-6f &&
+                            0.75f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 12) -
-                            1.00f) < 1.0e-6f &&
+                            0.75f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 1) -
                             1.50f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 2) -
                             1.50f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(0.50f, 0) -
                             0.50f) < 1.0e-6f &&
+              PhysicalContactClassify(
+                  0.75f, 0.75f,
+                  PhysicalContactTargetMeleeThreshold(1.50f, 0)) ==
+                  PhysicalContactAction::ImpulseAndMelee &&
+              PhysicalContactClassify(
+                  0.75f, 0.75f,
+                  PhysicalContactTargetMeleeThreshold(1.50f, 1)) ==
+                  PhysicalContactAction::ImpulseOnly &&
               std::fabs(fallbackEnemyNormal.x) < 1.0e-6f &&
               std::fabs(fallbackEnemyNormal.y + 1.0f) < 1.0e-6f &&
               std::fabs(fallbackEnemyNormal.z) < 1.0e-6f &&
@@ -9769,7 +9777,7 @@ int main()
             "melee, armed enemy contact accepts later deliberate tracked "
             "weapon-point speed and a motion-facing effects normal, "
             "target rebound and vehicle/prop tangential or sustained shoving "
-            "stay physics-only, enemies use the bounded one-third threshold "
+            "stay physics-only, enemies use the bounded half-threshold "
             "allowance, rigid targets begin exactly at the configured threshold, and implausible "
             "headset spikes remain impulse-only");
 
