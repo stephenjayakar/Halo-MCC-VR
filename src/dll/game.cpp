@@ -5914,11 +5914,7 @@ namespace
                     float envelopeTargetRadius = 0.0f;
                     uint64_t envelopeMs = 0;
                     uint64_t envelopeSerial = 0;
-                    // The rotation envelope is its own current proof. Apply it
-                    // even when the worker's base approval needed no linear
-                    // offset: a rotating target can cross that otherwise-safe
-                    // pose between simulation and final palette submission.
-                    if (std::isfinite(worldScale) &&
+                    if (approvedCorrected && std::isfinite(worldScale) &&
                         worldScale >= 0.05f && worldScale <= 2.0f &&
                         Halo3ReadRenderEnvelope(
                             envelopeTargetHandle, envelopeSpheres,
