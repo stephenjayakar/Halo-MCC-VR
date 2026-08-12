@@ -388,6 +388,12 @@ namespace
     bool g_headPoseValid = false;
     XrPosef g_rightAimPose{{0, 0, 0, 1}, {0, 0, 0}};
     bool g_rightAimPoseValid = false;
+    // Opt-in validation aid for SteamVR's null driver, which exposes no active
+    // controller action pose.  Read once during cold init; the normal runtime
+    // and all real headsets leave this false.  This lets the installed build's
+    // actual visible-weapon and firing paths be exercised without adding work
+    // to their hot callbacks.
+    bool g_halo3AimDebugPose = false;
     struct ControllerMotionPublication
     {
         std::atomic<uint32_t> sequence{0};
@@ -8603,6 +8609,13 @@ void VR_InitInstance()
         InitializeCriticalSection(&g_headCs);
         g_headCsInit = true;
     }
+    wchar_t halo3AimDebugValue[2]{};
+    g_halo3AimDebugPose =
+        GetEnvironmentVariableW(L"HALOMCCVR_H3_AIM_DEBUG_POSE",
+                                halo3AimDebugValue, 2) == 1 &&
+        halo3AimDebugValue[0] == L'1';
+    if (g_halo3AimDebugPose)
+        LOG("H3 direct weapon aim DEBUG: using fixed null-driver controller pose");
     // Runs on the DLL's background init thread, in parallel with the game
     // loading. Never touches the render thread or the game's D3D device.
     if (InitInstance())
@@ -10327,6 +10340,19 @@ bool VR_GetAimPose(float outQuat[4], float outPos[3])
 {
     if (!g_headCsInit)
         return false;
+    if (g_halo3AimDebugPose)
+    {
+        // OpenXR LOCAL-space pose: a steady right hand in front of the null
+        // driver's standing head.  Identity points the controller along -Z.
+        outQuat[0] = 0.0f;
+        outQuat[1] = 0.0f;
+        outQuat[2] = 0.0f;
+        outQuat[3] = 1.0f;
+        outPos[0] = 0.28f;
+        outPos[1] = 1.25f;
+        outPos[2] = -0.45f;
+        return true;
+    }
     EnterCriticalSection(&g_headCs);
     const bool okR = g_rightAimPoseValid;
     const XrPosef right = g_rightAimPose;
