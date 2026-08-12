@@ -9225,6 +9225,25 @@ int main()
                 movingTriangleMesh, guardWeaponTransform,
                 guardWeaponTransform, targetTriangleMesh,
                 guardTargetTransform, 0.002f, 0.008f);
+        guardTargetTransform.position = {0.0005f, 0.0f, 0.0f};
+        const PhysicalContactTriangleMeshHit contactSkinNearTouch =
+            PhysicalContactSweepTriangleMeshes(
+                movingTriangleMesh, guardWeaponTransform,
+                guardWeaponTransform, targetTriangleMesh,
+                guardTargetTransform, 0.002f, 0.00125f);
+        const PhysicalContactTriangleMeshHit zeroRadiusNearTouch =
+            PhysicalContactSweepTriangleMeshes(
+                movingTriangleMesh, guardWeaponTransform,
+                guardWeaponTransform, targetTriangleMesh,
+                guardTargetTransform, 0.002f, 0.0f);
+        const float observedSurfaceApproach =
+            PhysicalContactObservedSurfaceApproachMeters(
+                {0.0f, 0.0f, 0.0f}, {0.03f, 0.0f, 0.0f},
+                {1.0f, 0.0f, 0.0f}, 2.0f, 0.04f);
+        const float observedSurfaceDeparture =
+            PhysicalContactObservedSurfaceApproachMeters(
+                {0.03f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f},
+                {1.0f, 0.0f, 0.0f}, 2.0f, 0.04f);
 
         PhysicalContactTriangleMesh separatedSurfaceMesh{};
         separatedSurfaceMesh.triangleCount = 2;
@@ -9267,10 +9286,22 @@ int main()
               triangleMeshTunnelling.normalReliable &&
               !triangleMeshGrazingMiss.hit &&
               !exactNearSurfaceClear.hit && guardedNearSurfaceHit.hit &&
+              contactSkinNearTouch.hit && !zeroRadiusNearTouch.hit &&
+              !PhysicalContactConfirmedSurfacePenetration(
+                  false, false, false, false) &&
+              !PhysicalContactConfirmedSurfacePenetration(
+                  true, true, true, false) &&
+              !PhysicalContactConfirmedSurfacePenetration(
+                  true, true, false, true) &&
+              PhysicalContactConfirmedSurfacePenetration(
+                  true, true, true, true) &&
+              std::fabs(observedSurfaceApproach - 0.015f) < 1.0e-6f &&
+              observedSurfaceDeparture == 0.0f &&
               !exactMeshGap.hit,
             "Triangle-accurate contact catches a fast thin-surface crossing, "
             "preserves grazing and concave gaps, admits a separate bounded "
-            "visual guard before physical contact, and rejects malformed "
+            "visual guard before physical contact, distinguishes the physical "
+            "contact skin from geometric intersection, and rejects malformed "
             "fixed mesh bounds");
 
         const std::array<uint8_t, 16> packedRockPlacement{
@@ -10396,6 +10427,14 @@ int main()
         const auto bodyHitObservation =
             PhysicalContactDynamicBodyObservationForTarget(
                 0x12340001, true, true, true);
+        const auto bodyRecentSeparation =
+            PhysicalContactHoldRecentDynamicBodySeparation(
+                PhysicalContactDynamicBodyObservation::Separated,
+                0x12340001, 1000, 1060, 60);
+        const auto bodyExpiredSeparation =
+            PhysicalContactHoldRecentDynamicBodySeparation(
+                PhysicalContactDynamicBodyObservation::Separated,
+                0x12340001, 1000, 1061, 60);
         const PhysicalContactVec3 bodyUncertainHeld =
             PhysicalContactUpdateDynamicBodyOffset(
                 {-0.20f, 0, 0}, {},
@@ -10495,6 +10534,10 @@ int main()
                   PhysicalContactDynamicBodyObservation::Uncertain &&
               bodyHitObservation ==
                   PhysicalContactDynamicBodyObservation::Uncertain &&
+              bodyRecentSeparation ==
+                  PhysicalContactDynamicBodyObservation::Uncertain &&
+              bodyExpiredSeparation ==
+                  PhysicalContactDynamicBodyObservation::Separated &&
               std::fabs(bodyUncertainHeld.x + 0.20f) < 1.0e-6f &&
               std::fabs(bodyUncertainStillHeld.x + 0.20f) < 1.0e-6f &&
               PhysicalContactLengthSquared(bodySeparated) < 1.0e-10f &&
