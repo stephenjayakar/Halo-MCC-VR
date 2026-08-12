@@ -14030,26 +14030,27 @@ namespace
                         g_halo3ContactBodyOffset) <= 1.0e-10f)
                     Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
             };
-            const auto publishBodyFollow = [&] (
-                int32_t targetHandle,
-                const PhysicalContactTransform& targetTransform,
-                PhysicalContactVec3 correctedWeaponPosition)
+            const auto publishBodyFollow = [&] (int32_t targetHandle)
             {
                 if (targetHandle == -1 || !g_halo3ObjectGetVelocities ||
-                    !PhysicalContactTransformFinite(targetTransform) ||
-                    !PhysicalContactFinite(correctedWeaponPosition))
+                    !g_halo3ObjectGetCenter)
                     return;
                 float linear[3]{}, angular[3]{};
+                float center[3]{};
                 g_halo3ObjectGetVelocities(targetHandle, linear, angular);
+                g_halo3ObjectGetCenter(targetHandle, center);
                 const PhysicalContactVec3 linearVelocity{
                     linear[0], linear[1], linear[2]};
                 const PhysicalContactVec3 angularVelocity{
                     angular[0], angular[1], angular[2]};
+                const PhysicalContactVec3 bodyCenter{
+                    center[0], center[1], center[2]};
                 if (PhysicalContactFinite(linearVelocity) &&
-                    PhysicalContactFinite(angularVelocity))
+                    PhysicalContactFinite(angularVelocity) &&
+                    PhysicalContactFinite(bodyCenter))
                     Halo3PublishWeaponBodyFollow(
                         linearVelocity, angularVelocity,
-                        targetTransform.position, nowMs, proposalSerial);
+                        bodyCenter, nowMs, proposalSerial);
             };
             if (weaponHandle != g_halo3ContactWeaponHandle)
             {
@@ -14592,11 +14593,7 @@ namespace
                         PhysicalContactDynamicBodyObservation::Blocked,
                         followedOffset, constrainedBodyTargetHandle);
                     publishBodyFollow(
-                        constrainedBodyTargetHandle,
-                        constrainedBodyTargetTransform,
-                        intendedWeaponTransform.position +
-                            g_halo3ContactWallOffset +
-                            g_halo3ContactBodyOffset);
+                        constrainedBodyTargetHandle);
                     publishApprovedVisiblePose();
                     g_halo3ContactDebounce.EndSample(nowMs);
                     return;
@@ -14704,11 +14701,7 @@ namespace
                                     verifiedGuard.offset,
                                     closestVisualGuardHandle);
                                 publishBodyFollow(
-                                    closestVisualGuardHandle,
-                                    guardTargetTransform,
-                                    intendedWeaponTransform.position +
-                                        g_halo3ContactWallOffset +
-                                        g_halo3ContactBodyOffset);
+                                    closestVisualGuardHandle);
                                 publishApprovedVisiblePose();
                                 g_halo3ContactDebounce.EndSample(nowMs);
                                 return;
@@ -15050,9 +15043,7 @@ namespace
                 g_halo3ContactBodyAnchorHandle = closestHandle;
                 g_halo3ContactBodyAnchorValid = PhysicalContactFinite(
                     g_halo3ContactBodyLocalWeaponAnchor);
-                publishBodyFollow(
-                    closestHandle, closestTargetTransform,
-                    correctedWeaponPosition);
+                publishBodyFollow(closestHandle);
             }
             if (bodyConstraint.constrained &&
                 !visualConstraintUsesFallbackNormal)

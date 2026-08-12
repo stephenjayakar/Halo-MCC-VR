@@ -10526,11 +10526,12 @@ int main()
                 bodyPrevious, bodyIntended, 0.0f, {}, 0.10f, 0.01f, 1.0f);
         const PhysicalContactRigidBodyFollow bodyFollow =
             PhysicalContactBuildRigidBodyFollow(
-                {6.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 10.0f}, {},
+                {6.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 10.0f},
+                {2.0f, 3.0f, 0.0f},
                 1000, 1017, 0.5f);
         const PhysicalContactVec3 bodyFollowPoint =
             PhysicalContactApplyRigidBodyFollowPoint(
-                bodyFollow, {0.0f, 1.0f, 0.0f});
+                bodyFollow, {2.0f, 4.0f, 0.0f});
         const PhysicalContactVec3 bodyFollowVector =
             PhysicalContactApplyRigidBodyFollowVector(
                 bodyFollow, {1.0f, 0.0f, 0.0f});
@@ -10608,8 +10609,9 @@ int main()
               std::fabs(bodyFollow.translation.x - 0.102f) < 1.0e-6f &&
               std::fabs(bodyFollow.rotationRadians - 0.17f) < 1.0e-6f &&
               std::fabs(bodyFollowPoint.x -
-                            (0.102f - std::sin(0.17f))) < 1.0e-6f &&
-              std::fabs(bodyFollowPoint.y - std::cos(0.17f)) < 1.0e-6f &&
+                            (2.102f - std::sin(0.17f))) < 1.0e-6f &&
+              std::fabs(bodyFollowPoint.y -
+                            (3.0f + std::cos(0.17f))) < 1.0e-6f &&
               std::fabs(bodyFollowVector.x - std::cos(0.17f)) < 1.0e-6f &&
               std::fabs(bodyFollowVector.y - std::sin(0.17f)) < 1.0e-6f &&
               bodyFollowClamped.valid &&

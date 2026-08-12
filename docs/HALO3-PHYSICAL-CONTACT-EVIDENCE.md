@@ -1767,7 +1767,8 @@ different part of the moving surface could still enter it before the next exact
 solve.
 
 The replacement publishes the native body's linear velocity, angular velocity,
-and pivot with the exact approved pose serial. The palette consumer advances
+and authoritative `object_get_center_of_mass` pivot with the exact approved
+pose serial. The palette consumer advances
 every visible weapon node by the same bounded rigid transform: translation plus
 axis-angle rotation about the body pivot. It also rotates every node basis, so
 the visible weapon remains rigid instead of merely moving its node positions.
