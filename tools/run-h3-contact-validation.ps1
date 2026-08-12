@@ -376,7 +376,7 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
         }
         'decorator-wall' {
             return $Text -match
-                'H3 physical contact status:.*decoratorSelfTest=1'
+                'H3 physical contact status:.*decoratorSelfTest=([1-9][0-9]*)'
         }
         'melee' {
             $status = Get-LatestContactStatusLine $Text

@@ -2083,6 +2083,38 @@ for bipeds, creatures and giants. The vehicle validator also requires the
 latest target status to have no pending melee, so it cannot pass on stale
 evidence again.
 
+Candidate `e87caf451b2840da84e963bb62ba859fc8580398` was built and
+installed from
+`out/candidates/e87caf4-h3-physical-contact-20260812-065533207Z`; its DLL
+SHA-256 was
+`A5FA74EF0CEDC878B9028B1AF9E8B95FEB1D1ECFE543890EB6171772BE017356`.
+The extended High Ground Mongoose transaction passed and stayed clean through
+its 30-second post-pass window. Its preserved log is
+`out/debug-openxr/20260812-065544043Z-vehicle-nudge.log`, SHA-256
+`C70D3E25ADE8114CE13FEDD9000960598108E0FD08169C2091B769ECEEBAA227`.
+It applied more than 617 impulses to the exact 502-triangle, 464.835 kg vehicle
+while native melee and queued melee status remained zero. The exact fast-hit
+transaction also passed with one completed native melee response; its log is
+`out/debug-openxr/20260812-070800172Z-melee.log`, SHA-256
+`021EDD2030C3A135325348FF32A60D00C73201925D35433C555C566331F536BE`.
+The same installed DLL passed exact left-palm acquisition, native-mass carry,
+release and toss in
+`out/debug-openxr/20260812-071146836Z-left-grab.log`, SHA-256
+`C600CDAA140F338650F649A1E185F27C6DB9542F125006CE16FE37881BAB4011`,
+and passed Valhalla structure and placed-object wall validation in
+`out/debug-openxr/20260812-071522684Z-wall.log`, SHA-256
+`8EF8647E1D5542BC3EDEA13C3FA7D862AC97E79F6686BE74E956B892CE5AC32A`.
+
+The first decorator replay was rejected only by its validator. Runtime reached
+`decoratorSelfTest=3`, with 8,454 wall blocks, 472,228 wall rays, 272,142
+placed-object planes, 56 wall vertices and 38 wall planes. The validator
+incorrectly required the cumulative self-test counter to equal exactly one.
+Its preserved rejected log is
+`out/debug-openxr/20260812-072354299Z-decorator-wall.log`, SHA-256
+`B2C2EEF0BD8DFCBDCD7EEC8335702BEA19668C2A2D81B02EAD548EA7B29F0AD0`.
+The corrected validator accepts any positive cumulative self-test count; no
+runtime behavior changed.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
