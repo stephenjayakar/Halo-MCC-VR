@@ -8,6 +8,7 @@ param(
         'vehicle-nudge',
         'visible-weapon-nudge',
         'visible-weapon-gap',
+        'rotating-body-gap',
         'wall',
         'decorator-wall',
         'melee')]
@@ -355,6 +356,14 @@ function Test-VisibleWeaponGapResult([string]$Text) {
         $confirmedOverlaps -eq 0
 }
 
+function Test-RotatingBodyGapResult([string]$Text) {
+    $line = ($Text -split "`r?`n") | Where-Object {
+        $_ -match 'H3 physical contact DEBUG VISIBLE REPLAY:'
+    } | Select-Object -Last 1
+    return (Test-VisibleWeaponGapResult $Text) -and $line -and
+        $line -match 'rotatingCommands=([1-9][0-9]{2,})'
+}
+
 function Test-VisibleWeaponGapFailure([string]$Text) {
     # The physical query has a 1.25 mm contact skin, so direct overlap includes
     # legitimate near-touch. A zero-radius coplanar edge can also hit from a
@@ -397,6 +406,10 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
         'visible-weapon-gap' {
             return (Test-DetailedTargetGeometrySeen $Text) -and
                 (Test-VisibleWeaponGapResult $Text)
+        }
+        'rotating-body-gap' {
+            return (Test-DetailedTargetGeometrySeen $Text) -and
+                (Test-RotatingBodyGapResult $Text)
         }
         'wall' {
             return $Text -match
@@ -464,7 +477,8 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_MELEE',
     'HALOMCCVR_H3_CONTACT_DEBUG_WALL',
     'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE',
-    'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT'
+    'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT',
+    'HALOMCCVR_H3_CONTACT_DEBUG_ROTATING'
 )
 $savedEnvironment = @{}
 foreach ($name in $debugVariables) {
@@ -533,6 +547,11 @@ try {
         }
         'visible-weapon-gap' {
             $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT = '1'
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '2'
+        }
+        'rotating-body-gap' {
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT = '1'
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_ROTATING = '1'
             $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '2'
         }
         'wall' {
@@ -762,7 +781,7 @@ public static class HaloMccVrContactInput {
 
     Wait-Until {
         $text = Get-NewLogText $runtimeLog $startedUtc
-        if ($Test -eq 'visible-weapon-gap' -and
+        if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
             (Test-VisibleWeaponGapFailure $text)) {
             throw 'Halo 3 visible-weapon-gap recorded a cumulative direct overlap.'
         }
@@ -774,7 +793,7 @@ public static class HaloMccVrContactInput {
         Start-Sleep -Seconds $PostPassHoldSeconds
     }
     $text = Get-NewLogText $runtimeLog $startedUtc
-    if ($Test -eq 'visible-weapon-gap' -and
+    if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
         (Test-VisibleWeaponGapFailure $text)) {
         throw 'Halo 3 visible-weapon-gap recorded a cumulative direct overlap during the post-pass hold.'
     }
@@ -782,7 +801,9 @@ public static class HaloMccVrContactInput {
         throw "Halo 3 $Test lost its pass condition during the post-pass hold."
     }
     [IO.File]::WriteAllText($savedLogPath, $text)
-    if ($Test -in @('visible-weapon-nudge', 'visible-weapon-gap')) {
+    if ($Test -in @(
+            'visible-weapon-nudge', 'visible-weapon-gap',
+            'rotating-body-gap')) {
         Save-DesktopScreenshot $successScreenshot
     }
     $passed = $true

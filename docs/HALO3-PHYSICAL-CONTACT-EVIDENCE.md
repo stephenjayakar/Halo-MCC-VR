@@ -877,6 +877,20 @@ The edge-midpoint extension passes the cumulative Release build, pure tests,
 and the shared Reach consistency gate. Its exact installed candidate remains
 headset-pending; the accepted-build pointer does not advance.
 
+### Rotating-body visible-gap validator
+
+The existing exact visible replay moves a final rendered weapon into a live
+loose object's authored surface, but an ordinary resting object cannot prove
+that the render-side constraint follows target rotation. The debug-only
+`rotating-body-gap` transaction preserves the selected loose weapon's linear
+velocity and applies a bounded 1.5 rad/s world-up angular velocity through the
+already verified post-update `object_set_velocities` binding. The normal exact
+replay then rebuilds that target's current authored geometry and applies the
+same zero-penetration judgement to the final displayed weapon. A separate
+counter proves that hundreds of rotation commands ran; the test cannot pass by
+silently exercising the older stationary path. This environment-gated path is
+absent from normal headset play and makes no production behavior claim.
+
 This improves narrow BSP, instanced-structure, and fixed-object coverage
 without naming a map or wall. It does not pretend that Valhalla's render-only
 decorator rocks have native collision; those still require the separately

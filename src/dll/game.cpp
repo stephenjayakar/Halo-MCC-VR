@@ -979,6 +979,8 @@ namespace
     Halo3ContactVisibleReplayPublication g_halo3ContactVisibleReplayRoot;
     std::atomic<bool> g_halo3ContactDebugVisibleReplay{false};
     std::atomic<bool> g_halo3ContactDebugVisibleExactReplay{false};
+    std::atomic<bool> g_halo3ContactDebugRotatingTarget{false};
+    std::atomic<uint64_t> g_halo3ContactDebugRotatingTargetCommands{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisiblePalettes{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleExactPublishes{0};
     std::atomic<uint64_t> g_halo3ContactDebugVisibleExactPalettes{0};
@@ -12048,6 +12050,9 @@ namespace
             kEnableHalo3ExactVisibleReplayPlacement &&
             g_halo3ContactDebugVisibleExactReplay.load(
                 std::memory_order_acquire);
+        const bool debugRotatingTarget =
+            g_halo3ContactDebugRotatingTarget.load(
+                std::memory_order_acquire);
         // Candidate 51a3e6a did not produce an exact kind-10 hit in Construct.
         // Keep its bounded placement helper for evidence, but do not run the
         // failed diagnostic behavior while the proven scoop selector can
@@ -12733,6 +12738,43 @@ namespace
                     aimTarget, std::memory_order_relaxed);
                 g_halo3ContactDebugAimKind.store(
                     aimKind, std::memory_order_relaxed);
+                if (debugRotatingTarget && aimTarget != -1 &&
+                    g_halo3ObjectGetVelocities && g_halo3ObjectSetVelocities)
+                {
+                    // Debug-only rotating-body stress. Preserve the selected
+                    // body's current linear velocity and impose one bounded
+                    // world-up angular velocity after Halo's object update.
+                    // The exact replay then judges the final rendered weapon
+                    // against the target's newly rotated authored geometry.
+                    bool applied = false;
+                    __try
+                    {
+                        float debugLinear[3]{}, debugAngular[3]{};
+                        g_halo3ObjectGetVelocities(
+                            aimTarget, debugLinear, debugAngular);
+                        debugAngular[0] = 0.0f;
+                        debugAngular[1] = 0.0f;
+                        debugAngular[2] = 1.5f;
+                        const PhysicalContactVec3 linear{
+                            debugLinear[0], debugLinear[1], debugLinear[2]};
+                        if (PhysicalContactFinite(linear))
+                        {
+                            g_halo3ObjectSetVelocities(
+                                aimTarget, debugLinear, debugAngular);
+                            applied = true;
+                        }
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        applied = false;
+                    }
+                    if (applied)
+                        g_halo3ContactDebugRotatingTargetCommands.fetch_add(
+                            1, std::memory_order_relaxed);
+                    else
+                        g_halo3ContactDebugRotatingTarget.store(
+                            false, std::memory_order_release);
+                }
                 // The left-grab diagnostic needs the proven object selector
                 // and exact authored target, but it must not also hit that
                 // object with the right-hand weapon.  Publish the selected
@@ -16353,6 +16395,7 @@ namespace
                     "geometryOverlaps=%llu geometrySeparations=%llu "
                     "confirmedOverlaps=%llu "
                     "solidOverlaps=%llu solidSeparations=%llu "
+                    "rotatingCommands=%llu "
                     "gapRange=(%.4f %.4f)m",
                     (unsigned long long)
                         g_halo3ContactDebugVisiblePalettes.load(
@@ -16392,6 +16435,9 @@ namespace
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugVisibleSolidSeparations.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugRotatingTargetCommands.load(
                             std::memory_order_relaxed),
                     g_halo3ContactDebugVisibleMinimumGap.load(
                         std::memory_order_relaxed),
@@ -21168,6 +21214,16 @@ namespace
             contactDebugVisibleExactLength <
                 std::size(contactDebugVisibleExactValue) &&
             contactDebugVisibleExactValue[0] != L'0';
+        wchar_t contactDebugRotatingValue[8]{};
+        const DWORD contactDebugRotatingLength = GetEnvironmentVariableW(
+            L"HALOMCCVR_H3_CONTACT_DEBUG_ROTATING",
+            contactDebugRotatingValue,
+            static_cast<DWORD>(std::size(contactDebugRotatingValue)));
+        const bool contactDebugRotatingEnabled =
+            contactDebugRotatingLength > 0 &&
+            contactDebugRotatingLength <
+                std::size(contactDebugRotatingValue) &&
+            contactDebugRotatingValue[0] != L'0';
         wchar_t contactDebugKindValue[8]{};
         const DWORD contactDebugKindLength = GetEnvironmentVariableW(
             L"HALOMCCVR_H3_CONTACT_DEBUG_KIND", contactDebugKindValue,
@@ -21195,7 +21251,8 @@ namespace
             contactDebugEnabled || contactDebugMeleeEnabled ||
             contactDebugScoopEnabled || contactDebugLeftGrabEnabled ||
             contactDebugWallEnabled ||
-            contactDebugVisibleEnabled || contactDebugVisibleExactEnabled;
+            contactDebugVisibleEnabled || contactDebugVisibleExactEnabled ||
+            contactDebugRotatingEnabled;
         g_halo3ContactDebugRig.store(
             contactDebugRigEnabled, std::memory_order_release);
         g_halo3ContactDebugMelee.store(
@@ -21211,6 +21268,10 @@ namespace
             std::memory_order_release);
         g_halo3ContactDebugVisibleExactReplay.store(
             contactDebugVisibleExactEnabled, std::memory_order_release);
+        g_halo3ContactDebugRotatingTarget.store(
+            contactDebugRotatingEnabled, std::memory_order_release);
+        g_halo3ContactDebugRotatingTargetCommands.store(
+            0, std::memory_order_release);
         g_halo3ContactDebugVisiblePalettes.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleExactPublishes.store(
