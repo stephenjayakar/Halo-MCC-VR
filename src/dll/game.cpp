@@ -6868,6 +6868,10 @@ namespace
     PhysicalContactVec3 g_halo3ContactBodyLocalWeaponAnchor{};
     int32_t g_halo3ContactBodyAnchorHandle = -1;
     bool g_halo3ContactBodyAnchorValid = false;
+    PhysicalContactTransform g_halo3ContactBodyMotionTransform{};
+    int32_t g_halo3ContactBodyMotionHandle = -1;
+    uint64_t g_halo3ContactBodyMotionMs = 0;
+    bool g_halo3ContactBodyMotionValid = false;
     PhysicalContactTransform g_halo3ContactPreviousWallTransform{};
     int32_t g_halo3ContactWallWeaponHandle = -1;
     bool g_halo3ContactPreviousWallPoseValid = false;
@@ -11180,6 +11184,10 @@ namespace
         g_halo3ContactBodyLocalWeaponAnchor = {};
         g_halo3ContactBodyAnchorHandle = -1;
         g_halo3ContactBodyAnchorValid = false;
+        g_halo3ContactBodyMotionTransform = {};
+        g_halo3ContactBodyMotionHandle = -1;
+        g_halo3ContactBodyMotionMs = 0;
+        g_halo3ContactBodyMotionValid = false;
         Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
         g_halo3ContactPreviousWallTransform = {};
         g_halo3ContactWallWeaponHandle = -1;
@@ -14064,6 +14072,7 @@ namespace
                     g_halo3ContactBodyLastBlockedMs = 0;
                     g_halo3ContactBodyAnchorHandle = -1;
                     g_halo3ContactBodyAnchorValid = false;
+                    g_halo3ContactBodyMotionValid = false;
                 }
                 if (uncertainHeld)
                     g_halo3ContactBodyUncertainHolds.fetch_add(
@@ -14098,27 +14107,31 @@ namespace
                         g_halo3ContactBodyOffset) <= 1.0e-10f)
                     Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
             };
-            const auto publishBodyFollow = [&] (int32_t targetHandle)
+            const auto publishBodyFollow = [&] (
+                int32_t targetHandle,
+                const PhysicalContactTransform& targetTransform)
             {
-                if (targetHandle == -1 || !g_halo3ObjectGetVelocities ||
-                    !g_halo3ObjectGetCenter)
+                if (targetHandle == -1 ||
+                    !PhysicalContactTransformFinite(targetTransform))
                     return;
-                float linear[3]{}, angular[3]{};
-                float center[3]{};
-                g_halo3ObjectGetVelocities(targetHandle, linear, angular);
-                g_halo3ObjectGetCenter(targetHandle, center);
-                const PhysicalContactVec3 linearVelocity{
-                    linear[0], linear[1], linear[2]};
-                const PhysicalContactVec3 angularVelocity{
-                    angular[0], angular[1], angular[2]};
-                const PhysicalContactVec3 bodyCenter{
-                    center[0], center[1], center[2]};
-                if (PhysicalContactFinite(linearVelocity) &&
-                    PhysicalContactFinite(angularVelocity) &&
-                    PhysicalContactFinite(bodyCenter))
+                const PhysicalContactRigidMotionSample motion =
+                    g_halo3ContactBodyMotionValid &&
+                            g_halo3ContactBodyMotionHandle == targetHandle
+                        ? PhysicalContactRigidMotionFromTransforms(
+                              g_halo3ContactBodyMotionTransform,
+                              targetTransform, g_halo3ContactBodyMotionMs,
+                              nowMs, worldScale)
+                        : PhysicalContactRigidMotionSample{};
+                g_halo3ContactBodyMotionTransform = targetTransform;
+                g_halo3ContactBodyMotionHandle = targetHandle;
+                g_halo3ContactBodyMotionMs = nowMs;
+                g_halo3ContactBodyMotionValid = true;
+                if (motion.valid)
                     Halo3PublishWeaponBodyFollow(
-                        linearVelocity, angularVelocity,
-                        bodyCenter, nowMs, proposalSerial);
+                        motion.linearVelocity, motion.angularVelocity,
+                        motion.pivot, nowMs, proposalSerial);
+                else
+                    Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
             };
             if (weaponHandle != g_halo3ContactWeaponHandle)
             {
@@ -14132,6 +14145,7 @@ namespace
                 g_halo3ContactPreviousTargetSurfaceValid = false;
                 g_halo3ContactBodyAnchorHandle = -1;
                 g_halo3ContactBodyAnchorValid = false;
+                g_halo3ContactBodyMotionValid = false;
                 g_halo3ContactBodySetbackMeters.store(
                     0.0f, std::memory_order_relaxed);
                 Halo3PublishWeaponWallOffset(g_halo3ContactWallOffset, nowMs);
@@ -14661,7 +14675,8 @@ namespace
                         PhysicalContactDynamicBodyObservation::Blocked,
                         followedOffset, constrainedBodyTargetHandle);
                     publishBodyFollow(
-                        constrainedBodyTargetHandle);
+                        constrainedBodyTargetHandle,
+                        constrainedBodyTargetTransform);
                     publishApprovedVisiblePose();
                     g_halo3ContactDebounce.EndSample(nowMs);
                     return;
@@ -14769,7 +14784,8 @@ namespace
                                     verifiedGuard.offset,
                                     closestVisualGuardHandle);
                                 publishBodyFollow(
-                                    closestVisualGuardHandle);
+                                    closestVisualGuardHandle,
+                                    guardTargetTransform);
                                 publishApprovedVisiblePose();
                                 g_halo3ContactDebounce.EndSample(nowMs);
                                 return;
@@ -15111,7 +15127,8 @@ namespace
                 g_halo3ContactBodyAnchorHandle = closestHandle;
                 g_halo3ContactBodyAnchorValid = PhysicalContactFinite(
                     g_halo3ContactBodyLocalWeaponAnchor);
-                publishBodyFollow(closestHandle);
+                publishBodyFollow(
+                    closestHandle, closestTargetTransform);
             }
             if (bodyConstraint.constrained &&
                 !visualConstraintUsesFallbackNormal)

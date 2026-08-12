@@ -10546,6 +10546,26 @@ int main()
             PhysicalContactBuildRigidBodyFollow(
                 {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f},
                 {}, {}, 1000, 1017, 0.5f);
+        PhysicalContactTransform bodyMotionPrevious{};
+        PhysicalContactTransform bodyMotionCurrent{};
+        bodyMotionCurrent.position = {0.05f, -0.025f, 0.0f};
+        constexpr float kBodyMotionTurn = 0.17f;
+        bodyMotionCurrent.forward = {
+            std::cos(kBodyMotionTurn), std::sin(kBodyMotionTurn), 0.0f};
+        bodyMotionCurrent.left = {
+            -std::sin(kBodyMotionTurn), std::cos(kBodyMotionTurn), 0.0f};
+        const PhysicalContactRigidMotionSample bodyMotion =
+            PhysicalContactRigidMotionFromTransforms(
+                bodyMotionPrevious, bodyMotionCurrent, 1000, 1100, 0.5f);
+        PhysicalContactTransform bodyMotionScaleChanged = bodyMotionCurrent;
+        bodyMotionScaleChanged.scale = 2.0f;
+        const PhysicalContactRigidMotionSample bodyMotionScaleInvalid =
+            PhysicalContactRigidMotionFromTransforms(
+                bodyMotionPrevious, bodyMotionScaleChanged,
+                1000, 1100, 0.5f);
+        const PhysicalContactRigidMotionSample bodyMotionStale =
+            PhysicalContactRigidMotionFromTransforms(
+                bodyMotionPrevious, bodyMotionCurrent, 1000, 1101, 0.5f);
         Check(wallTip.constrained &&
               std::fabs(wallTip.setbackWorldUnits - 0.60f) < 1.0e-6f &&
               std::fabs(wallTip.offset.x + 0.60f) < 1.0e-6f &&
@@ -10619,6 +10639,12 @@ int main()
               std::fabs(bodyFollowClamped.rotationRadians - 0.35f) <
                   1.0e-6f &&
               !bodyFollowStale.valid && !bodyFollowInvalid.valid &&
+              bodyMotion.valid &&
+              std::fabs(bodyMotion.linearVelocity.x - 0.5f) < 1.0e-6f &&
+              std::fabs(bodyMotion.linearVelocity.y + 0.25f) < 1.0e-6f &&
+              std::fabs(bodyMotion.angularVelocity.z - 1.7f) < 1.0e-5f &&
+              std::fabs(bodyMotion.pivot.x - 0.05f) < 1.0e-6f &&
+              !bodyMotionScaleInvalid.valid && !bodyMotionStale.valid &&
               PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
                       .centreCount == 22 &&
               PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)

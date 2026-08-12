@@ -2177,6 +2177,25 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
+### 2026-08-12 exact target-transform render follow
+
+Candidate `3474dc2c493d7bcf0d4ef0de6464d50a66cba7a2` tried using exact
+animated-limb transforms while leaving root props on Halo's public velocity
+accessor. Its rotating loose-weapon replay stayed clean through 2,962 exact
+palettes, then failed with seven direct overlaps after the target's reported
+velocity and visible authored transform diverged. The preserved log is
+`out/debug-openxr/20260812-155943461Z-rotating-body-gap.log`, SHA-256
+`79ACAE520EA2F8ACFB7C1AC8058152D532D4E9AD68E002223F36193EDF3BA6E9`.
+That behavior is rejected and reverted by `ad9a8c0`.
+
+The next candidate derives bounded linear and angular render-follow velocity
+from consecutive exact target transforms for every contacted rigid body. Root
+props and vehicles use the same object transform already used by their exact
+collision query; animated limbs use their selected visible-node transform.
+Missing, stale, scale-changing, target-changing, ambiguous, or non-finite
+samples clear follow instead of extrapolating. No new hook, signature, engine
+write, lock, or allocation is added.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
