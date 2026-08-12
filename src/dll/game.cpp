@@ -998,6 +998,9 @@ namespace
     std::atomic<uint64_t> g_halo3ContactDebugAlignedGeometryOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugAlignedConfirmedOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugAlignedSolidOverlaps{0};
+    std::atomic<uint64_t> g_halo3ContactDebugSameFrameSamples{0};
+    std::atomic<uint64_t> g_halo3ContactDebugSameFrameGeometryOverlaps{0};
+    std::atomic<uint64_t> g_halo3ContactDebugSameFrameConfirmedOverlaps{0};
     std::atomic<uint32_t> g_halo3ContactDebugLastResetReason{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
     std::atomic<float> g_halo3ContactDebugVisibleMaximumGap{-FLT_MAX};
@@ -5480,6 +5483,10 @@ namespace
         return true;
     }
 
+    void Halo3MeasureSameFrameRotatingGap(
+        int32_t weaponHandle, const BoneMatrix* visibleNodes,
+        uint32_t visibleNodeCount, uint64_t sampleMs);
+
     void __fastcall FpVisiblePaletteHook(uint16_t tag, const BoneMatrix* root,
                                          BoneMatrix* destination, uintptr_t unused,
                                          const BoneMatrix* source, const int32_t* boneMap)
@@ -5817,6 +5824,9 @@ namespace
                     static_cast<uint32_t>(renderNodeCount), tag,
                     activeWeaponHandle, displayedSerial, nowMs,
                     displayedCorrected);
+                Halo3MeasureSameFrameRotatingGap(
+                    activeWeaponHandle, destination,
+                    static_cast<uint32_t>(renderNodeCount), nowMs);
             }
         }
 
@@ -8557,6 +8567,116 @@ namespace
             objectData, visibleNodes.data(),
             static_cast<uint32_t>(matrixCount), outputTransform, output,
             true, &requiresNativeConfirmation, triangleMesh);
+    }
+
+    // The rotating replay's gameplay-thread checker can only estimate the
+    // target pose at the older displayed-weapon timestamp. A collision may
+    // change velocity between those samples. This debug-only check instead
+    // runs in the final visible-palette callback and reads the target's same
+    // interpolated node bank that Halo's object renderer consumes. It performs
+    // no logging, allocation, locking, scanning, or file I/O in the hook.
+    void Halo3MeasureSameFrameRotatingGap(
+        int32_t weaponHandle, const BoneMatrix* visibleNodes,
+        uint32_t visibleNodeCount, uint64_t sampleMs)
+    {
+        if (!g_halo3ContactDebugRotatingTarget.load(
+                std::memory_order_acquire) ||
+            !g_halo3ContactDebugVisibleExactReplay.load(
+                std::memory_order_acquire) ||
+            !g_halo3ContactDebugVisibleMeasurementStarted.load(
+                std::memory_order_acquire) ||
+            weaponHandle == -1 || !visibleNodes || !visibleNodeCount ||
+            visibleNodeCount >
+                Halo3VisibleWeaponPosePublication::kMaximumNodes ||
+            !sampleMs)
+        {
+            return;
+        }
+
+        // The two eyes submit the same world-space weapon palette within one
+        // millisecond. One exact comparison per display frame is sufficient
+        // and keeps this opt-in validator bounded.
+        static thread_local uint64_t lastSampleMs = 0;
+        if (sampleMs == lastSampleMs)
+            return;
+        lastSampleMs = sampleMs;
+
+        static thread_local PhysicalContactCompoundShape weaponShape{};
+        static thread_local PhysicalContactTriangleMesh weaponMesh{};
+        static thread_local PhysicalContactCompoundShape targetShape{};
+        static thread_local PhysicalContactTriangleMesh targetMesh{};
+        bool measured = false;
+        bool geometryHit = false;
+        bool confirmedHit = false;
+        __try
+        {
+            unsigned char* weaponData = nullptr;
+            uint8_t weaponKind = 0xFF;
+            const int32_t targetHandle =
+                g_halo3ContactDebugAimTarget.load(std::memory_order_acquire);
+            unsigned char* targetData = nullptr;
+            PhysicalContactTransform weaponTransform =
+                Halo3ContactTransformFromBone(visibleNodes[0]);
+            PhysicalContactTransform targetTransform{};
+            bool requiresNativeConfirmation = false;
+            const float worldScale =
+                g_worldScale.load(std::memory_order_relaxed);
+            if (targetHandle == -1 || !std::isfinite(worldScale) ||
+                worldScale < 0.05f || worldScale > 2.0f ||
+                !PhysicalContactTransformFinite(weaponTransform) ||
+                !Halo3ContactObjectDataForHandle(
+                    weaponHandle, weaponData, &weaponKind) ||
+                weaponKind != 2 ||
+                !Halo3ContactObjectDataForHandle(targetHandle, targetData) ||
+                !Halo3ContactVisibleCollisionShape(
+                    weaponData, visibleNodes, visibleNodeCount,
+                    weaponTransform, weaponShape, false, nullptr,
+                    &weaponMesh) ||
+                !Halo3ContactDetailedTargetShape(
+                    targetHandle, targetData, targetShape, targetTransform,
+                    requiresNativeConfirmation, &targetMesh) ||
+                !PhysicalContactTriangleMeshValid(weaponMesh) ||
+                !PhysicalContactTriangleMeshValid(targetMesh))
+            {
+                return;
+            }
+
+            const auto exactHit = [&](const PhysicalContactTransform& pose,
+                                      float radius) {
+                return PhysicalContactSweepTriangleMeshes(
+                    weaponMesh, pose, pose, targetMesh, targetTransform,
+                    kHalo3ContactTriangleStepMeters * worldScale,
+                    radius).hit;
+            };
+            const bool directHit = exactHit(
+                weaponTransform,
+                kHalo3ContactTriangleSurfaceRadiusMeters * worldScale);
+            geometryHit = exactHit(weaponTransform, 0.0f);
+            PhysicalContactTransform outwardProbe = weaponTransform;
+            outwardProbe.position = outwardProbe.position -
+                weaponTransform.forward * (0.00025f * worldScale);
+            confirmedHit = PhysicalContactConfirmedSurfacePenetration(
+                directHit, geometryHit,
+                exactHit(
+                    outwardProbe,
+                    kHalo3ContactTriangleSurfaceRadiusMeters * worldScale),
+                exactHit(outwardProbe, 0.0f));
+            measured = true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            measured = false;
+        }
+        if (!measured)
+            return;
+        g_halo3ContactDebugSameFrameSamples.fetch_add(
+            1, std::memory_order_relaxed);
+        if (geometryHit)
+            g_halo3ContactDebugSameFrameGeometryOverlaps.fetch_add(
+                1, std::memory_order_relaxed);
+        if (confirmedHit)
+            g_halo3ContactDebugSameFrameConfirmedOverlaps.fetch_add(
+                1, std::memory_order_relaxed);
     }
 
     bool Halo3ContactNativeSurfaceConfirms(
@@ -13157,6 +13277,12 @@ namespace
                                 0, std::memory_order_relaxed);
                             g_halo3ContactDebugAlignedSolidOverlaps.store(
                                 0, std::memory_order_relaxed);
+                            g_halo3ContactDebugSameFrameSamples.store(
+                                0, std::memory_order_relaxed);
+                            g_halo3ContactDebugSameFrameGeometryOverlaps.store(
+                                0, std::memory_order_relaxed);
+                            g_halo3ContactDebugSameFrameConfirmedOverlaps.store(
+                                0, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleMinimumGap.store(
                                 FLT_MAX, std::memory_order_relaxed);
                             g_halo3ContactDebugVisibleMaximumGap.store(
@@ -16545,6 +16671,8 @@ namespace
                     "solidOverlaps=%llu solidSeparations=%llu "
                     "alignedOverlaps=%llu alignedGeometry=%llu "
                     "alignedConfirmed=%llu alignedSolid=%llu "
+                    "sameFrameSamples=%llu sameFrameGeometry=%llu "
+                    "sameFrameConfirmed=%llu "
                     "rotatingCommands=%llu resetReason=%u "
                     "gapRange=(%.4f %.4f)m",
                     (unsigned long long)
@@ -16597,6 +16725,15 @@ namespace
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugAlignedSolidOverlaps.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugSameFrameSamples.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugSameFrameGeometryOverlaps.load(
+                            std::memory_order_relaxed),
+                    (unsigned long long)
+                        g_halo3ContactDebugSameFrameConfirmedOverlaps.load(
                             std::memory_order_relaxed),
                     (unsigned long long)
                         g_halo3ContactDebugRotatingTargetCommands.load(
@@ -21473,6 +21610,12 @@ namespace
         g_halo3ContactDebugAlignedConfirmedOverlaps.store(
             0, std::memory_order_release);
         g_halo3ContactDebugAlignedSolidOverlaps.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugSameFrameSamples.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugSameFrameGeometryOverlaps.store(
+            0, std::memory_order_release);
+        g_halo3ContactDebugSameFrameConfirmedOverlaps.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleMinimumGap.store(
             FLT_MAX, std::memory_order_release);

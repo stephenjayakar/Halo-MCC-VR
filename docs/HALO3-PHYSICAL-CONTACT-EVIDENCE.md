@@ -2276,8 +2276,29 @@ failed-validator log is
 `out/debug-openxr/20260812-234014616Z-rotating-body-gap.log`, SHA-256
 `B11CCFE27CBAE1B43C2E69D444719C59F91E73FD6F41BF6A165F03E5945223FA`.
 
+Candidate `e60f3cf` then ran long enough to record one aligned confirmed
+triangle penetration after 2,320 displayed palettes. That does not establish a
+visible overlap: the aligned pose is reconstructed from the target's *later*
+physics pose and its *current* velocity. A collision impulse can change that
+velocity between the displayed-palette timestamp and the gameplay check, so
+rewinding the new velocity cannot reproduce the earlier rendered pose. The
+preserved log is
+`out/debug-openxr/20260812-234549819Z-rotating-body-gap.log`, SHA-256
+`C5082673A1706166F6AD354D707BABF957C6D09E737730D985847F1E00EC9714`.
+
+The replacement validator measures both rendered objects at the same time.
+Inside the opt-in final visible-weapon palette callback, it reads the target's
+interpolated node bank—the same bank Halo's object renderer consumes—and
+compares the exact final weapon triangles against those exact target
+triangles. The callback publishes only bounded atomic counters. It performs no
+allocation, logging, lock, file I/O, or signature scan. The two eyes share one
+world-space pose, so the validator takes at most one sample per millisecond and
+requires at least 8,000 successful same-frame comparisons with zero confirmed
+penetrations. The current-time, velocity-rewound, and conservative-compound
+counters remain in the log as diagnostics but no longer decide rotating
+visible-geometry acceptance.
+
 The ordinary non-rotating gap validator remains unchanged and continues to
-judge the live transform directly. Both counter sets stay in the debug log so
-a future disagreement remains visible. This changes no production pose,
-geometry, impulse, melee, input, or render behavior. Exact packaging and a
-full replay under the corrected validator remain pending.
+judge the live transform directly. This changes no production pose, geometry,
+impulse, melee, input, or render behavior. Exact packaging and a full replay
+under the same-frame validator remain pending.

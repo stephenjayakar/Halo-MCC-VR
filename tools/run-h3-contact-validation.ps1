@@ -361,7 +361,7 @@ function Test-RotatingBodyGapResult([string]$Text) {
         $_ -match 'H3 physical contact DEBUG VISIBLE REPLAY:'
     } | Select-Object -Last 1
     if (-not $line -or $line -notmatch
-        'exactPalettes=([0-9]+).*correctedPalettes=([0-9]+).*approvedPalettes=([0-9]+) heldPalettes=([0-9]+).*directOverlaps=([0-9]+) directSeparations=([0-9]+).*geometryOverlaps=([0-9]+) geometrySeparations=([0-9]+) confirmedOverlaps=([0-9]+).*solidOverlaps=([0-9]+) solidSeparations=([0-9]+).*alignedOverlaps=([0-9]+) alignedGeometry=([0-9]+) alignedConfirmed=([0-9]+) alignedSolid=([0-9]+).*rotatingCommands=([0-9]+)') {
+        'exactPalettes=([0-9]+).*correctedPalettes=([0-9]+).*approvedPalettes=([0-9]+) heldPalettes=([0-9]+).*directOverlaps=([0-9]+) directSeparations=([0-9]+).*geometryOverlaps=([0-9]+) geometrySeparations=([0-9]+) confirmedOverlaps=([0-9]+).*solidOverlaps=([0-9]+) solidSeparations=([0-9]+).*alignedOverlaps=([0-9]+) alignedGeometry=([0-9]+) alignedConfirmed=([0-9]+) alignedSolid=([0-9]+).*sameFrameSamples=([0-9]+) sameFrameGeometry=([0-9]+) sameFrameConfirmed=([0-9]+).*rotatingCommands=([0-9]+)') {
         return $false
     }
     $exactPalettes = [int]$Matches[1]
@@ -370,21 +370,22 @@ function Test-RotatingBodyGapResult([string]$Text) {
     $heldPalettes = [int]$Matches[4]
     $directSeparations = [int]$Matches[6]
     $geometrySeparations = [int]$Matches[8]
-    $alignedConfirmed = [int]$Matches[14]
-    $alignedSolid = [int]$Matches[15]
-    $rotatingCommands = [int]$Matches[16]
+    $sameFrameSamples = [int]$Matches[16]
+    $sameFrameConfirmed = [int]$Matches[18]
+    $rotatingCommands = [int]$Matches[19]
     return $exactPalettes -ge 8000 -and
         $correctedPalettes -ge 2500 -and
         $approvedPalettes -ge 2500 -and
         $heldPalettes -ge 8000 -and
         $directSeparations -ge 2500 -and
         $geometrySeparations -ge 2500 -and
-        $alignedConfirmed -eq 0 -and
+        $sameFrameSamples -ge 8000 -and
+        $sameFrameConfirmed -eq 0 -and
         $rotatingCommands -ge 100
 }
 
 function Test-VisibleWeaponGapFailure(
-    [string]$Text, [bool]$UseAlignedCounters = $false) {
+    [string]$Text, [bool]$UseSameFrameCounters = $false) {
     # The physical query has a 1.25 mm contact skin, so direct overlap includes
     # legitimate near-touch. A zero-radius coplanar edge can also hit from a
     # floating-point branch while the enclosing skin is clear. Require both
@@ -394,8 +395,8 @@ function Test-VisibleWeaponGapFailure(
         $_ -match 'H3 physical contact DEBUG VISIBLE REPLAY:'
     } | Select-Object -Last 1
     if (-not $line) { return $false }
-    if ($UseAlignedCounters) {
-        return $line -match 'alignedConfirmed=([1-9][0-9]*)'
+    if ($UseSameFrameCounters) {
+        return $line -match 'sameFrameConfirmed=([1-9][0-9]*)'
     }
     return $line -match 'confirmedOverlaps=([1-9][0-9]*)'
 }
@@ -805,10 +806,10 @@ public static class HaloMccVrContactInput {
 
     Wait-Until {
         $text = Get-NewLogText $runtimeLog $startedUtc
-        $useAlignedGapCounters = $Test -eq 'rotating-body-gap'
+        $useSameFrameGapCounters = $Test -eq 'rotating-body-gap'
         if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
-            (Test-VisibleWeaponGapFailure $text $useAlignedGapCounters)) {
-            throw 'Halo 3 visible-weapon-gap recorded a cumulative direct overlap.'
+            (Test-VisibleWeaponGapFailure $text $useSameFrameGapCounters)) {
+            throw 'Halo 3 visible-weapon-gap recorded an exact visible-geometry penetration.'
         }
         Test-ValidationResult $text $Test
     } $ValidationTimeoutSeconds "Halo 3 $Test did not reach its pass condition."
@@ -818,10 +819,10 @@ public static class HaloMccVrContactInput {
         Start-Sleep -Seconds $PostPassHoldSeconds
     }
     $text = Get-NewLogText $runtimeLog $startedUtc
-    $useAlignedGapCounters = $Test -eq 'rotating-body-gap'
+    $useSameFrameGapCounters = $Test -eq 'rotating-body-gap'
     if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
-        (Test-VisibleWeaponGapFailure $text $useAlignedGapCounters)) {
-        throw 'Halo 3 visible-weapon-gap recorded a cumulative direct overlap during the post-pass hold.'
+        (Test-VisibleWeaponGapFailure $text $useSameFrameGapCounters)) {
+        throw 'Halo 3 visible-weapon-gap recorded an exact visible-geometry penetration during the post-pass hold.'
     }
     if (-not (Test-ValidationResult $text $Test)) {
         throw "Halo 3 $Test lost its pass condition during the post-pass hold."
