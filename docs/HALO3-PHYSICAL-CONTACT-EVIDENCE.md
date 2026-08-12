@@ -2263,9 +2263,21 @@ separations. Two aligned samples touched only the 1.25 mm physical skin. The
 old rotating result is therefore a cross-frame validator false positive, not
 visible clipping.
 
-The rotating validator now requires the aligned confirmed and solid counters
-to remain zero. The ordinary non-rotating gap validator remains unchanged and
-continues to judge the live transform directly. Both counter sets stay in the
-debug log so a future disagreement remains visible. This changes no production
-pose, geometry, impulse, melee, input, or render behavior. Exact packaging and
-a replay under the corrected validator remain pending.
+The first corrected-validator replay on candidate `c670ba3` exposed a second
+validator mistake. The exact 36-triangle weapon against the exact 88-triangle
+target stayed at zero aligned geometry intersections and zero confirmed
+penetrations, while the deliberately conservative compound safety proxy
+reported two overlaps. The normal non-rotating gap validator already treats
+the authored triangle test as the visible-geometry authority and retains the
+compound counter only as a diagnostic. The rotating validator now applies that
+same rule: aligned confirmed penetration must remain zero; aligned compound
+overlap remains logged but cannot fail an exact-triangle sample. The preserved
+failed-validator log is
+`out/debug-openxr/20260812-234014616Z-rotating-body-gap.log`, SHA-256
+`B11CCFE27CBAE1B43C2E69D444719C59F91E73FD6F41BF6A165F03E5945223FA`.
+
+The ordinary non-rotating gap validator remains unchanged and continues to
+judge the live transform directly. Both counter sets stay in the debug log so
+a future disagreement remains visible. This changes no production pose,
+geometry, impulse, melee, input, or render behavior. Exact packaging and a
+full replay under the corrected validator remain pending.

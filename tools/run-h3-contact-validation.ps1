@@ -379,7 +379,7 @@ function Test-RotatingBodyGapResult([string]$Text) {
         $heldPalettes -ge 8000 -and
         $directSeparations -ge 2500 -and
         $geometrySeparations -ge 2500 -and
-        $alignedConfirmed -eq 0 -and $alignedSolid -eq 0 -and
+        $alignedConfirmed -eq 0 -and
         $rotatingCommands -ge 100
 }
 
@@ -395,8 +395,7 @@ function Test-VisibleWeaponGapFailure(
     } | Select-Object -Last 1
     if (-not $line) { return $false }
     if ($UseAlignedCounters) {
-        return $line -match
-            'alignedConfirmed=([1-9][0-9]*)|alignedSolid=([1-9][0-9]*)'
+        return $line -match 'alignedConfirmed=([1-9][0-9]*)'
     }
     return $line -match 'confirmedOverlaps=([1-9][0-9]*)'
 }
