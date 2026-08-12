@@ -10546,6 +10546,14 @@ int main()
             PhysicalContactBuildRigidBodyFollow(
                 {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f},
                 {}, {}, 1000, 1017, 0.5f);
+        PhysicalContactLocalBoundingSphere renderSpheres[1] = {
+            {{0.0f, 0.0f, 0.0f}, 0.10f}};
+        PhysicalContactTransform renderSphereTransform{};
+        renderSphereTransform.position = {0.45f, 0.0f, 0.0f};
+        const PhysicalContactWallConstraint renderEnvelope =
+            PhysicalContactRotationInvariantSphereSetOffset(
+                renderSpheres, 1, renderSphereTransform,
+                {}, 0.50f, 0.01f, 1.0f);
         Check(wallTip.constrained &&
               std::fabs(wallTip.setbackWorldUnits - 0.60f) < 1.0e-6f &&
               std::fabs(wallTip.offset.x + 0.60f) < 1.0e-6f &&
@@ -10619,6 +10627,8 @@ int main()
               std::fabs(bodyFollowClamped.rotationRadians - 0.35f) <
                   1.0e-6f &&
               !bodyFollowStale.valid && !bodyFollowInvalid.valid &&
+              renderEnvelope.constrained &&
+              renderEnvelope.offset.x > 0.15f &&
               PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
                       .centreCount == 22 &&
               PhysicalContactWallTriangleFeatureSampleBudget(20, 222, 64)
