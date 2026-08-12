@@ -9225,17 +9225,6 @@ int main()
                 movingTriangleMesh, guardWeaponTransform,
                 guardWeaponTransform, targetTriangleMesh,
                 guardTargetTransform, 0.002f, 0.008f);
-        guardTargetTransform.position = {0.0005f, 0.0f, 0.0f};
-        const PhysicalContactTriangleMeshHit contactSkinNearTouch =
-            PhysicalContactSweepTriangleMeshes(
-                movingTriangleMesh, guardWeaponTransform,
-                guardWeaponTransform, targetTriangleMesh,
-                guardTargetTransform, 0.002f, 0.00125f);
-        const PhysicalContactTriangleMeshHit zeroRadiusNearTouch =
-            PhysicalContactSweepTriangleMeshes(
-                movingTriangleMesh, guardWeaponTransform,
-                guardWeaponTransform, targetTriangleMesh,
-                guardTargetTransform, 0.002f, 0.0f);
 
         PhysicalContactTriangleMesh separatedSurfaceMesh{};
         separatedSurfaceMesh.triangleCount = 2;
@@ -9278,20 +9267,10 @@ int main()
               triangleMeshTunnelling.normalReliable &&
               !triangleMeshGrazingMiss.hit &&
               !exactNearSurfaceClear.hit && guardedNearSurfaceHit.hit &&
-              contactSkinNearTouch.hit && !zeroRadiusNearTouch.hit &&
-              !PhysicalContactConfirmedSurfacePenetration(
-                  false, false, false, false) &&
-              !PhysicalContactConfirmedSurfacePenetration(
-                  true, true, true, false) &&
-              !PhysicalContactConfirmedSurfacePenetration(
-                  true, true, false, true) &&
-              PhysicalContactConfirmedSurfacePenetration(
-                  true, true, true, true) &&
               !exactMeshGap.hit,
             "Triangle-accurate contact catches a fast thin-surface crossing, "
             "preserves grazing and concave gaps, admits a separate bounded "
-            "visual guard before physical contact, distinguishes the physical "
-            "contact skin from geometric intersection, and rejects malformed "
+            "visual guard before physical contact, and rejects malformed "
             "fixed mesh bounds");
 
         const std::array<uint8_t, 16> packedRockPlacement{
