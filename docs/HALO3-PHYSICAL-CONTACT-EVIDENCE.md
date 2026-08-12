@@ -1848,17 +1848,22 @@ the byte-identical real-headset settings hash
 `F8B2C009AE05A2AC796D3458B9AA8B072A5BEA97CA8EC5A74FAA5DD585DBAB9E`.
 Headset acceptance remains pending.
 
-The replacement keeps triangle geometry for the precise swept contact point,
-but resolves visual penetration against the complete authored solid compounds.
-Each collision BSP is Halo's own convex body. Testing every weapon BSP against
-every target BSP detects both surface crossings and full containment, unlike a
-triangle-only query that calls the inside of a closed object empty. The bounded
-outward search publishes a correction only after the final complete compound
-pose is clear. Animated multi-node bodies keep their separate melee path. A
-regression starts a solid weapon fully inside one child of a two-child target,
-requires a clear final pose, and proves that a direction which cannot leave the
-body inside the one-metre cap is rejected. The strict sustained Valhalla replay
-remains the runtime gate.
+Candidate `c529df334f422bf2080f104063bd6b9ddd1f033c` replaced the final
+triangle query with the complete authored weapon and target solid compounds.
+Its package was
+`out/candidates/c529df3-h3-physical-contact-20260812-032132824Z`, with DLL
+SHA-256 `6D53F76FA232AF37B71A4E39E091C1964A8CB8722DB48E0A3C2505667D7F65EF`.
+The strict Valhalla Forge replay still failed. Its preserved log is
+`out/debug-openxr/20260812-033603362Z-c529df3-visible-weapon-gap-failed.log`,
+SHA-256
+`FB7908A61A91E2C79DA41AA53570EAF2251F0342419B0348A9A14FDB640224EB`.
+The final cumulative report recorded 9,613 exact palettes, 3,383 corrected
+palettes, 4,262 direct separations and 725 direct overlaps, with a worst gap of
+`-0.3075 m`. The solid solver ran only after a triangle surface sweep reported
+a hit. A weapon already contained inside a closed target can overlap both
+solids while crossing no triangle at that sample, so the code released its
+body constraint. This post-hit-only behavior is rejected and reverted. Normal
+SteamVR settings were restored with the byte-identical hash above.
 
 ## Verification boundary
 
