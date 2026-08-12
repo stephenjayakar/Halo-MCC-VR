@@ -15013,43 +15013,6 @@ namespace
                 if (verifiedGeometry &&
                     PhysicalContactTransformFinite(verifiedTargetTransform))
                 {
-                    bool rotationEnvelopeConstrained = false;
-                    if (closestTargetShapeSource != 3 &&
-                        g_halo3ObjectGetVelocities)
-                    {
-                        float envelopeLinear[3]{}, envelopeAngular[3]{};
-                        g_halo3ObjectGetVelocities(
-                            closestHandle, envelopeLinear, envelopeAngular);
-                        const PhysicalContactVec3 angularVelocity{
-                            envelopeAngular[0], envelopeAngular[1],
-                            envelopeAngular[2]};
-                        const float targetRadius =
-                            PhysicalContactRotationInvariantRadius(
-                                verifiedTargetShape,
-                                &verifiedTargetMesh) *
-                            verifiedTargetTransform.scale;
-                        const float rotationalSurfaceSpeedMeters =
-                            PhysicalContactLength(angularVelocity) *
-                            targetRadius / worldScale;
-                        if (PhysicalContactFinite(angularVelocity) &&
-                            std::isfinite(rotationalSurfaceSpeedMeters) &&
-                            rotationalSurfaceSpeedMeters >= 0.05f)
-                        {
-                            const PhysicalContactWallConstraint envelope =
-                                PhysicalContactRotationInvariantChildSphereOffset(
-                                    weaponShape, intendedWeaponTransform,
-                                    verifiedTargetTransform.position,
-                                    targetRadius,
-                                    kHalo3ContactVisualGuardClearanceMeters *
-                                        worldScale,
-                                    worldScale);
-                            if (envelope.constrained)
-                            {
-                                bodyConstraint = envelope;
-                                rotationEnvelopeConstrained = true;
-                            }
-                        }
-                    }
                     const auto exactOverlap =
                         [&](const PhysicalContactTransform& candidate) {
                             bool surfaceOverlap = false;
@@ -15118,12 +15081,7 @@ namespace
                                 followedLength;
                         }
                     }
-                    if (rotationEnvelopeConstrained)
-                    {
-                        // Every tight weapon-child sphere is now outside the
-                        // sphere containing all target orientations.
-                    }
-                    else if (followedConstraint.constrained)
+                    if (followedConstraint.constrained)
                         bodyConstraint = followedConstraint;
                     else if (verifiedConstraint.constrained)
                     {
