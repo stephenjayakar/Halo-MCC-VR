@@ -2202,3 +2202,18 @@ the current signed SteamVR `vrclient_x64.dll` imports
 process-local `XR_RUNTIME_JSON` override proved the installed Oculus 1.201.0
 runtime initializes, but no headset was connected, so this is launch evidence
 only and not physical-contact acceptance.
+
+## Unreliable-normal visual publication
+
+The clean `1ac8a37` null-driver replay on 2026-08-12 recorded two confirmed
+visible triangle overlaps after 8,388 palettes. The preserved log is
+`out/debug-openxr/20260812-195824089Z-visible-weapon-gap.log`, SHA-256
+`597A8813A38B4D95B87A49BC504553CA690FDF972785E2B4E96F406218405400`.
+Immediately before the overlap, `rejectNormal` increased from zero to three
+while the geometry verifier continued returning constrained, clear final
+poses. The callback withheld those safe poses solely because their separating
+normal was not reliable enough for a native impulse. Native impulse rejection
+is correct, but it is independent from presentation: a complete authored-
+geometry query already proves whether the kinematic rendered weapon pose is
+clear. The next candidate therefore publishes that verified visual pose while
+continuing to reject native impulse and melee use of the fallback normal.
