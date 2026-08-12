@@ -1865,6 +1865,21 @@ solids while crossing no triangle at that sample, so the code released its
 body constraint. This post-hit-only behavior is rejected and reverted. Normal
 SteamVR settings were restored with the byte-identical hash above.
 
+The replacement admits the missing state before solving it. After a precise
+triangle sweep reports no surface crossing, a single-permutation rigid target
+is also tested as Halo's complete authored solid compound at the final visible
+weapon pose. A solid overlap becomes a visual-only contact with an explicitly
+unreliable normal: it may keep the weapon outside, but it cannot authorize an
+impulse or melee. The target's cached reliable surface normal is reused during
+continuous contact when available. The bounded solid search then publishes a
+correction only after the final complete weapon compound is proven clear of
+every complete target child. Multi-permutation vehicles still require Halo's
+native live-surface confirmation, and animated bodies keep their separate
+melee path. A regression proves the exact failure mode: the triangle surfaces
+report no hit while a closed weapon solid is contained in the target, then the
+solid query admits the overlap and the separation solver proves its final pose
+clear. The strict sustained Valhalla replay remains the runtime gate.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

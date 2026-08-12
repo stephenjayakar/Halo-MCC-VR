@@ -13506,6 +13506,8 @@ namespace
             PhysicalContactConvexShape closestWeaponShape{};
             PhysicalContactConvexShape closestTargetShape{};
             PhysicalContactTransform closestTargetTransform{};
+            PhysicalContactCompoundShape closestTargetCompound{};
+            bool closestTargetCompoundValid = false;
             uint32_t closestTargetShapeSource = 0;
             uint32_t closestTargetTriangleCount = 0;
             int32_t closestTargetBodyIndex = -1;
@@ -13725,6 +13727,24 @@ namespace
                                     targetTriangleMesh.triangles[
                                         meshHit.targetIndex]);
                         }
+                        else if (!requiresNativeConfirmation)
+                        {
+                            // A closed weapon solid can be wholly inside a
+                            // closed target without touching either triangle
+                            // surface at this sample. Keep that overlap in the
+                            // visual blocker. Its synthetic normal is never
+                            // allowed to authorize a native impulse.
+                            authored = PhysicalContactCompoundOverlap(
+                                weaponShape, intendedWeaponTransform,
+                                targetShape, authoredTargetTransform);
+                            if (authored.hit)
+                            {
+                                authoredWeaponShape = weaponShape.children[
+                                    authored.weaponChild];
+                                authoredTargetShape = targetShape.children[
+                                    authored.targetChild];
+                            }
+                        }
                     }
                     else
                         authored = PhysicalContactSweepCompound(
@@ -13783,6 +13803,19 @@ namespace
                                         meshHit.weaponTriangle]);
                             authoredTargetShape =
                                 targetShape.children[meshHit.targetIndex];
+                        }
+                        else
+                        {
+                            authored = PhysicalContactCompoundOverlap(
+                                weaponShape, intendedWeaponTransform,
+                                targetShape, authoredTargetTransform);
+                            if (authored.hit)
+                            {
+                                authoredWeaponShape = weaponShape.children[
+                                    authored.weaponChild];
+                                authoredTargetShape = targetShape.children[
+                                    authored.targetChild];
+                            }
                         }
                     }
                     else
@@ -13844,6 +13877,9 @@ namespace
                 closestWeaponShape = authoredWeaponShape;
                 closestTargetShape = authoredTargetShape;
                 closestTargetTransform = authoredTargetTransform;
+                closestTargetCompound = targetShape;
+                closestTargetCompoundValid =
+                    PhysicalContactCompoundValid(targetShape);
                 closestTargetShapeSource = targetShapeSource;
                 closestTargetTriangleCount = targetTriangleCount;
                 closestTargetBodyIndex = targetBodyIndex;
@@ -14047,12 +14083,33 @@ namespace
                 // material point used to measure rigid weapon velocity.
                 closest.point = targetPoint;
             }
-            const PhysicalContactWallConstraint bodyConstraint =
+            PhysicalContactWallConstraint bodyConstraint =
                 PhysicalContactDynamicBodyOffset(
                     previousWeaponTransform, intendedWeaponTransform,
                     closest.fraction, closest.normal,
                     closestPenetrationMeters,
                     kHalo3ContactTriangleSurfaceRadiusMeters, worldScale);
+            if (closestTargetShapeSource != 3 &&
+                closestTargetCompoundValid)
+            {
+                const auto solidOverlap =
+                    [&](const PhysicalContactTransform& candidate) {
+                        return PhysicalContactCompoundsIntersect(
+                            weaponShape, candidate,
+                            closestTargetCompound, closestTargetTransform);
+                    };
+                const bool finalPoseOverlaps =
+                    solidOverlap(intendedWeaponTransform);
+                const PhysicalContactWallConstraint solidConstraint =
+                    PhysicalContactSolidSeparationOffset(
+                        intendedWeaponTransform, closest.normal,
+                        bodyConstraint.setbackWorldUnits,
+                        0.005f * worldScale, worldScale, solidOverlap);
+                if (solidConstraint.constrained)
+                    bodyConstraint = solidConstraint;
+                else if (finalPoseOverlaps)
+                    bodyConstraint = {};
+            }
             updateBodyConstraint(
                 bodyConstraint.constrained
                     ? PhysicalContactDynamicBodyObservation::Blocked
