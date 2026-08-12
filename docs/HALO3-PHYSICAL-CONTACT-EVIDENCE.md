@@ -2177,24 +2177,6 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
-### 2026-08-12 root-body contact rotation stabilization
-
-Candidate `b81f11d3ca6a48413b99cc2197f8c5b5b2535eb5` combined a fixed
-approved palette with 40 mm dynamic clearance, but a later impulse still swung
-the rotating target through it by 84 mm. Its preserved log is
-`out/debug-openxr/20260812-163020665Z-rotating-body-gap.log`. That behavior is
-rejected and reverted by `f56f8df`.
-
-The next candidate treats continuous root-body contact as a controlled shove.
-After exact constraint resolution it preserves the target's native linear
-velocity and native-mass response, but sets root angular velocity to zero before
-rendering. This prevents a loose weapon, crate, or vehicle corner from rotating
-through the held weapon while the two remain in contact. Separation rearms the
-ordinary native physics path. Animated multi-body targets are excluded; their
-exact limb point-impulse and native body behavior remain unchanged. The
-existing proven object velocity getter/setter is reused, and a fault fails open
-for stabilization only.
-
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

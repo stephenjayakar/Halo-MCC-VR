@@ -6867,7 +6867,6 @@ namespace
     bool g_halo3ContactPreviousTargetSurfaceValid = false;
     PhysicalContactVec3 g_halo3ContactBodyLocalWeaponAnchor{};
     int32_t g_halo3ContactBodyAnchorHandle = -1;
-    uint32_t g_halo3ContactBodyAnchorShapeSource = 0;
     bool g_halo3ContactBodyAnchorValid = false;
     PhysicalContactTransform g_halo3ContactPreviousWallTransform{};
     int32_t g_halo3ContactWallWeaponHandle = -1;
@@ -11180,7 +11179,6 @@ namespace
         g_halo3ContactPreviousTargetSurfaceValid = false;
         g_halo3ContactBodyLocalWeaponAnchor = {};
         g_halo3ContactBodyAnchorHandle = -1;
-        g_halo3ContactBodyAnchorShapeSource = 0;
         g_halo3ContactBodyAnchorValid = false;
         Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
         g_halo3ContactPreviousWallTransform = {};
@@ -14065,7 +14063,6 @@ namespace
                     g_halo3ContactBodyTargetHandle = -1;
                     g_halo3ContactBodyLastBlockedMs = 0;
                     g_halo3ContactBodyAnchorHandle = -1;
-                    g_halo3ContactBodyAnchorShapeSource = 0;
                     g_halo3ContactBodyAnchorValid = false;
                 }
                 if (uncertainHeld)
@@ -14123,32 +14120,6 @@ namespace
                         linearVelocity, angularVelocity,
                         bodyCenter, nowMs, proposalSerial);
             };
-            const auto stabilizeRootBodyRotation = [&] (
-                int32_t targetHandle, uint32_t targetShapeSource)
-            {
-                if (targetHandle == -1 || targetShapeSource == 3 ||
-                    !g_halo3ObjectGetVelocities ||
-                    !g_halo3ObjectSetVelocities)
-                    return;
-                __try
-                {
-                    float linear[3]{}, angular[3]{};
-                    g_halo3ObjectGetVelocities(
-                        targetHandle, linear, angular);
-                    if (PhysicalContactFinite(
-                            {linear[0], linear[1], linear[2]}))
-                    {
-                        const float stoppedAngular[3]{};
-                        g_halo3ObjectSetVelocities(
-                            targetHandle, linear, stoppedAngular);
-                    }
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    // Optional contact stabilization fails open. The native
-                    // impulse/melee path and VR ownership remain installed.
-                }
-            };
             if (weaponHandle != g_halo3ContactWeaponHandle)
             {
                 g_halo3ContactDebounce.Reset();
@@ -14160,7 +14131,6 @@ namespace
                 g_halo3ContactPreviousTargetSurfaceHandle = -1;
                 g_halo3ContactPreviousTargetSurfaceValid = false;
                 g_halo3ContactBodyAnchorHandle = -1;
-                g_halo3ContactBodyAnchorShapeSource = 0;
                 g_halo3ContactBodyAnchorValid = false;
                 g_halo3ContactBodySetbackMeters.store(
                     0.0f, std::memory_order_relaxed);
@@ -14690,9 +14660,6 @@ namespace
                     updateBodyConstraint(
                         PhysicalContactDynamicBodyObservation::Blocked,
                         followedOffset, constrainedBodyTargetHandle);
-                    stabilizeRootBodyRotation(
-                        constrainedBodyTargetHandle,
-                        g_halo3ContactBodyAnchorShapeSource);
                     publishBodyFollow(
                         constrainedBodyTargetHandle);
                     publishApprovedVisiblePose();
@@ -14801,9 +14768,6 @@ namespace
                                         Blocked,
                                     verifiedGuard.offset,
                                     closestVisualGuardHandle);
-                                stabilizeRootBodyRotation(
-                                    closestVisualGuardHandle,
-                                    closestVisualGuardShapeSource);
                                 publishBodyFollow(
                                     closestVisualGuardHandle);
                                 publishApprovedVisiblePose();
@@ -15135,9 +15099,6 @@ namespace
                     : constrainedBodyObservation,
                 bodyConstraint.offset,
                 bodyConstraint.constrained ? closestHandle : -1);
-            if (bodyConstraint.constrained)
-                stabilizeRootBodyRotation(
-                    closestHandle, closestTargetShapeSource);
             if (bodyConstraint.constrained && closestUsesAuthoredShape &&
                 PhysicalContactTransformFinite(closestTargetTransform))
             {
@@ -15148,8 +15109,6 @@ namespace
                     PhysicalContactInverseTransformPoint(
                         closestTargetTransform, correctedWeaponPosition);
                 g_halo3ContactBodyAnchorHandle = closestHandle;
-                g_halo3ContactBodyAnchorShapeSource =
-                    closestTargetShapeSource;
                 g_halo3ContactBodyAnchorValid = PhysicalContactFinite(
                     g_halo3ContactBodyLocalWeaponAnchor);
                 publishBodyFollow(closestHandle);
