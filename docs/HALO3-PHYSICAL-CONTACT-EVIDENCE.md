@@ -1938,6 +1938,111 @@ must use a lock-free render proposal and worker approval, while keeping all
 collision work outside the render hook. Normal SteamVR settings were restored
 with the byte-identical hash above.
 
+The next candidate implements that render-boundary ownership change. The final
+primary-weapon palette is first published as a bounded lock-free proposal. The
+camera/gameplay worker retains all tag reads, object-table access, geometry
+construction, triangle/convex collision, and native physics work. It publishes
+a full corrected 16-node-or-smaller palette only after the final pose has been
+proven clear against both the rendered triangle surface and authored solid
+children. The render hook performs only bounded atomic reads and a fixed-size
+matrix copy: while a newer proposal is unchecked or blocked, it displays the
+last fresh approval for the exact same weapon handle, render tag, and node
+count. Weapon changes, tracking loss, runtime teardown, stale timestamps, and
+identity mismatches invalidate approval rather than crossing feature state.
+Animated multi-body targets hold the preceding safe pose during overlap because
+one struck limb is insufficient proof that the whole moving body is clear.
+
+Unit coverage now rejects stale, future, wrong-tag, wrong-handle, and wrong-node
+approvals, and confirms that the bounded exact-separation search returns only a
+directly clear final pose. Release build and full `ctest` pass. Runtime replay,
+artifact identity, and headset acceptance remain pending until this paragraph
+is updated with the committed candidate and preserved log.
+
+Candidate `ca628b1e9f326d70521ca3c3630e27bf1081b865` was built and installed
+from `out/candidates/ca628b1-h3-physical-contact-20260812-050424278Z`; its DLL
+SHA-256 was `CDEFAA79F54027FAB83365A5BCD7F0AE65B5F0375AF720848C7A6B99D45A6615`.
+The strict external-visible-state Halo 3 Forge replay failed after recording
+one displayed triangle overlap and one solid overlap. Its preserved log is
+`out/debug-openxr/20260812-050516592Z-visible-weapon-gap.log`, SHA-256
+`43AC2E68179411BCE4DC3456A086E22634CF52617C9A57D62B42EDC7B35DBFD6`.
+The same report proves the new handoff was live (`approvedPalettes=42`,
+`heldPalettes=28`), but only eight held palettes carried correction. The
+remaining hole is the dynamic-body `Separated` branch: it still eased the
+offset toward zero and approved that unchecked intermediate. This behavior is
+rejected and reverted by `1e4c204` before the next candidate. Normal SteamVR
+was restored and MCC closed.
+
+The next candidate preserves the proposal/approval gate but changes exact
+dynamic-body separation to release directly to the already checked controller
+pose. `Separated` is produced only when the constrained target was removed or
+its resolved geometry was tested and found clear; `Uncertain` continues to hold
+the last exact correction. This removes every unchecked intermediate release
+pose from the approval stream.
+
+Candidate `49fac411a56a884585572cccb4a3054395da8a72` was built and installed
+from `out/candidates/49fac41-h3-physical-contact-20260812-051540012Z`; its DLL
+SHA-256 was `D3050F752B8A290129FB41F654181EC7814A51900A6E40277B1CD417B2996FF2`.
+The strict visible-state Valhalla Forge replay failed with two displayed
+triangle overlaps and two solid overlaps. Its preserved log is
+`out/debug-openxr/20260812-051604413Z-visible-weapon-gap.log`, SHA-256
+`C31E09E95A0911AB79EE2AE62FE495E1A4498A3CEA80501AFCCAB8D17B6AFE62`.
+Direct release removed the earlier smoothed-release hole, but the target itself
+moved about 10 mm during the first report. A corrected pose that is clear at
+worker time can therefore be crossed by a moving dynamic body before the
+renderer consumes it. The candidate is rejected and reverted by `cb84883`.
+Normal SteamVR was restored and MCC closed.
+
+The next candidate treats contact as a closed gate: a blocked dynamic target
+never produces a new visible approval. Rendering holds the last clear palette
+for the duration of contact. Only the complete object sweep's exact no-hit
+branch advances to a newer proposed pose. This removes dependence on a target
+remaining still between worker proof and render consumption.
+
+Candidate `2a324add3ad59938954a2ef1d062a22af05763fb` was built and
+installed from
+`out/candidates/2a324ad-h3-physical-contact-20260812-053001778Z`; its DLL
+SHA-256 was
+`92AA96ED92C646C7F01DEB12670C1DBB586B4C2B230C04E38FC87AC7725CF82F`.
+The strict external-visible-state Valhalla Forge replay failed after 410 exact
+palettes with one displayed triangle-surface overlap and zero solid overlaps.
+Its preserved log is
+`out/debug-openxr/20260812-060431892Z-visible-weapon-gap.log`, SHA-256
+`CB0EEB74CB034959AA1F0EBE649C64E568CA74A9AA5F00B3ECF1CE91E76E1A8A`.
+The gate was live (`approvedPalettes=123`, `heldPalettes=403`), but a loose
+target moved into the last clear pose after contact began. This behavior is
+rejected and reverted by `b3c47db`.
+
+Candidate `4ac1b5fba588ab42ed37b8edabc2e59c612066ba` then added clearance
+based on the target contact point's measured linear and angular velocity. It
+was built and installed from
+`out/candidates/4ac1b5f-h3-physical-contact-20260812-061812760Z`; its DLL
+SHA-256 was
+`14EE1BAD5E026328664C3F39EB65ACE8B3CA19BF96B8F3CED467762B5EAECEB2`.
+The strict replay also failed, with three triangle overlaps and two solid
+overlaps by the second report. Its preserved log is
+`out/debug-openxr/20260812-061843191Z-visible-weapon-gap.log`, SHA-256
+`ADC105784EEADAD5EBFC4D6DCA1B1A0172577D492E6059CDB844B12B5BABC2E7`.
+The target had moved only 3 mm while the solver had reached a 108 mm peak
+setback. The failure therefore occurs before a post-hit motion reserve can
+protect the displayed pose; increasing distance along a contact normal is not
+a preventive contact boundary. This behavior is rejected and reverted by
+`b637557`. Both failed runs closed MCC and restored the byte-identical normal
+SteamVR settings hash
+`F8B2C009AE05A2AC796D3458B9AA8B072A5BEA97CA8EC5A74FAA5DD585DBAB9E`.
+
+The next candidate adds a separate visual-only guard around exact authored
+triangle geometry. Physical contact, impulse timing, melee timing and the
+1.25 mm physical surface remain unchanged. The worker begins constraining and
+approving the visible palette when the complete moving weapon mesh comes within
+8 mm of a movable target, then directly proves a final pose outside that guard
+plus 4 mm clearance against both triangle surfaces and solid children. The
+render hook still performs only bounded atomic reads and a fixed matrix copy.
+During real contact, every newly published correction must pass the same guard;
+an unresolved guard holds the preceding approval. This creates the safety band
+before the first impulse or target rotation rather than trying to recover after
+penetration. The strict validator requires sustained corrected approvals and
+zero displayed overlaps.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,

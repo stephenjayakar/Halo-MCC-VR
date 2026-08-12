@@ -8910,6 +8910,26 @@ int main()
                   5, 7, 42, kRightWristSubtree, false),
             "Physical contact publishes only the active primary weapon render "
             "model, never a small attachment sharing its wrist palette");
+        Check(PhysicalContactApprovedPaletteUsable(
+                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
+                  0x12340001, 0x12340001, 5, 5, 12, 11, 1000, 1100) &&
+              !PhysicalContactApprovedPaletteUsable(
+                  kActiveWeaponRenderTag, 0x4321u,
+                  0x12340001, 0x12340001, 5, 5, 12, 11, 1000, 1100) &&
+              !PhysicalContactApprovedPaletteUsable(
+                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
+                  0x12340001, 0x56780001, 5, 5, 12, 11, 1000, 1100) &&
+              !PhysicalContactApprovedPaletteUsable(
+                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
+                  0x12340001, 0x12340001, 5, 6, 12, 11, 1000, 1100) &&
+              !PhysicalContactApprovedPaletteUsable(
+                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
+                  0x12340001, 0x12340001, 5, 5, 12, 13, 1000, 1100) &&
+              !PhysicalContactApprovedPaletteUsable(
+                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
+                  0x12340001, 0x12340001, 5, 5, 12, 11, 1000, 1101),
+            "The render gate consumes only a fresh, same-weapon, same-shape "
+            "worker approval that cannot come from a future proposal");
 
         const PhysicalContactHit translation = PhysicalContactSweepCapsule(
             {0, 0, 0}, {0.5f, 0, 0}, {2, 0, 0}, {2.5f, 0, 0},
@@ -9192,6 +9212,19 @@ int main()
                 movingTriangleMesh, triangleFrom, triangleTo,
                 targetTriangleMesh, triangleTargetTransform,
                 0.002f, 0.001f);
+        PhysicalContactTransform guardWeaponTransform{};
+        PhysicalContactTransform guardTargetTransform{};
+        guardTargetTransform.position = {0.006f, 0.0f, 0.0f};
+        const PhysicalContactTriangleMeshHit exactNearSurfaceClear =
+            PhysicalContactSweepTriangleMeshes(
+                movingTriangleMesh, guardWeaponTransform,
+                guardWeaponTransform, targetTriangleMesh,
+                guardTargetTransform, 0.002f, 0.00125f);
+        const PhysicalContactTriangleMeshHit guardedNearSurfaceHit =
+            PhysicalContactSweepTriangleMeshes(
+                movingTriangleMesh, guardWeaponTransform,
+                guardWeaponTransform, targetTriangleMesh,
+                guardTargetTransform, 0.002f, 0.008f);
 
         PhysicalContactTriangleMesh separatedSurfaceMesh{};
         separatedSurfaceMesh.triangleCount = 2;
@@ -9232,10 +9265,13 @@ int main()
               triangleMeshTunnelling.fraction > 0.40f &&
               triangleMeshTunnelling.fraction < 0.60f &&
               triangleMeshTunnelling.normalReliable &&
-              !triangleMeshGrazingMiss.hit && !exactMeshGap.hit,
+              !triangleMeshGrazingMiss.hit &&
+              !exactNearSurfaceClear.hit && guardedNearSurfaceHit.hit &&
+              !exactMeshGap.hit,
             "Triangle-accurate contact catches a fast thin-surface crossing, "
-            "preserves grazing and concave gaps, and rejects malformed fixed "
-            "mesh bounds");
+            "preserves grazing and concave gaps, admits a separate bounded "
+            "visual guard before physical contact, and rejects malformed "
+            "fixed mesh bounds");
 
         const std::array<uint8_t, 16> packedRockPlacement{
             0xA9, 0xBE, 0xA5, 0x22, 0x65, 0x35, 0x00, 0x00,
@@ -10363,6 +10399,21 @@ int main()
                 1.0f / 120.0f, 0.5f);
         PhysicalContactTransform bodyPrevious{};
         PhysicalContactTransform bodyIntended{};
+        PhysicalContactTransform verifiedIntended{};
+        const auto overlappingUntil = [](const PhysicalContactTransform& pose) {
+            return pose.position.x < 0.35f;
+        };
+        const PhysicalContactWallConstraint verifiedSeparation =
+            PhysicalContactVerifiedSeparationOffset(
+                verifiedIntended, {1.0f, 0.0f, 0.0f},
+                0.02f, 0.005f, 1.0f, overlappingUntil);
+        PhysicalContactTransform verifiedClear = verifiedIntended;
+        verifiedClear.position =
+            verifiedClear.position + verifiedSeparation.offset;
+        const PhysicalContactWallConstraint verifiedWrongDirection =
+            PhysicalContactVerifiedSeparationOffset(
+                verifiedIntended, {-1.0f, 0.0f, 0.0f},
+                0.02f, 0.005f, 0.50f, overlappingUntil);
         bodyIntended.position = {1.0f, 0.0f, 0.0f};
         const PhysicalContactWallConstraint bodyTunnel =
             PhysicalContactDynamicBodyOffset(
@@ -10422,11 +10473,14 @@ int main()
                   PhysicalContactDynamicBodyObservation::Uncertain &&
               std::fabs(bodyUncertainHeld.x + 0.20f) < 1.0e-6f &&
               std::fabs(bodyUncertainStillHeld.x + 0.20f) < 1.0e-6f &&
-              bodySeparated.x > -0.20f &&
-              bodySeparated.x < -0.18f &&
+              PhysicalContactLengthSquared(bodySeparated) < 1.0e-10f &&
               std::fabs(bodyReblocked.x + 0.35f) < 1.0e-6f &&
               PhysicalContactLengthSquared(bodyInvalidObservation) <
                   1.0e-10f &&
+              verifiedSeparation.constrained &&
+              !overlappingUntil(verifiedClear) &&
+              verifiedSeparation.setbackWorldUnits > 0.35f &&
+              !verifiedWrongDirection.constrained &&
               bodyTunnel.constrained &&
               std::fabs(bodyTunnel.offset.x + 0.51f) < 1.0e-6f &&
               std::fabs(bodyTunnel.offset.y) < 1.0e-6f &&
@@ -10458,7 +10512,9 @@ int main()
             "vertices, while larger meshes rotate an evenly spread bounded "
             "face-centre sample set; "
             "dynamic bodies reject only inward travel while preserving slides, "
-            "hold exact correction across an unresolved query gap, then release");
+            "hold exact correction across an unresolved query gap, accept only "
+            "a directly verified clear final pose, then release directly to "
+            "that checked pose");
 
         Check(PhysicalContactGameModeAllowed(1, 1, false) &&
               !PhysicalContactGameModeAllowed(1, 1, true) &&
