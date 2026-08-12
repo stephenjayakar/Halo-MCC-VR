@@ -1807,15 +1807,23 @@ validator correctly failed because it requires zero direct overlaps.
 The old depth calculation explains that result. It measured only the one held-
 weapon triangle or convex selected by the earliest exact hit. Moving that one
 piece outside the contacted target plane did not move a different, deeper part
-of the same rendered weapon outside it. The pending candidate keeps the selected
-exact support point for contact velocity and native impulse, but measures visual
-penetration from the deepest support point of the complete visible triangle
-mesh (or the complete authored compound fallback). One rigid translation then
-places the full rendered weapon on the target-facing side of that exact local
-surface. Regression coverage uses a two-part weapon where the selected triangle
-reports zero depth while the other triangle remains 0.50 m inside, and proves
-the full-shape calculation catches the missing depth. The strict corrected-
-palette replay remains the runtime gate; headset acceptance remains pending.
+weapon outside it. Candidate `a260be9c85b03ad7bdc90e22a75345e4dbf5fd03`
+tested a full-mesh support point against that one local plane. Its exact package
+was `out/candidates/a260be9-h3-physical-contact-20260812-021410036Z`, with DLL
+SHA-256 `B13B0C6DD64EA232F7D030E8208AEF737C6E3E037CC5CCF7749815C5AA0CC1DC`.
+The strict visible Valhalla Forge replay failed again. The preserved log is
+`out/debug-openxr/20260812-022244630Z-visible-weapon-gap.log` (SHA-256
+`DA7B82DE14793C28B8692998721DDF397E9D3702F7370EDC5138D4D43AE6F7CC`).
+It reached exact 36-triangle-versus-88-triangle contact, applied corrected
+palettes, and still accumulated direct overlaps; early samples already showed
+17 overlaps after 96 corrected palettes and 51 after 270. The single-plane
+full-mesh behavior is therefore rejected and reverted. A support plane can be
+conservative along one normal while still failing against a different target
+face; the next candidate must prove its final translated pose directly against
+the complete exact target geometry. SteamVR was restored to the byte-identical
+real-headset settings hash
+`F8B2C009AE05A2AC796D3458B9AA8B072A5BEA97CA8EC5A74FAA5DD585DBAB9E`.
+Headset acceptance remains pending.
 
 ## Verification boundary
 
