@@ -792,6 +792,33 @@ inline float PhysicalContactConvexBoundRadius(
     return std::sqrt(radiusSquared) + shape.radius;
 }
 
+struct PhysicalContactLocalBoundingSphere
+{
+    PhysicalContactVec3 centre{};
+    float radius = 0.0f;
+};
+
+inline bool PhysicalContactConvexLocalBoundingSphere(
+    const PhysicalContactConvexShape& shape,
+    PhysicalContactLocalBoundingSphere& sphere)
+{
+    sphere = {};
+    if (!PhysicalContactConvexValid(shape))
+        return false;
+    for (uint16_t vertex = 0; vertex < shape.vertexCount; ++vertex)
+        sphere.centre = sphere.centre + shape.vertices[vertex];
+    sphere.centre = sphere.centre *
+        (1.0f / static_cast<float>(shape.vertexCount));
+    for (uint16_t vertex = 0; vertex < shape.vertexCount; ++vertex)
+        sphere.radius = std::max(
+            sphere.radius,
+            PhysicalContactLength(
+                shape.vertices[vertex] - sphere.centre));
+    sphere.radius += shape.radius;
+    return PhysicalContactFinite(sphere.centre) &&
+        std::isfinite(sphere.radius) && sphere.radius >= 0.0f;
+}
+
 inline float PhysicalContactCompoundBoundRadius(
     const PhysicalContactCompoundShape& shape)
 {
@@ -811,6 +838,17 @@ inline float PhysicalContactTriangleMeshBoundRadius(
             radius, PhysicalContactLength(mesh.groups[group].centre) +
                         mesh.groups[group].boundRadius);
     return radius;
+}
+
+inline float PhysicalContactRotationInvariantRadius(
+    const PhysicalContactCompoundShape& shape,
+    const PhysicalContactTriangleMesh* mesh = nullptr)
+{
+    const float compoundRadius = PhysicalContactCompoundValid(shape)
+        ? PhysicalContactCompoundBoundRadius(shape) : 0.0f;
+    const float meshRadius = mesh && PhysicalContactTriangleMeshValid(*mesh)
+        ? PhysicalContactTriangleMeshBoundRadius(*mesh) : 0.0f;
+    return std::max(compoundRadius, meshRadius);
 }
 
 inline PhysicalContactVec3 PhysicalContactConvexSupport(
@@ -1913,6 +1951,68 @@ struct PhysicalContactWallConstraint
     float setbackWorldUnits = 0.0f;
     PhysicalContactVec3 offset{};
 };
+
+inline PhysicalContactWallConstraint
+PhysicalContactRotationInvariantSphereSetOffset(
+    const PhysicalContactLocalBoundingSphere* weaponSpheres,
+    size_t weaponSphereCount,
+    const PhysicalContactTransform& weaponTransform,
+    PhysicalContactVec3 targetOrigin, float targetRadiusWorldUnits,
+    float clearanceWorldUnits, float maximumOffsetWorldUnits)
+{
+    PhysicalContactWallConstraint result{};
+    if (!weaponSpheres || !weaponSphereCount || weaponSphereCount > 16 ||
+        !PhysicalContactTransformFinite(weaponTransform) ||
+        !PhysicalContactFinite(targetOrigin) ||
+        !std::isfinite(targetRadiusWorldUnits) ||
+        targetRadiusWorldUnits <= 0.0f ||
+        !std::isfinite(clearanceWorldUnits) || clearanceWorldUnits < 0.0f ||
+        !std::isfinite(maximumOffsetWorldUnits) ||
+        maximumOffsetWorldUnits <= 0.0f)
+        return result;
+    PhysicalContactVec3 weaponCentre{};
+    for (size_t i = 0; i < weaponSphereCount; ++i)
+    {
+        if (!PhysicalContactFinite(weaponSpheres[i].centre) ||
+            !std::isfinite(weaponSpheres[i].radius) ||
+            weaponSpheres[i].radius < 0.0f)
+            return result;
+        weaponCentre = weaponCentre + PhysicalContactTransformPoint(
+            weaponTransform, weaponSpheres[i].centre);
+    }
+    weaponCentre = weaponCentre *
+        (1.0f / static_cast<float>(weaponSphereCount));
+    const PhysicalContactVec3 outward = PhysicalContactNormalize(
+        weaponCentre - targetOrigin, weaponTransform.forward * -1.0f);
+    float requiredSetback = 0.0f;
+    for (size_t i = 0; i < weaponSphereCount; ++i)
+    {
+        const PhysicalContactVec3 relative = PhysicalContactTransformPoint(
+            weaponTransform, weaponSpheres[i].centre) - targetOrigin;
+        const float along = PhysicalContactDot(relative, outward);
+        const PhysicalContactVec3 perpendicular = relative - outward * along;
+        const float requiredRadius = targetRadiusWorldUnits +
+            weaponSpheres[i].radius * weaponTransform.scale +
+            clearanceWorldUnits;
+        const float perpendicularSquared =
+            PhysicalContactLengthSquared(perpendicular);
+        if (perpendicularSquared < requiredRadius * requiredRadius)
+        {
+            const float boundaryAlong = std::sqrt(std::max(
+                0.0f, requiredRadius * requiredRadius -
+                    perpendicularSquared));
+            requiredSetback = std::max(
+                requiredSetback, boundaryAlong - along);
+        }
+    }
+    if (!std::isfinite(requiredSetback) || requiredSetback <= 1.0e-5f ||
+        requiredSetback > maximumOffsetWorldUnits)
+        return result;
+    result.offset = outward * requiredSetback;
+    result.setbackWorldUnits = requiredSetback;
+    result.constrained = PhysicalContactFinite(result.offset);
+    return result;
+}
 
 struct PhysicalContactWallPlane
 {

@@ -2202,3 +2202,44 @@ the current signed SteamVR `vrclient_x64.dll` imports
 process-local `XR_RUNTIME_JSON` override proved the installed Oculus 1.201.0
 runtime initializes, but no headset was connected, so this is launch evidence
 only and not physical-contact acceptance.
+### 2026-08-12 palette-time rotation-invariant envelope
+
+- Candidate `72c2155` still failed after two confirmed overlaps in 415
+  palettes. Its exact-origin translation follow corrected only the target's
+  displacement since worker approval; it did not re-solve separation against
+  the final palette itself. Preserved log:
+  `out/debug-openxr/20260812-181224884Z-rotating-body-gap.log`, SHA-256
+  `C8F6FD9062BDF4529AD37CC45DC7C6E5A50294BA59B02E3D65514A0C9257A434`.
+- This candidate publishes at most 16 tight local weapon-piece spheres plus the
+  target's authored rotation-invariant radius. The existing final-palette hook
+  reads the verified target handle and re-solves the envelope against the exact
+  palette and current target origin immediately before submission.
+- The publication is a bounded atomic seqlock. The hot hook adds no allocation,
+  logging, file I/O, signature scan, COM call, or lock. Stale, recycled,
+  non-finite, ambiguous, or over-1 m corrections fail open for that palette.
+### 2026-08-12 palette-time envelope lifetime correction
+
+- Candidate `e013fac` recorded two confirmed overlaps after 792 palettes.
+  Preserved log `out/debug-openxr/20260812-182247529Z-rotating-body-gap.log`,
+  SHA-256
+  `711C37A6113D7729BAA39BD2116657C1FE183E36EF5C13BF2221290609E5AD99`.
+- The published spheres and target radius describe immutable geometry for the
+  current held weapon and contacted object. Requiring their worker proposal
+  serial to equal the consumed approved-palette serial rejected valid envelope
+  data whenever the worker advanced before the renderer consumed that palette.
+- The retry retains the validated target datum, held-weapon reset, 100 ms
+  freshness, finite-value, count, and one-metre correction guards, but removes
+  the racy per-proposal equality. It also braces the separation cleanup so the
+  envelope is cleared only on proven separation, not on every observation.
+### 2026-08-12 palette-time envelope range correction
+
+- Candidate `c9c036a` kept the render-time envelope active across proposal
+  changes and produced 691 consecutive separated measurements, then failed
+  when the validator selected another loose object and the required correction
+  exceeded the one-metre bound. Preserved log:
+  `out/debug-openxr/20260812-183008826Z-rotating-body-gap.log`, SHA-256
+  `87CF2DCF3B3CAFC9D5448E4768993F53B297DADFD5A2BF232CF27FD9D237AE5C`.
+- This retry changes only the conservative fast-rotating-root envelope's
+  worker and palette-time bounds from one metre to four metres. It remains
+  finite, bounded, opt-in with physical contact, and inactive for ordinary
+  exact-geometry contacts, static walls, melee, or animated bodies.
