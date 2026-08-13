@@ -10503,6 +10503,19 @@ int main()
             PhysicalContactVerifiedSeparationOffset(
                 verifiedIntended, {-1.0f, 0.0f, 0.0f},
                 0.02f, 0.005f, 0.50f, overlappingUntil);
+        const float directSphereExit = PhysicalContactSphereRayExitDistance(
+            {}, {1.0f, 0.0f, 0.0f}, {0.10f, 0.0f, 0.0f},
+            0.35f, 0.01f, 1.0f);
+        const float directSphereMiss = PhysicalContactSphereRayExitDistance(
+            {}, {1.0f, 0.0f, 0.0f}, {0.0f, 2.0f, 0.0f},
+            0.35f, 0.01f, 1.0f);
+        const float directSphereClamped =
+            PhysicalContactSphereRayExitDistance(
+                {}, {1.0f, 0.0f, 0.0f}, {0.75f, 0.0f, 0.0f},
+                0.50f, 0.01f, 1.0f);
+        const float directSphereInvalid =
+            PhysicalContactSphereRayExitDistance(
+                {}, {}, {}, 0.50f, 0.01f, 1.0f);
         bodyIntended.position = {1.0f, 0.0f, 0.0f};
         const PhysicalContactWallConstraint bodyTunnel =
             PhysicalContactDynamicBodyOffset(
@@ -10596,6 +10609,9 @@ int main()
               !overlappingUntil(verifiedClear) &&
               verifiedSeparation.setbackWorldUnits > 0.35f &&
               !verifiedWrongDirection.constrained &&
+              std::fabs(directSphereExit - 0.46f) < 1.0e-6f &&
+              directSphereMiss == 0.0f && directSphereClamped == 1.0f &&
+              directSphereInvalid == 0.0f &&
               bodyTunnel.constrained &&
               std::fabs(bodyTunnel.offset.x + 0.51f) < 1.0e-6f &&
               std::fabs(bodyTunnel.offset.y) < 1.0e-6f &&

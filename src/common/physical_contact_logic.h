@@ -2274,6 +2274,44 @@ inline PhysicalContactWallConstraint PhysicalContactDynamicBodyOffset(
     return result;
 }
 
+// Find the far edge of a conservative bounding sphere along one outward ray.
+// The caller still verifies the returned pose against its real geometry. This
+// makes the common contained-body case constant-time instead of repeatedly
+// invoking an expensive triangle predicate to search for the boundary.
+inline float PhysicalContactSphereRayExitDistance(
+    PhysicalContactVec3 origin, PhysicalContactVec3 outwardDirection,
+    PhysicalContactVec3 sphereCenter, float combinedRadiusWorldUnits,
+    float clearanceWorldUnits, float maximumOffsetWorldUnits)
+{
+    if (!PhysicalContactFinite(origin) ||
+        !PhysicalContactFinite(outwardDirection) ||
+        !PhysicalContactFinite(sphereCenter) ||
+        !std::isfinite(combinedRadiusWorldUnits) ||
+        combinedRadiusWorldUnits < 0.0f ||
+        !std::isfinite(clearanceWorldUnits) || clearanceWorldUnits < 0.0f ||
+        !std::isfinite(maximumOffsetWorldUnits) ||
+        maximumOffsetWorldUnits <= 0.0f ||
+        clearanceWorldUnits > maximumOffsetWorldUnits)
+        return 0.0f;
+
+    const PhysicalContactVec3 outward = PhysicalContactNormalize(
+        outwardDirection, {});
+    if (PhysicalContactLengthSquared(outward) <= 1.0e-12f)
+        return 0.0f;
+    const PhysicalContactVec3 relative = origin - sphereCenter;
+    const float along = PhysicalContactDot(relative, outward);
+    const float discriminant = along * along -
+        (PhysicalContactLengthSquared(relative) -
+         combinedRadiusWorldUnits * combinedRadiusWorldUnits);
+    if (!std::isfinite(discriminant) || discriminant < 0.0f)
+        return 0.0f;
+    const float farExit = -along + std::sqrt(discriminant);
+    if (!std::isfinite(farExit) || farExit < 0.0f)
+        return 0.0f;
+    return std::min(
+        maximumOffsetWorldUnits, farExit + clearanceWorldUnits);
+}
+
 // Validate a proposed visual setback against the complete caller-supplied
 // geometry predicate. This covers both a swept surface hit whose final pose is
 // outside and an end pose already contained in a closed body. The fixed search

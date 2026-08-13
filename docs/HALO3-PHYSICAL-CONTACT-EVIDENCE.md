@@ -2539,3 +2539,11 @@ Candidate `7358ca0` kept its first 846 same-frame comparisons clear, but 219 of
 2,095 render checks exceeded 0.25 ms (10.45%). The single-direction binary
 search was still too expensive when the 5 cm reserve activated. The run was
 stopped before the long threshold and the behavior is disabled.
+
+The next candidate replaces that repeated search with a direct conservative
+bounding-sphere exit calculation. The exact held-weapon triangle mesh and the
+authored target compound already have bounded root-relative radii. Solving the
+ray/sphere exit for each of the three observed target roots takes fixed scalar
+work, after which one complete triangle-versus-compound predicate must prove
+the proposed visible pose clear. Failure still leaves the correction disabled
+for that frame and increments the existing loud failure counter.
