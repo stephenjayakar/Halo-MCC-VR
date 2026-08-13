@@ -70,6 +70,11 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
     $leftLines = 0
     $visibleLines = 0
     $bindingsInstalled = $false
+    $directAimInstalled = $false
+    $directAimShotObserved = $false
+    $directAimOriginShiftMeters = $null
+    $directAimDirectionChangeDegrees = $null
+    $directAimVisibleRootGapMeters = $null
 
     foreach ($line in ($Text -split "`r?`n")) {
         if (-not $sourceCommit -and
@@ -93,6 +98,32 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
         if ($line -like '*H3 physical contact: optional native bindings installed*') {
             $bindingsInstalled = $true
         }
+        if ($line -like '*H3 direct weapon aim: installed*') {
+            $directAimInstalled = $true
+        }
+        if ($line -match
+            'H3 direct weapon aim: first local on-foot shot used fresh visible origin\+direction after native targeting.*stock origin shift=([-+0-9.eE]+)m direction change=([-+0-9.eE]+)deg visible-root gap=([-+0-9.eE]+)m') {
+            $originShift = 0.0
+            $directionChange = 0.0
+            $visibleRootGap = 0.0
+            if ([double]::TryParse(
+                    $Matches[1], [Globalization.NumberStyles]::Float,
+                    [Globalization.CultureInfo]::InvariantCulture,
+                    [ref]$originShift) -and
+                [double]::TryParse(
+                    $Matches[2], [Globalization.NumberStyles]::Float,
+                    [Globalization.CultureInfo]::InvariantCulture,
+                    [ref]$directionChange) -and
+                [double]::TryParse(
+                    $Matches[3], [Globalization.NumberStyles]::Float,
+                    [Globalization.CultureInfo]::InvariantCulture,
+                    [ref]$visibleRootGap)) {
+                $directAimShotObserved = $true
+                $directAimOriginShiftMeters = $originShift
+                $directAimDirectionChangeDegrees = $directionChange
+                $directAimVisibleRootGapMeters = $visibleRootGap
+            }
+        }
         if ($line -like '*H3 physical contact status:*') {
             ++$statusLines
             $pairs = Get-ContactPairs $line
@@ -100,12 +131,16 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
                 'sweeps', 'hits', 'impulses', 'releases', 'melees',
                 'authoredShapeHits', 'animatedBodyHits', 'unsupportedShapes',
                 'rejectNormal', 'enemySustainedMelees',
-                'enemyFallbackNormalMelees', 'rejectPose', 'rejectVelocity',
+                'enemyFallbackNormalMelees', 'enemyAssistHits',
+                'rejectPose', 'rejectVelocity',
                 'rejectMeleeSpike', 'weaponTriangles', 'targetTriangles',
                 'targetDetailed', 'targetFallback', 'nativeSamples',
                 'wallBlocks', 'bodyConstraints',
                 'bodyFallbackNormalConstraints', 'bodyGapHolds',
-                'bodyUncertainHolds', 'wallRays',
+                'bodyUncertainHolds', 'bodyRenderSeparations',
+                'bodyRenderSeparationFailures', 'bodyRenderSamples',
+                'bodyRenderOver250us', 'bodyRenderConvexFallbacks',
+                'bodyRenderExactTargets', 'bodyRenderExactClears', 'wallRays',
                 'wallMotionRays', 'wallObjectPlanes', 'wallVertices',
                 'wallPlanes', 'decoratorSolidDraws', 'decoratorInstances',
                 'decoratorPlanes', 'decoratorSelfTest', 'contactHaptic',
@@ -178,6 +213,7 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
 
     $checks = [ordered]@{
         native_bindings = $bindingsInstalled
+        visible_weapon_fire = $directAimInstalled -and $directAimShotObserved
         exact_visible_weapon =
             (Test-Positive $maximum 'weaponTriangles') -and
             (Test-Positive $maximum 'visible_submissions')
@@ -201,7 +237,12 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
             (Test-Positive $maximum 'decoratorSelfTest') -or
             (Test-Positive $maximum 'decoratorPlanes')
         animated_body = Test-Positive $maximum 'animatedBodyHits'
+        enemy_contact_catch = Test-Positive $maximum 'enemyAssistHits'
         native_melee = Test-Positive $maximum 'melees'
+        render_collision_guard = Test-Positive $maximum 'bodyRenderSamples'
+        render_guard_no_recorded_failure =
+            (Test-Positive $maximum 'bodyRenderSamples') -and
+            (-not (Test-Positive $maximum 'bodyRenderSeparationFailures'))
         left_hand_pickup =
             (Test-Positive $maximum 'left_acquisitions') -and
             (Test-Positive $maximum 'left_applied') -and
@@ -214,7 +255,7 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
     }
 
     return [pscustomobject]@{
-        schema_version = 1
+        schema_version = 2
         log_path = $SourcePath
         source_commit = $sourceCommit
         mcc_edition = $edition
@@ -226,6 +267,13 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
         status_samples = $statusLines
         left_grab_samples = $leftLines
         visible_palette_samples = $visibleLines
+        direct_weapon_aim = [pscustomobject]@{
+            installed = $directAimInstalled
+            final_shot_observed = $directAimShotObserved
+            stock_origin_shift_m = $directAimOriginShiftMeters
+            stock_direction_change_deg = $directAimDirectionChangeDegrees
+            visible_root_gap_m = $directAimVisibleRootGapMeters
+        }
         observed = [pscustomobject]$checks
         object_kinds = $kindObjects
         maxima = [pscustomobject]$counterObject
@@ -273,21 +321,31 @@ if ($SelfTest) {
 [10:00:00.003] headset: 'SteamVR/OpenXR : oculus' (vendor 0x28DE) on runtime sample
 [10:00:00.004] headset: panel is running at 90.0Hz
 [10:00:00.005] H3 physical contact: optional native bindings installed
-[10:00:01.000] H3 physical contact status: sweeps=2 hits=1 impulses=1 releases=0 melees=0 commandStatus=2 meleeStatus=0 target=0x12340001 candidate=0x12340001 kind=3 weaponMass=2.764 targetMass=0.382 contactHaptic=0.250 authoredShapeHits=1 animatedBodyHits=0 weaponTriangles=36 targetShapeSource=1 targetTriangles=8 targetDetailed=1 targetFallback=0 wallBlocks=1 bodyConstraints=1 bodyFallbackNormalConstraints=1 bodyUncertainHolds=1 wallRays=4 wallObjectPlanes=2 wallPlanes=3 decoratorPlanes=5 decoratorSelfTest=0
+[10:00:00.006] H3 direct weapon aim: installed ray=+0x3524B0 targeting=+0x13BAD0/+0x5B15A4 [unique]
+[10:00:00.007] H3 direct weapon aim: first local on-foot shot used fresh visible origin+direction after native targeting, before authored spread (stock origin shift=0.423m direction change=37.5deg visible-root gap=0.233m telemetry=1)
+[10:00:01.000] H3 physical contact status: sweeps=2 hits=1 impulses=1 releases=0 melees=1 commandStatus=2 meleeStatus=2 target=0x12340001 candidate=0x12340001 kind=0 weaponMass=2.764 targetMass=0.382 contactHaptic=0.250 authoredShapeHits=1 animatedBodyHits=1 enemyAssistHits=1 weaponTriangles=36 targetShapeSource=3 targetTriangles=8 targetDetailed=1 targetFallback=0 wallBlocks=1 bodyConstraints=1 bodyFallbackNormalConstraints=1 bodyUncertainHolds=1 bodyRenderSeparations=1 bodyRenderSeparationFailures=0 bodyRenderSamples=12 bodyRenderOver250us=0 bodyRenderConvexFallbacks=0 bodyRenderExactTargets=12 bodyRenderExactClears=12 wallRays=4 wallObjectPlanes=2 wallPlanes=3 decoratorPlanes=5 decoratorSelfTest=0
 [10:00:01.001] H3 left grab status: bindings=1 acquisitions=1 commands=2 applied=2 releases=1 mass=0.382
 [10:00:01.002] H3 physical contact visible IDs: slotMatches=3 slotMisses=0 submissions=3
 '@
     $report = Analyze-Halo3ContactText $sample '<self-test>'
     if (-not $report.real_headset_session -or
+        -not $report.observed.visible_weapon_fire -or
         -not $report.observed.exact_visible_weapon -or
         -not $report.observed.authored_target_contact -or
         -not $report.observed.gradual_rigid_body_response -or
         -not $report.observed.structure_wall -or
         -not $report.observed.placed_object_wall -or
         -not $report.observed.decorator_wall -or
+        -not $report.observed.enemy_contact_catch -or
+        -not $report.observed.native_melee -or
+        -not $report.observed.render_collision_guard -or
+        -not $report.observed.render_guard_no_recorded_failure -or
         -not $report.observed.left_hand_pickup -or
+        $report.direct_weapon_aim.stock_origin_shift_m -ne 0.423 -or
+        $report.direct_weapon_aim.stock_direction_change_deg -ne 37.5 -or
+        $report.direct_weapon_aim.visible_root_gap_m -ne 0.233 -or
         $report.object_kinds.Count -ne 1 -or
-        $report.object_kinds[0].name -ne 'equipment/grenade') {
+        $report.object_kinds[0].name -ne 'biped') {
         throw 'Halo 3 contact-session analyzer self-test failed.'
     }
     Write-Output 'Halo 3 contact-session analyzer self-test passed.'
