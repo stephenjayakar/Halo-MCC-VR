@@ -2520,3 +2520,12 @@ bounded motion reserve to 5 cm. This intentionally prefers a small visible gap
 over any weapon penetration when Halo changes target interpolation banks after
 an impulse. The final headset test must judge whether this safety distance is
 acceptable for precise interaction.
+
+Candidate `6c43d6b` had zero same-frame penetrations in its first 827 exact
+comparisons, but 212 of 1,933 render checks exceeded 0.25 ms (10.97%). Every
+overlap ran the multi-direction search, so the candidate was stopped and
+rejected on cost before the long threshold. The preserved partial log is
+`out/debug-openxr/20260813-014011409Z-rotating-body-gap-aborted-performance.log`,
+SHA-256
+`76AF78A16FF6A4EDE79E0BC98C06D45D058B36C60445D70D3A220BDF4F2921C4`.
+The expensive 5 cm search is disabled and remains dormant.

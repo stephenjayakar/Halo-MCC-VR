@@ -7048,10 +7048,9 @@ namespace
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactFinalRenderReserveMeters = 0.050f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Target interpolation banks can jump after a collision impulse. Keep the
-    // held weapon's exact triangles outside the authored convex target plus a
-    // bounded 5 cm motion reserve.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    // The 5 cm reserve avoided overlap but the multi-direction correction
+    // exceeded the render budget. Keep this implementation dormant.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
