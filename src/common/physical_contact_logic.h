@@ -2916,6 +2916,18 @@ inline bool PhysicalContactEnemyMeleeKind(uint8_t kind)
     return kind == 0 || kind == 12 || kind == 13;
 }
 
+inline bool PhysicalContactNativeEnemyMeleeFallbackEligible(
+    bool nativeHit, int32_t nativeType, int32_t targetHandle,
+    bool validRootObject, bool excludedObject, uint8_t targetKind)
+{
+    // This is a damage-admission fallback only. Halo's native vector query
+    // must have named one valid enemy root object. Static surfaces, vehicles,
+    // props, attachments, the player, and the held weapon can never enter it.
+    return nativeHit && nativeType == 4 && targetHandle != -1 &&
+        validRootObject && !excludedObject &&
+        PhysicalContactEnemyMeleeKind(targetKind);
+}
+
 inline float PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
     float exactSurfaceRadiusMeters, uint8_t targetKind)
 {

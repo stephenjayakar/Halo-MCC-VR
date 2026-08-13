@@ -7146,6 +7146,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactEnemyCandidates{0};
     std::atomic<uint64_t> g_halo3ContactEnemyGeometryResolved{0};
     std::atomic<uint64_t> g_halo3ContactEnemyExactHits{0};
+    std::atomic<uint64_t> g_halo3ContactEnemyNativeFallbackHits{0};
     std::atomic<uint64_t> g_halo3ContactEnemyMeleeRequests{0};
     std::atomic<uint64_t> g_halo3ContactEnemyMeleeApplied{0};
     std::atomic<uint64_t> g_halo3ContactEnemyMeleeRejected{0};
@@ -15984,21 +15985,26 @@ namespace
                 static_cast<uint32_t>(nativeLocalSampleCount),
                 std::memory_order_relaxed);
             PhysicalContactHit closest{};
+            PhysicalContactHit nativeEnemyMeleeFallback{};
             PhysicalContactConvexHit closestVisualGuard{};
             int32_t closestType = -1;
             int32_t closestHandle = -1;
+            int32_t nativeEnemyMeleeFallbackHandle = -1;
             int32_t closestVisualGuardHandle = -1;
             uint32_t closestVisualGuardShapeSource = 0;
             uint16_t closestMaterial = 0;
+            uint16_t nativeEnemyMeleeFallbackMaterial = 0;
             int32_t nativeMaterialHandle = -1;
             uint16_t nativeMaterial = 0;
             float nativeMaterialFraction = 1.0f;
             PhysicalContactVec3 closestWeaponPoint{};
+            PhysicalContactVec3 nativeEnemyMeleeFallbackWeaponPoint{};
             float closestPenetrationMeters = 0.0f;
             bool closestUsesAuthoredShape = false;
             bool closestUsesRigidWeaponPoint = false;
             bool closestNormalReliable = false;
             bool closestEnemyMeleeAssist = false;
+            bool closestEnemyNativeMeleeFallback = false;
             PhysicalContactConvexShape closestWeaponShape{};
             PhysicalContactConvexShape closestTargetShape{};
             PhysicalContactTransform closestTargetTransform{};
@@ -16077,6 +16083,50 @@ namespace
                         nativeMaterialFraction = native.fraction;
                         nativeMaterialHandle = native.objectHandle;
                         nativeMaterial = native.materialIndex;
+                    }
+                    const uint32_t nativeIndex =
+                        static_cast<uint32_t>(native.objectHandle) & 0xFFFFu;
+                    const uint32_t nativeLimit = std::min(
+                        header.firstUnallocated, header.maximumCount);
+                    unsigned char* nativeEntry = nativeIndex < nativeLimit
+                        ? entries + static_cast<size_t>(nativeIndex) *
+                            kHalo3ObjectEntryStride
+                        : nullptr;
+                    const bool nativeIdentityMatches = nativeEntry &&
+                        *reinterpret_cast<const uint16_t*>(nativeEntry) ==
+                            static_cast<uint16_t>(
+                                static_cast<uint32_t>(native.objectHandle) >>
+                                16);
+                    unsigned char* nativeData = nativeIdentityMatches
+                        ? *reinterpret_cast<unsigned char**>(
+                              nativeEntry + kHalo3ObjectEntryDataOffset)
+                        : nullptr;
+                    const bool nativeValidRoot = nativeData &&
+                        *reinterpret_cast<const int32_t*>(
+                            nativeData + kHalo3ObjectParentOffset) == -1;
+                    const bool nativeExcluded =
+                        native.objectHandle == unitHandle ||
+                        native.objectHandle == weaponHandle;
+                    const uint8_t nativeKind = nativeEntry
+                        ? *(nativeEntry + kHalo3ObjectEntryKindOffset)
+                        : 0xFFu;
+                    if (PhysicalContactNativeEnemyMeleeFallbackEligible(
+                            true, native.type, native.objectHandle,
+                            nativeValidRoot, nativeExcluded, nativeKind) &&
+                        (!nativeEnemyMeleeFallback.hit ||
+                         native.fraction <
+                             nativeEnemyMeleeFallback.fraction))
+                    {
+                        nativeEnemyMeleeFallback.hit = true;
+                        nativeEnemyMeleeFallback.fraction = native.fraction;
+                        nativeEnemyMeleeFallback.point = hitPoint;
+                        nativeEnemyMeleeFallback.normal =
+                            PhysicalContactNormalize(
+                                hitNormal, movementDirection * -1.0f);
+                        nativeEnemyMeleeFallbackHandle = native.objectHandle;
+                        nativeEnemyMeleeFallbackMaterial =
+                            native.materialIndex;
+                        nativeEnemyMeleeFallbackWeaponPoint = currentPoint;
                     }
                     continue;
                 }
@@ -16454,6 +16504,28 @@ namespace
                 // not per face. Zero selects the authored default material.
                 closestMaterial = authoredMaterial;
             }
+            // The official native query can prove an unobstructed moving
+            // weapon hit against an enemy even when the optional animated
+            // Havok decoder cannot resolve that target. Admit that exact
+            // target for native melee only. Any authored object or static
+            // surface already found wins, so this cannot strike through it.
+            if (!closest.hit && nativeEnemyMeleeFallback.hit &&
+                nativeEnemyMeleeFallbackHandle != -1)
+            {
+                closest = nativeEnemyMeleeFallback;
+                closestType = 4;
+                closestHandle = nativeEnemyMeleeFallbackHandle;
+                closestMaterial = nativeEnemyMeleeFallbackMaterial;
+                closestWeaponPoint =
+                    nativeEnemyMeleeFallbackWeaponPoint;
+                closestUsesAuthoredShape = false;
+                closestUsesRigidWeaponPoint = true;
+                closestNormalReliable = true;
+                closestEnemyMeleeAssist = true;
+                closestEnemyNativeMeleeFallback = true;
+                g_halo3ContactEnemyNativeFallbackHits.fetch_add(
+                    1, std::memory_order_relaxed);
+            }
             const PhysicalContactDynamicBodyObservation
                 constrainedBodyObservation =
                     PhysicalContactDynamicBodyObservationForTarget(
@@ -16757,7 +16829,8 @@ namespace
             // authored hit are proven. Velocity, mass, impulse, or melee may
             // fail later without leaving the guard on a preceding object.
             g_halo3ContactTargetHandle.store(
-                closestHandle, std::memory_order_relaxed);
+                closestEnemyNativeMeleeFallback ? -1 : closestHandle,
+                std::memory_order_relaxed);
             g_halo3ContactTargetKind.store(
                 targetKind, std::memory_order_relaxed);
             g_halo3ContactTargetBodyIndex.store(
@@ -17959,6 +18032,7 @@ namespace
             "enemySustainedMelees=%llu enemyFallbackNormalMelees=%llu "
             "enemyAssistHits=%llu enemyCandidates=%llu "
             "enemyGeometry=%llu enemyExactHits=%llu "
+            "enemyNativeFallbackHits=%llu "
             "enemyMeleeRequests=%llu enemyMeleeApplied=%llu "
             "enemyMeleeRejected=%llu enemyMeleeFaulted=%llu "
             "enemyMeleeNoDamage=%llu "
@@ -18063,6 +18137,8 @@ namespace
             (unsigned long long)g_halo3ContactEnemyGeometryResolved.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactEnemyExactHits.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactEnemyNativeFallbackHits.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactEnemyMeleeRequests.load(
                 std::memory_order_relaxed),
@@ -23385,6 +23461,8 @@ namespace
         g_halo3ContactEnemyGeometryResolved.store(
             0, std::memory_order_relaxed);
         g_halo3ContactEnemyExactHits.store(0, std::memory_order_relaxed);
+        g_halo3ContactEnemyNativeFallbackHits.store(
+            0, std::memory_order_relaxed);
         g_halo3ContactEnemyMeleeRequests.store(
             0, std::memory_order_relaxed);
         g_halo3ContactEnemyMeleeApplied.store(

@@ -148,6 +148,7 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
                 'rejectNormal', 'enemySustainedMelees',
                 'enemyFallbackNormalMelees', 'enemyAssistHits',
                 'enemyCandidates', 'enemyGeometry', 'enemyExactHits',
+                'enemyNativeFallbackHits',
                 'enemyMeleeRequests', 'enemyMeleeApplied',
                 'enemyMeleeRejected', 'enemyMeleeFaulted',
                 'enemyMeleeNoDamage',
@@ -261,7 +262,8 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
         enemy_geometry = Test-Positive $maximum 'enemyGeometry'
         enemy_exact_or_assist_contact =
             (Test-Positive $maximum 'enemyExactHits') -or
-            (Test-Positive $maximum 'enemyAssistHits')
+            (Test-Positive $maximum 'enemyAssistHits') -or
+            (Test-Positive $maximum 'enemyNativeFallbackHits')
         enemy_melee_requested =
             Test-Positive $maximum 'enemyMeleeRequests'
         enemy_melee_applied = Test-Positive $maximum 'enemyMeleeApplied'

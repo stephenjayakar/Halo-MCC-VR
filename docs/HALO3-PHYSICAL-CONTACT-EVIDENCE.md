@@ -3086,3 +3086,23 @@ These counters do not change collision, target selection, speed admission,
 damage, effects, or cooldowns. The session analyzer reports each stage
 separately, so the next headset Campaign run can distinguish a geometry miss
 from a command or native-damage failure. Headset acceptance remains pending.
+
+### 2026-08-13 native enemy-contact melee fallback
+
+Inspection after the Campaign report found a second exact target source that
+the contact worker discarded. The already verified Halo 3 vector collision
+query can return a type-4 object hit with the enemy's exact live handle,
+surface point, normal, and material. Production retained that result only as
+material evidence and required the separate animated-Havok decoder to resolve
+before melee could proceed. A valid native enemy hit could therefore vanish
+when the optional decoder rejected one body layout.
+
+The isolated fallback admits that native result only when the moving weapon's
+query names a live root biped, creature, or giant and no authored object or
+static surface won the sweep. The result may request the existing native melee
+transaction against that exact handle. It cannot create a visual constraint,
+move a rigid body, affect vehicles or props, accept an attachment, or pass a
+wall that the same sweep already found. `enemyNativeFallbackHits` records the
+path separately from authored animated-body contact. Pure tests cover valid
+enemy kinds and reject structure, vehicles, invalid roots, and excluded
+objects. Headset Campaign acceptance remains pending.
