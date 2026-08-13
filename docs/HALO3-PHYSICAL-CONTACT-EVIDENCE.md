@@ -2470,3 +2470,14 @@ The same exact code candidate also passed these visible Forge regressions:
 These null-driver results are automated evidence, not headset acceptance. The
 accepted-build pointer remains unchanged until the user verifies this behavior
 in a real headset.
+
+The exact packaged identity `b15c7da` exposed an 88-triangle loose weapon that
+the earlier 12-triangle rotating target did not cover. It failed after 823
+same-frame comparisons with one confirmed penetration. It also exceeded 0.25
+ms on 791 of 1,904 final checks (41.5%), with a 37.15 ms peak. The preserved
+failure log is `out/debug-openxr/20260813-011503090Z-rotating-body-gap.log`,
+SHA-256
+`FBD00808A6813BD1310840A6932C956CA789E76BAA5BE26EF229CAB04307246A`.
+The root-only exact-target solver is disabled. This meets the plan's explicit
+condition for using the authored convex fallback on complex target geometry;
+the held weapon remains triangle-accurate.

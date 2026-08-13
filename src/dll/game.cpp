@@ -7046,9 +7046,9 @@ namespace
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Decode one authored mesh, sample the changing rigid root three times,
-    // and use several verified directions only when an overlap exists.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    // The root-only multi-direction solver failed on an 88-triangle loose
+    // weapon and exceeded the render budget. Keep this behavior dormant.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
