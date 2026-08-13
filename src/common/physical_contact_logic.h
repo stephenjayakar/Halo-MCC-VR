@@ -2977,6 +2977,19 @@ inline float PhysicalContactTargetMeleeImpactSpeed(
         ? std::max(normalImpact, weaponSpeed) : normalImpact;
 }
 
+inline float PhysicalContactTargetActionSpeed(
+    float relativeSpeedMetersPerSecond, float weaponSpeedMetersPerSecond,
+    uint8_t targetKind)
+{
+    // A living animated body can move in the same direction as the tracked
+    // weapon between simulation samples. Relative speed is still the right
+    // input for rigid-body impulses, but it must not cancel a real hand swing
+    // before the enemy-only melee decision is reached. Props and vehicles
+    // retain their exact relative-speed behavior.
+    return PhysicalContactEnemyMeleeKind(targetKind)
+        ? weaponSpeedMetersPerSecond : relativeSpeedMetersPerSecond;
+}
+
 inline PhysicalContactAction PhysicalContactClassify(
     float relativeSpeedMetersPerSecond, float meleeImpactSpeedMetersPerSecond,
     float meleeThresholdMetersPerSecond)

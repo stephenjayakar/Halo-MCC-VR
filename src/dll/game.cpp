@@ -17035,10 +17035,12 @@ namespace
             const float meleeThreshold =
                 PhysicalContactTargetMeleeThreshold(
                     g_config.physical_weapon_melee_speed, targetKind);
+            const float actionSpeed = PhysicalContactTargetActionSpeed(
+                relativeSpeed, weaponSpeed, targetKind);
             const PhysicalContactVec3 contactDirection =
                 PhysicalContactNormalize(relativeVelocity, movementDirection);
             const PhysicalContactAction action = PhysicalContactClassify(
-                relativeSpeed, meleeImpactSpeed,
+                actionSpeed, meleeImpactSpeed,
                 meleeThreshold);
             if (action == PhysicalContactAction::ImpulseAndMelee)
                 g_halo3ContactReleaseLatch.Reset();

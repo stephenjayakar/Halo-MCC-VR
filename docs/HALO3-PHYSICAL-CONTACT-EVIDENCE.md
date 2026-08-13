@@ -2930,6 +2930,23 @@ latch, separation rearm, 250 ms global cooldown, and 8 m/s spike rejection are
 unchanged. Pure coverage proves all three enemy kinds at `0.05 m/s` and the
 unchanged vehicle/prop thresholds. Headset acceptance remains pending.
 
+### 2026-08-13 enemy tracked-motion noise gate
+
+The next Campaign report still described physical melee as too hard. The
+enemy-only damage speed already used tracked weapon-point motion, but the
+shared action classifier first rejected the contact when *relative* speed was
+below `0.05 m/s`. A keyframed animated body moving with the weapon could
+therefore cancel a real hand swing before the enemy melee decision ran.
+
+Living enemy kinds now use tracked weapon-point speed for that common noise
+gate. Relative speed remains unchanged for every rigid-body impulse, and props
+and vehicles retain the original relative-speed gate and configured melee
+threshold. This cannot restore Mongoose shove damage: only bipeds, creatures,
+and giants select tracked speed here. Pure coverage proves all three enemy
+kinds admit a moving hand when target-relative motion nearly cancels, while a
+vehicle keeps the low relative speed and remains below noise. Headset
+acceptance remains pending.
+
 ### 2026-08-13 fixed-object exact wall sweep
 
 The next campaign report still identified a rock that the weapon could cross.

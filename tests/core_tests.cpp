@@ -9910,6 +9910,18 @@ int main()
                   0.05f, 0.05f,
                   PhysicalContactTargetMeleeThreshold(1.50f, 0)) ==
                   PhysicalContactAction::ImpulseAndMelee &&
+              std::fabs(PhysicalContactTargetActionSpeed(
+                            0.01f, 0.40f, 0) - 0.40f) < 1.0e-6f &&
+              std::fabs(PhysicalContactTargetActionSpeed(
+                            0.01f, 0.40f, 12) - 0.40f) < 1.0e-6f &&
+              std::fabs(PhysicalContactTargetActionSpeed(
+                            0.01f, 0.40f, 13) - 0.40f) < 1.0e-6f &&
+              std::fabs(PhysicalContactTargetActionSpeed(
+                            0.01f, 0.40f, 1) - 0.01f) < 1.0e-6f &&
+              PhysicalContactClassify(
+                  PhysicalContactTargetActionSpeed(0.01f, 0.40f, 0),
+                  0.40f, 0.05f) ==
+                  PhysicalContactAction::ImpulseAndMelee &&
               PhysicalContactClassify(
                   0.50f, 0.50f,
                   PhysicalContactTargetMeleeThreshold(1.50f, 1)) ==
@@ -9944,7 +9956,8 @@ int main()
             "only first-contact tracked weapon velocity closing into a prop "
             "surface can "
             "melee, armed enemy contact accepts later deliberate tracked "
-            "weapon-point speed and a motion-facing effects normal, "
+            "weapon-point speed even when animated target motion cancels "
+            "relative speed, plus a motion-facing effects normal, "
             "target rebound and vehicle/prop tangential or sustained shoving "
             "stay physics-only, enemies begin at the tracking-noise boundary, "
             "rigid targets begin exactly at the configured threshold, and implausible "
