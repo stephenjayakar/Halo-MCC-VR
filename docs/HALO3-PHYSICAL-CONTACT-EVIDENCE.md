@@ -2500,3 +2500,10 @@ The preserved failure log is
 `out/debug-openxr/20260813-012325269Z-rotating-body-gap.log`, SHA-256
 `E8B12B3D4A27EFB159CB72115D1F848BFBF50C158350D808B9E5E6A5CFC21C31`.
 The mixed exact/convex target behavior is disabled and remains dormant.
+
+The replacement uses one consistent model for the final visual constraint:
+the held weapon's exact authored triangles against the target's conservative
+authored convex collision compound. The independent same-frame validator still
+judges both objects using exact triangles, so a pass proves that the
+conservative fallback prevented real visible penetration. The runtime no
+longer changes constraint models when the target changes complexity.
