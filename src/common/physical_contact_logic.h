@@ -2797,11 +2797,11 @@ inline float PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
         return exactSurfaceRadiusMeters;
     // A render-tracked controller and an animated limb are sampled on
     // different clocks.  The exact 1.25 mm physics surface is retained for
-    // blocking and impulse, but enemy melee gets a small catch zone so a fast
+    // blocking and impulse, but enemy melee gets an 8 cm catch zone so a fast
     // visible strike cannot pass entirely between two samples.  This is
     // deliberately enemy-only: props and vehicles keep exact contact.
     return PhysicalContactEnemyMeleeKind(targetKind)
-        ? std::max(exactSurfaceRadiusMeters, 0.030f)
+        ? std::max(exactSurfaceRadiusMeters, 0.080f)
         : exactSurfaceRadiusMeters;
 }
 

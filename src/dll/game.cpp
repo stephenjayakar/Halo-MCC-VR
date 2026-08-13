@@ -15645,7 +15645,13 @@ namespace
                 uint32_t targetTriangleCount = 0;
                 bool requiresNativeConfirmation = false;
                 bool targetGeometryResolved = false;
-                const bool hasDetailedTarget =
+                const bool enemyMeleeTarget =
+                    PhysicalContactEnemyMeleeKind(kind);
+                // Living and ragdoll enemies must use the official animated
+                // multi-body collision bank. Their object-level collision
+                // model is a root-space proxy and can exist even while the
+                // visible head, torso, and limbs are elsewhere.
+                const bool hasDetailedTarget = !enemyMeleeTarget &&
                     Halo3ContactDetailedTargetShape(
                         handle, data, targetShape,
                         authoredTargetTransform,
@@ -15739,7 +15745,8 @@ namespace
                             targetShape.children[authored.targetChild];
                     }
                 }
-                else if (Halo3ContactShapeForObject(data, targetShape))
+                else if (!enemyMeleeTarget &&
+                         Halo3ContactShapeForObject(data, targetShape))
                 {
                     targetGeometryResolved = true;
                     ++fallbackTargetCandidates;
@@ -16382,7 +16389,7 @@ namespace
                 else
                     bodyConstraint = {};
             }
-            // The 3 cm animated-limb catch zone exists only to prevent a
+            // The 8 cm animated-limb catch zone exists only to prevent a
             // sampled fast swing from missing native melee. It must never
             // create an invisible visual wall or a pre-contact physics shove.
             if (closestEnemyMeleeAssist)

@@ -2831,3 +2831,20 @@ foliage cannot become a wall. Pure tests cover a 16-bit indexed solid mesh and
 out-of-range-index rejection. Existing non-indexed Valhalla capture is
 unchanged. The specific campaign rock and indexed runtime path remain pending
 headset acceptance.
+
+### 2026-08-13 enemy root-proxy bypass
+
+The next campaign headset result reported no physical melee. Inspection found
+that enemy objects could resolve an object-level collision model before the
+animated-body path ran. That root-space proxy is not the visible animated head,
+torso, or limb bank already proven from official H3EK, so its presence could
+prevent exact animated-body contact from being considered at all.
+
+Bipeds, creatures, and giants now always use the official animated multi-body
+collision bank. Props and vehicles keep their existing authored object-level
+triangle/convex path. The exact 1.25 mm surface remains the only source of
+visual blocking and physics impulse. Enemy melee alone receives an 8 cm sampled
+catch zone to cover the render/physics clock split; it cannot constrain the
+weapon or create a vehicle/prop melee. The existing armed latch, 250 ms global
+cooldown, tracked-weapon speed, and native exact-target melee call remain.
+Headset acceptance is pending.
