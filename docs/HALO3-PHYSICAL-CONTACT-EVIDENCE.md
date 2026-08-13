@@ -2691,3 +2691,12 @@ had 66 unresolved separations and one confirmed same-frame penetration, while
 `out/debug-openxr/20260813-032325066Z-rotating-body-gap.log`, SHA-256
 `53127F4B9A2CCABD92D321F984AA940D1D6B2F2B555423DB817909B92F9880FF`.
 The always-exact behavior is rejected and disabled.
+
+Candidate `56785cb` eliminated all solver refusals and kept callback cost low,
+but one exact same-frame penetration still appeared after 9,839 render checks.
+The rare escape itself worked (744 exact clears); the remaining hole was a
+conservative correction that reported clear without a final authored-mesh
+proof. Preserved log:
+`out/debug-openxr/20260813-032957152Z-rotating-body-gap.log`, SHA-256
+`ECD145FB50F42AF27F22A2E83E42DB7CD96C0E4A253F131D17BDC35E9E0EFD1A`.
+The unverified-correction behavior is rejected and disabled.
