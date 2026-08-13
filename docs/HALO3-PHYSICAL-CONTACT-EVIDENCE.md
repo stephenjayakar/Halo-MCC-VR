@@ -2376,3 +2376,11 @@ exceeded 0.25 ms (1.13%), with a 782.7 microsecond peak. The preserved failure
 log is `out/debug-openxr/20260813-002019939Z-rotating-body-gap.log`, SHA-256
 `F841BA5EF9301CA974E32873766700DBDB06E6B0663CEFA6B3BD3E2D36BE95FC`.
 The failed 8 mm guard is disabled; its implementation remains dormant.
+
+The next candidate keeps the same exact authored-triangle correction but reads
+the target's bounded visible geometry three times in the final weapon-palette
+callback. Each pass validates the palette produced by the prior pass and can
+move it to the smallest directly verified clear position. This targets the
+observed target-bank transition without hardcoding a shape or wall and without
+adding allocation, logging, locks, file I/O, or scanning to the hook. Runtime
+cost and the 8,000-sample same-frame replay remain pending.

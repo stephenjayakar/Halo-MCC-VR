@@ -7015,10 +7015,12 @@ namespace
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Both the zero-margin and 8 mm render-callback guards failed the exact
-    // same-frame runtime validator. Keep the code dormant while the target
-    // geometry transaction is repaired in a separate candidate.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    // A loose target can publish a different interpolated node bank while the
+    // weapon palette is being prepared. Re-read it three bounded times in the
+    // final callback; every pass uses exact authored triangles and repairs the
+    // candidate palette before submission.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<uint32_t> g_halo3ContactTargetMotionType{0};
@@ -8683,34 +8685,45 @@ namespace
         static thread_local PhysicalContactTriangleMesh targetMesh{};
         __try
         {
-            unsigned char* weaponData = nullptr;
-            uint8_t weaponKind = 0xFF;
-            unsigned char* targetData = nullptr;
             const float worldScale =
                 g_worldScale.load(std::memory_order_relaxed);
-            PhysicalContactTransform weaponTransform =
-                Halo3ContactTransformFromBone(moved[0]);
-            PhysicalContactTransform targetTransform{};
-            bool requiresNativeConfirmation = false;
-            const bool exactGeometry =
-                std::isfinite(worldScale) && worldScale >= 0.05f &&
-                worldScale <= 2.0f &&
-                PhysicalContactTransformFinite(weaponTransform) &&
-                Halo3ContactObjectDataForHandle(
-                    weaponHandle, weaponData, &weaponKind) &&
-                weaponKind == 2 &&
-                Halo3ContactObjectDataForHandle(targetHandle, targetData) &&
-                Halo3ContactVisibleCollisionShape(
-                    weaponData, moved.data(), weaponNodeCount,
-                    weaponTransform, weaponShape, false, nullptr,
-                    &weaponMesh) &&
-                Halo3ContactDetailedTargetShape(
-                    targetHandle, targetData, targetShape, targetTransform,
-                    requiresNativeConfirmation, &targetMesh) &&
-                PhysicalContactTriangleMeshValid(weaponMesh) &&
-                PhysicalContactTriangleMeshValid(targetMesh);
-            if (exactGeometry && kEnableHalo3ExactRenderSeparationGuard)
+            for (int pass = 0;
+                 pass < (kEnableHalo3ExactRenderSeparationGuard
+                     ? kHalo3ExactRenderSeparationPasses : 0);
+                 ++pass)
             {
+                unsigned char* weaponData = nullptr;
+                uint8_t weaponKind = 0xFF;
+                unsigned char* targetData = nullptr;
+                PhysicalContactTransform weaponTransform =
+                    Halo3ContactTransformFromBone(moved[0]);
+                PhysicalContactTransform targetTransform{};
+                bool requiresNativeConfirmation = false;
+                weaponShape = {};
+                weaponMesh = {};
+                targetShape = {};
+                targetMesh = {};
+                const bool exactGeometry =
+                    std::isfinite(worldScale) && worldScale >= 0.05f &&
+                    worldScale <= 2.0f &&
+                    PhysicalContactTransformFinite(weaponTransform) &&
+                    Halo3ContactObjectDataForHandle(
+                        weaponHandle, weaponData, &weaponKind) &&
+                    weaponKind == 2 &&
+                    Halo3ContactObjectDataForHandle(
+                        targetHandle, targetData) &&
+                    Halo3ContactVisibleCollisionShape(
+                        weaponData, moved.data(), weaponNodeCount,
+                        weaponTransform, weaponShape, false, nullptr,
+                        &weaponMesh) &&
+                    Halo3ContactDetailedTargetShape(
+                        targetHandle, targetData, targetShape,
+                        targetTransform, requiresNativeConfirmation,
+                        &targetMesh) &&
+                    PhysicalContactTriangleMeshValid(weaponMesh) &&
+                    PhysicalContactTriangleMeshValid(targetMesh);
+                if (!exactGeometry)
+                    continue;
                 const float renderGuardRadius =
                     kHalo3ContactVisualGuardRadiusMeters * worldScale;
                 const PhysicalContactTrianglePair overlap =
