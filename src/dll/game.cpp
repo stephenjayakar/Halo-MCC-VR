@@ -7053,7 +7053,7 @@ namespace
     // The target shape has at most 16 children and the render guard retains at
     // most three target poses. Forward-only clearing therefore needs no more
     // than 48 distinct child/pose steps.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     constexpr int kHalo3ExactRenderChildSeparationSteps =
         static_cast<int>(PhysicalContactCompoundShape::kMaximumChildren) *
@@ -8937,12 +8937,12 @@ namespace
                         directDistance += stepDistance;
                     }
                     // The per-child convexes deliberately enclose the authored
-                    // triangles. If their fast one-axis solver cannot clear,
-                    // rebuild the authored target mesh only for this rare
-                    // frame. First reject hull-only overlap. For a real surface
-                    // overlap, search a fixed set of local escape directions
-                    // and choose the first (therefore shortest) clear shell.
-                    if (!clear && !exactTargetGeometry)
+                    // triangles. Prove every conservative correction against
+                    // the authored surfaces. If that proof fails (or the fast
+                    // solver cannot clear), search a fixed set of local escape
+                    // directions and choose the first, shortest clear shell.
+                    if ((!clear || directDistance > 1.0e-5f) &&
+                        !exactTargetGeometry)
                     {
                         PhysicalContactTransform exactTargetTransform{};
                         bool exactRequiresNativeConfirmation = false;
@@ -8966,8 +8966,7 @@ namespace
                             for (int observation = 0;
                                  observation < observationCount; ++observation)
                             {
-                                exactPair = exactHit(
-                                    weaponTransform, observation);
+                                exactPair = exactHit(candidate, observation);
                                 if (exactPair.hit)
                                 {
                                     exactObservation = observation;
@@ -8976,13 +8975,38 @@ namespace
                             }
                             if (exactObservation < 0)
                             {
-                                clear = true;
-                                candidate = weaponTransform;
-                                directDistance = 0.0f;
                                 g_halo3ContactRenderExactClears.fetch_add(
                                     1, std::memory_order_relaxed);
                             }
-                            else if (exactPair.weaponTriangle <
+                            else
+                            {
+                                // A conservative move can expose another real
+                                // surface. Retry the unshifted followed pose
+                                // before invoking the broader escape search.
+                                clear = false;
+                                candidate = weaponTransform;
+                                directDistance = 0.0f;
+                                exactObservation = -1;
+                                for (int observation = 0;
+                                     observation < observationCount;
+                                     ++observation)
+                                {
+                                    exactPair = exactHit(
+                                        weaponTransform, observation);
+                                    if (exactPair.hit)
+                                    {
+                                        exactObservation = observation;
+                                        break;
+                                    }
+                                }
+                                if (exactObservation < 0)
+                                {
+                                    clear = true;
+                                    g_halo3ContactRenderExactClears.fetch_add(
+                                        1, std::memory_order_relaxed);
+                                }
+                            }
+                            if (!clear && exactPair.weaponTriangle <
                                          weaponMesh.triangleCount &&
                                      exactPair.targetIndex <
                                          targetMesh.triangleCount)
@@ -9128,6 +9152,13 @@ namespace
                                     shellDistance *= 2.0f;
                                 }
                             }
+                        }
+                        else
+                        {
+                            // A correction without an authored proof is not
+                            // safe to publish. Keep the existing palette and
+                            // report the refusal loudly.
+                            clear = false;
                         }
                     }
                     PhysicalContactWallConstraint correction{};
