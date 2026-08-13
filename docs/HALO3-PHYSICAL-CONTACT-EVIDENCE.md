@@ -2415,3 +2415,11 @@ clearing only the latest bank can re-enter an earlier bank. The preserved log
 is `out/debug-openxr/20260813-003607504Z-rotating-body-gap.log`, SHA-256
 `04201CEADC324B93D85563529DC42F72A6804B230E99476AE4F7FE556A3981A1`.
 The failed single-bank final guard is disabled; its code remains dormant.
+
+The next candidate captures up to three bounded authored target meshes and
+transforms during the final callback, then finds one weapon position that is
+verified clear of every captured bank at once. Unlike repeated corrections,
+the final search predicate cannot move the weapon out of one bank and back into
+another. The existing 8 mm reserve remains part of every exact triangle test.
+Packaging, render-budget measurement, and the 8,000-sample replay remain
+pending.

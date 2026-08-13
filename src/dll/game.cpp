@@ -7046,11 +7046,10 @@ namespace
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // A final check against one target bank still failed when Halo alternated
-    // visible interpolation banks. Keep it dormant until the guard clears all
-    // bounded observations as one constraint.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
-    constexpr int kHalo3ExactRenderSeparationPasses = 1;
+    // Capture the bounded target banks exposed during final palette selection,
+    // then solve one position that is clear of all of them at once.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<uint32_t> g_halo3ContactTargetMotionType{0};
@@ -8715,57 +8714,80 @@ namespace
 
         static thread_local PhysicalContactCompoundShape weaponShape{};
         static thread_local PhysicalContactTriangleMesh weaponMesh{};
-        static thread_local PhysicalContactCompoundShape targetShape{};
-        static thread_local PhysicalContactTriangleMesh targetMesh{};
+        static thread_local std::array<PhysicalContactCompoundShape,
+            kHalo3ExactRenderSeparationPasses> targetShapes{};
+        static thread_local std::array<PhysicalContactTriangleMesh,
+            kHalo3ExactRenderSeparationPasses> targetMeshes{};
+        static thread_local std::array<PhysicalContactTransform,
+            kHalo3ExactRenderSeparationPasses> targetTransforms{};
         __try
         {
             const float worldScale =
                 g_worldScale.load(std::memory_order_relaxed);
+            unsigned char* weaponData = nullptr;
+            uint8_t weaponKind = 0xFF;
+            PhysicalContactTransform weaponTransform =
+                Halo3ContactTransformFromBone(moved[0]);
+            weaponShape = {};
+            weaponMesh = {};
+            const bool weaponGeometry = enforceSeparation &&
+                kEnableHalo3ExactRenderSeparationGuard &&
+                std::isfinite(worldScale) && worldScale >= 0.05f &&
+                worldScale <= 2.0f &&
+                PhysicalContactTransformFinite(weaponTransform) &&
+                Halo3ContactObjectDataForHandle(
+                    weaponHandle, weaponData, &weaponKind) &&
+                weaponKind == 2 &&
+                Halo3ContactVisibleCollisionShape(
+                    weaponData, moved.data(), weaponNodeCount,
+                    weaponTransform, weaponShape, false, nullptr,
+                    &weaponMesh) &&
+                PhysicalContactTriangleMeshValid(weaponMesh);
+            int observationCount = 0;
             for (int pass = 0;
-                 pass < (enforceSeparation &&
-                         kEnableHalo3ExactRenderSeparationGuard
-                     ? kHalo3ExactRenderSeparationPasses : 0);
+                 weaponGeometry &&
+                 pass < kHalo3ExactRenderSeparationPasses;
                  ++pass)
             {
-                unsigned char* weaponData = nullptr;
-                uint8_t weaponKind = 0xFF;
                 unsigned char* targetData = nullptr;
-                PhysicalContactTransform weaponTransform =
-                    Halo3ContactTransformFromBone(moved[0]);
-                PhysicalContactTransform targetTransform{};
                 bool requiresNativeConfirmation = false;
-                weaponShape = {};
-                weaponMesh = {};
-                targetShape = {};
-                targetMesh = {};
-                const bool exactGeometry =
-                    std::isfinite(worldScale) && worldScale >= 0.05f &&
-                    worldScale <= 2.0f &&
-                    PhysicalContactTransformFinite(weaponTransform) &&
-                    Halo3ContactObjectDataForHandle(
-                        weaponHandle, weaponData, &weaponKind) &&
-                    weaponKind == 2 &&
-                    Halo3ContactObjectDataForHandle(
+                targetShapes[observationCount] = {};
+                targetMeshes[observationCount] = {};
+                targetTransforms[observationCount] = {};
+                if (Halo3ContactObjectDataForHandle(
                         targetHandle, targetData) &&
-                    Halo3ContactVisibleCollisionShape(
-                        weaponData, moved.data(), weaponNodeCount,
-                        weaponTransform, weaponShape, false, nullptr,
-                        &weaponMesh) &&
                     Halo3ContactDetailedTargetShape(
-                        targetHandle, targetData, targetShape,
-                        targetTransform, requiresNativeConfirmation,
-                        &targetMesh) &&
-                    PhysicalContactTriangleMeshValid(weaponMesh) &&
-                    PhysicalContactTriangleMeshValid(targetMesh);
-                if (!exactGeometry)
-                    continue;
+                        targetHandle, targetData,
+                        targetShapes[observationCount],
+                        targetTransforms[observationCount],
+                        requiresNativeConfirmation,
+                        &targetMeshes[observationCount]) &&
+                    PhysicalContactTriangleMeshValid(
+                        targetMeshes[observationCount]))
+                {
+                    ++observationCount;
+                }
+            }
+            if (observationCount > 0)
+            {
                 const float renderGuardRadius =
                     kHalo3ContactVisualGuardRadiusMeters * worldScale;
-                const PhysicalContactTrianglePair overlap =
-                    PhysicalContactTriangleMeshesIntersect(
+                PhysicalContactTrianglePair overlap{};
+                int overlapObservation = -1;
+                for (int observation = 0;
+                     observation < observationCount; ++observation)
+                {
+                    overlap = PhysicalContactTriangleMeshesIntersect(
                         weaponMesh, weaponTransform,
-                        targetMesh, targetTransform, renderGuardRadius);
-                if (overlap.hit)
+                        targetMeshes[observation],
+                        targetTransforms[observation], renderGuardRadius);
+                    if (overlap.hit)
+                    {
+                        overlapObservation = observation;
+                        break;
+                    }
+                }
+                if (overlapObservation >= 0)
                 {
                     const PhysicalContactVec3 weaponCentre =
                         PhysicalContactTransformPoint(
@@ -8774,20 +8796,29 @@ namespace
                                 overlap.weaponTriangle].centre);
                     const PhysicalContactVec3 targetCentre =
                         PhysicalContactTransformPoint(
-                            targetTransform,
-                            targetMesh.triangles[
+                            targetTransforms[overlapObservation],
+                            targetMeshes[overlapObservation].triangles[
                                 overlap.targetIndex].centre);
                     const PhysicalContactVec3 outward =
                         PhysicalContactNormalize(
                             weaponCentre - targetCentre,
                             weaponTransform.position -
-                                targetTransform.position);
+                                targetTransforms[overlapObservation].position);
                     const auto overlapsAt = [&] (
                         const PhysicalContactTransform& candidate) {
-                        return PhysicalContactTriangleMeshesIntersect(
-                            weaponMesh, candidate,
-                            targetMesh, targetTransform,
-                            renderGuardRadius).hit;
+                        for (int observation = 0;
+                             observation < observationCount; ++observation)
+                        {
+                            if (PhysicalContactTriangleMeshesIntersect(
+                                    weaponMesh, candidate,
+                                    targetMeshes[observation],
+                                    targetTransforms[observation],
+                                    renderGuardRadius).hit)
+                            {
+                                return true;
+                            }
+                        }
+                        return false;
                     };
                     const PhysicalContactWallConstraint correction =
                         PhysicalContactVerifiedSeparationOffset(
