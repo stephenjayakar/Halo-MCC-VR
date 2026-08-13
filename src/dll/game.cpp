@@ -16311,10 +16311,9 @@ namespace
                     previousWeaponTransform.position,
                     intendedWeaponTransform.position, targetCenter,
                     weaponBroadRadius + radius);
-                if (!proxy.hit)
+                if (!PhysicalContactTargetPassesBroadPhase(
+                        proxy.hit, isConstrainedBodyTarget))
                 {
-                    if (isConstrainedBodyTarget)
-                        constrainedBodyTargetGeometryResolved = true;
                     continue;
                 }
                 void* candidateComponent = nullptr;

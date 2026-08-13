@@ -10884,6 +10884,10 @@ int main()
         const auto bodyHitObservation =
             PhysicalContactDynamicBodyObservationForTarget(
                 0x12340001, true, true, true);
+        const bool ordinaryBroadPhaseReject =
+            PhysicalContactTargetPassesBroadPhase(false, false);
+        const bool constrainedBroadPhaseBypass =
+            PhysicalContactTargetPassesBroadPhase(false, true);
         const auto bodyRecentSeparation =
             PhysicalContactHoldRecentDynamicBodySeparation(
                 PhysicalContactDynamicBodyObservation::Separated,
@@ -11049,6 +11053,7 @@ int main()
                   PhysicalContactDynamicBodyObservation::Uncertain &&
               bodyHitObservation ==
                   PhysicalContactDynamicBodyObservation::Uncertain &&
+              !ordinaryBroadPhaseReject && constrainedBroadPhaseBypass &&
               bodyRecentSeparation ==
                   PhysicalContactDynamicBodyObservation::Uncertain &&
               bodyExpiredSeparation ==
@@ -11134,7 +11139,9 @@ int main()
             "vertices and eight triangle-edge midpoints, while larger meshes "
             "rotate evenly spread bounded face-centre and edge samples; "
             "dynamic bodies reject only inward travel while preserving slides, "
-            "hold exact correction across an unresolved query gap, follow the "
+            "bypass the cheap broad-phase reject for the active constrained "
+            "target, hold exact correction across an unresolved query gap, "
+            "follow the "
             "bounded translation and rotation of a moving body, accept only "
             "a directly verified clear final pose, then release directly to "
             "that checked pose");

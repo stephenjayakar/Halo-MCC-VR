@@ -3242,3 +3242,24 @@ winner still cannot be replaced. The exact animated-body path remains preferred
 and unchanged. Pure tests cover preserved prior samples, exact face centroids,
 even bounds, malformed inputs, and capacity rejection. Campaign headset melee
 acceptance remains pending.
+
+### 2026-08-13 constrained-body broad-phase bypass
+
+The next headset report still observed an occasional visible weapon crossing a
+body after a nudge. The exact constraint already stores a target-local weapon
+anchor and follows the body's rigid transform. The object census nevertheless
+ran a cheap sweep against only the target's current bounding centre before it
+resolved that transform. A body moved by the preceding impulse could leave
+that broad phase, causing the worker to label its geometry clear without
+reading its new transform. The follow anchor was then unavailable and the
+visible weapon could jump directly to a controller pose on the far side.
+
+Only the currently constrained target now bypasses that cheap reject. Its
+native mass gate, exact authored geometry, current transform, continuous sweep,
+verified separation, one-metre bound, and same-frame render guard all still
+run. Other objects retain the broad phase, so the hot-path census cost is
+unchanged except for one already-active body. This preserves the target-local
+anchor until exact geometry and the target's current transform prove a safe
+release instead of inferring safety from a moved bounding centre. Pure coverage
+proves an ordinary broad-phase miss still rejects while a constrained-body miss
+continues to exact resolution. Headset no-clipping acceptance remains pending.

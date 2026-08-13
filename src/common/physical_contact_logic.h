@@ -2560,6 +2560,16 @@ PhysicalContactDynamicBodyObservationForTarget(
     return PhysicalContactDynamicBodyObservation::Uncertain;
 }
 
+// The cheap current-centre broad phase may reject a body that moved after the
+// previous physics sample. Once that body owns the visible weapon constraint,
+// its exact geometry and current transform must still be resolved so the
+// target-local follow anchor cannot be dropped across the object's far side.
+inline constexpr bool PhysicalContactTargetPassesBroadPhase(
+    bool broadPhaseHit, bool isConstrainedTarget)
+{
+    return broadPhaseHit || isConstrainedTarget;
+}
+
 inline PhysicalContactDynamicBodyObservation
 PhysicalContactHoldRecentDynamicBodySeparation(
     PhysicalContactDynamicBodyObservation observation,
