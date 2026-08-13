@@ -1008,6 +1008,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactExactRenderSamples{0};
     std::atomic<uint64_t> g_halo3ContactExactRenderOver250Us{0};
     std::atomic<uint64_t> g_halo3ContactRenderConvexFallbacks{0};
+    std::atomic<uint64_t> g_halo3ContactRenderExactClears{0};
     std::atomic<float> g_halo3ContactExactRenderPeakUs{0.0f};
     std::atomic<uint32_t> g_halo3ContactDebugLastResetReason{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
@@ -7051,7 +7052,7 @@ namespace
     // The target shape has at most 16 children and the render guard retains at
     // most three target poses. Forward-only clearing therefore needs no more
     // than 48 distinct child/pose steps.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     constexpr int kHalo3ExactRenderChildSeparationSteps =
         static_cast<int>(PhysicalContactCompoundShape::kMaximumChildren) *
@@ -8938,6 +8939,47 @@ namespace
                             outwardUnit * stepDistance;
                         directDistance += stepDistance;
                     }
+                    // The per-child convexes deliberately enclose the authored
+                    // triangles. A rotating compound can therefore report an
+                    // overlap that no visible surface has. If the conservative
+                    // solver cannot clear, rebuild the authored target mesh
+                    // only for this rare frame and prove the unshifted followed
+                    // pose clear. Never use this path to accept a triangle hit.
+                    if (!clear && !exactTargetGeometry)
+                    {
+                        PhysicalContactTransform exactTargetTransform{};
+                        bool exactRequiresNativeConfirmation = false;
+                        if (Halo3ContactDetailedTargetShape(
+                                targetHandle, targetData, targetShape,
+                                exactTargetTransform,
+                                exactRequiresNativeConfirmation, &targetMesh) &&
+                            PhysicalContactTriangleMeshValid(targetMesh))
+                        {
+                            targetTransforms[0] = exactTargetTransform;
+                            bool authoredClear = true;
+                            for (int observation = 0;
+                                 observation < observationCount; ++observation)
+                            {
+                                if (PhysicalContactTriangleMeshesIntersect(
+                                        weaponMesh, weaponTransform, targetMesh,
+                                        targetTransforms[observation],
+                                        kHalo3ContactTriangleSurfaceRadiusMeters *
+                                            worldScale).hit)
+                                {
+                                    authoredClear = false;
+                                    break;
+                                }
+                            }
+                            if (authoredClear)
+                            {
+                                clear = true;
+                                candidate = weaponTransform;
+                                directDistance = 0.0f;
+                                g_halo3ContactRenderExactClears.fetch_add(
+                                    1, std::memory_order_relaxed);
+                            }
+                        }
+                    }
                     PhysicalContactWallConstraint correction{};
                     if (clear && directDistance > 1.0e-5f)
                     {
@@ -8959,7 +9001,7 @@ namespace
                         g_halo3ContactExactRenderSeparations.fetch_add(
                             1, std::memory_order_relaxed);
                     }
-                    else
+                    else if (!clear)
                     {
                         g_halo3ContactExactRenderSeparationFailures.fetch_add(
                             1, std::memory_order_relaxed);
@@ -11797,6 +11839,8 @@ namespace
         g_halo3ContactExactRenderOver250Us.store(
             0, std::memory_order_relaxed);
         g_halo3ContactRenderConvexFallbacks.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactRenderExactClears.store(
             0, std::memory_order_relaxed);
         g_halo3ContactExactRenderPeakUs.store(
             0.0f, std::memory_order_relaxed);
@@ -16841,6 +16885,7 @@ namespace
             "bodyRenderSeparations=%llu bodyRenderSeparationFailures=%llu "
             "bodyRenderSamples=%llu bodyRenderOver250us=%llu "
             "bodyRenderPeakUs=%.1f bodyRenderConvexFallbacks=%llu "
+            "bodyRenderExactClears=%llu "
             "bodyUncertainHolds=%llu bodyPeak=%.3fm "
             "wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
@@ -16981,6 +17026,8 @@ namespace
             (unsigned long long)
                 g_halo3ContactRenderConvexFallbacks.load(
                     std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactRenderExactClears.load(
+                std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactBodyUncertainHolds.load(
                 std::memory_order_relaxed),
             g_halo3ContactBodyPeakSetbackMeters.load(
