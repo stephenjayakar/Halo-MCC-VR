@@ -3263,3 +3263,23 @@ anchor until exact geometry and the target's current transform prove a safe
 release instead of inferring safety from a moved bounding centre. Pure coverage
 proves an ordinary broad-phase miss still rejects while a constrained-body miss
 continues to exact resolution. Headset no-clipping acceptance remains pending.
+
+### 2026-08-13 part-zero-only Campaign decorator clusters
+
+The next Campaign headset result still found a visible rock with no weapon
+collision after small creator-qualified placement streams were enabled. The
+small-stream gate nevertheless retained a heuristic that required at least one
+nonzero decorator part. A valid small cluster can contain only part zero, so
+the uniquely identified retail decorator uploader could still create the exact
+placement stream and then have it discarded by a diversity test intended for
+unidentified buffers.
+
+For streams below 256 records, the exact unique creator return site now replaces
+only that nonzero-part heuristic. The existing 99% small-part, 99% finite
+scaled-quaternion, 50% nonzero-color, 16-byte stride, geometry, constants,
+topology, index, and solid-mesh checks remain required. Buffers with 256 or more
+records still use content-only discovery and still require a nonzero part, so
+this does not broaden the unverified renderer boundary. Pure coverage admits a
+36-instance creator-qualified part-zero stream and rejects an equally uniform
+large heuristic stream. The reported Campaign rock remains pending headset
+acceptance.

@@ -716,12 +716,15 @@ inline bool PhysicalContactH3DecoratorPlacementBufferEvidence(
     uint32_t smallPartIndices, uint32_t nonzeroPartIndices,
     uint32_t validScaledQuaternions, uint32_t nonzeroColors)
 {
-    if (!sampledRecords ||
-        (sampledRecords < 256u &&
-         (!verifiedCreatorRva || creatorRva != verifiedCreatorRva)))
+    if (!sampledRecords)
+        return false;
+    const bool smallVerifiedStream = sampledRecords < 256u &&
+        verifiedCreatorRva && creatorRva == verifiedCreatorRva;
+    if (sampledRecords < 256u && !smallVerifiedStream)
         return false;
     return smallPartIndices * 100ull >= sampledRecords * 99ull &&
-        nonzeroPartIndices * 100ull >= sampledRecords &&
+        (smallVerifiedStream ||
+         nonzeroPartIndices * 100ull >= sampledRecords) &&
         validScaledQuaternions * 100ull >= sampledRecords * 99ull &&
         nonzeroColors * 100ull >= sampledRecords * 50ull;
 }

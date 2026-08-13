@@ -9566,6 +9566,9 @@ int main()
         Check(PhysicalContactH3DecoratorPlacementBufferEvidence(
                   0x2A109Fu, 0x2A109Fu,
                   36u, 36u, 20u, 36u, 36u) &&
+              PhysicalContactH3DecoratorPlacementBufferEvidence(
+                  0x2A109Fu, 0x2A109Fu,
+                  36u, 36u, 0u, 36u, 36u) &&
               !PhysicalContactH3DecoratorPlacementBufferEvidence(
                   0x2A10A0u, 0x2A109Fu,
                   36u, 36u, 20u, 36u, 36u) &&
@@ -9576,10 +9579,11 @@ int main()
                   0x2A109Fu, 0x2A109Fu,
                   36u, 35u, 20u, 36u, 36u) &&
               !PhysicalContactH3DecoratorPlacementBufferEvidence(
-                  0x2A109Fu, 0x2A109Fu,
-                  36u, 36u, 0u, 36u, 36u),
+                  0x2A10A0u, 0u,
+                  256u, 256u, 0u, 256u, 128u),
             "Halo 3 admits small decorator placement clusters only from the "
-            "exact retail creator and retains every content invariant");
+            "exact retail creator, including valid part-zero-only clusters, "
+            "while large heuristic streams still require part diversity");
         const PhysicalContactVec3 decodedRockUp =
             decodedRockPlacement.up;
 
