@@ -1451,6 +1451,13 @@ requirement, grip hysteresis, no-snap follow correction, world-scale
 conversion, correction and toss clamps, and invalid scale. Runtime and headset
 acceptance remain pending.
 
+The Halo 3 weapon panel now states the complete player control beside the
+parent physical-contact option: overlap a supported loose object with the left
+palm, squeeze left grip to acquire, and release to drop or throw. It also names
+the supported object classes and 25 kg limit. This changes no binding, input,
+physics, or acquisition behavior; it makes the already implemented feature
+discoverable without requiring external instructions.
+
 Source `95047a6` adds an environment-gated scripted left-palm transaction to
 the existing Forge validator. It reuses the proven movable-object selector,
 but returns before the right-hand sweep so the test cannot move the target by
