@@ -7046,9 +7046,9 @@ namespace
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Capture the bounded target banks exposed during final palette selection,
-    // then solve one position that is clear of all of them at once.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    // Rebuilding every observed target mesh exceeded the render budget and a
+    // one-direction combined solve could still fail. Keep this attempt dormant.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};

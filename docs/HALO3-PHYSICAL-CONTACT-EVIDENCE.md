@@ -2423,3 +2423,14 @@ the final search predicate cannot move the weapon out of one bank and back into
 another. The existing 8 mm reserve remains part of every exact triangle test.
 Packaging, render-budget measurement, and the 8,000-sample replay remain
 pending.
+
+Candidate `d209679` was rejected on both correctness and cost. At 2,122 final
+guard samples it recorded three separation-search failures; the independent
+same-frame validator then recorded two confirmed penetrations after 927 valid
+comparisons. Rebuilding three target meshes also exceeded 0.25 ms on 1,101 of
+2,122 samples (51.9%), with a 6.63 ms peak. The preserved failure log is
+`out/debug-openxr/20260813-004259922Z-rotating-body-gap.log`, SHA-256
+`4F44AD74A8DF122277BB32FB92AB86C17B640C5A83528D9A7DAF7FDCBEDFFBA8`.
+The failed multi-mesh behavior is disabled and remains dormant. The next
+candidate will decode one authored mesh, sample only the changing rigid root,
+and try multiple exact, verified escape directions only when overlap exists.
