@@ -1023,7 +1023,8 @@ namespace
         changed |= ImGui::SliderFloat(
             "Melee speed", &g_config.physical_weapon_melee_speed,
             0.50f, 4.00f, "%.2f m/s");
-        ImGui::TextDisabled("All tracked contact pushes movable objects; only fast hits deal authored melee damage.\n"
+        ImGui::TextDisabled("All tracked contact pushes movable objects. Any moving enemy contact can melee;\n"
+                            "props and vehicles need the Melee speed above before they take melee damage.\n"
                             "Left hand: put your palm inside a loose weapon, equipment item,\n"
                             "garbage, or crate (up to 25 kg), squeeze left grip to pick it up,\n"
                             "then release the grip to drop or throw it.");
