@@ -2529,3 +2529,8 @@ rejected on cost before the long threshold. The preserved partial log is
 SHA-256
 `76AF78A16FF6A4EDE79E0BC98C06D45D058B36C60445D70D3A220BDF4F2921C4`.
 The expensive 5 cm search is disabled and remains dormant.
+
+The replacement retains the 5 cm motion reserve but runs one directly verified
+target-centre escape direction. The conservative target compound makes that
+direction well-defined; the existing fixed expansion and binary search still
+refuse any result that is not clear of all three observed target roots.

@@ -7048,9 +7048,9 @@ namespace
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactFinalRenderReserveMeters = 0.050f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // The 5 cm reserve avoided overlap but the multi-direction correction
-    // exceeded the render budget. Keep this implementation dormant.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    // Keep the 5 cm target-bank reserve, but use one verified target-centre
+    // escape direction so overlap correction remains bounded and cheap.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
@@ -8831,66 +8831,13 @@ namespace
                         }
                         return false;
                     };
-                    std::array<PhysicalContactVec3, 12> directions{};
-                    int directionCount = 0;
-                    for (int observation = 0;
-                         observation < observationCount; ++observation)
-                    {
-                        if (!targetOverlaps(
-                                weaponTransform, observation))
-                            continue;
-                        if (exactTargetGeometry)
-                        {
-                            const PhysicalContactTrianglePair observedOverlap =
-                                PhysicalContactTriangleMeshesIntersect(
-                                    weaponMesh, weaponTransform, targetMesh,
-                                    targetTransforms[observation],
-                                    renderGuardRadius);
-                            if (observedOverlap.hit)
-                            {
-                                const PhysicalContactVec3 weaponCentre =
-                                    PhysicalContactTransformPoint(
-                                        weaponTransform,
-                                        weaponMesh.triangles[
-                                            observedOverlap.weaponTriangle].centre);
-                                const PhysicalContactVec3 targetCentre =
-                                    PhysicalContactTransformPoint(
-                                        targetTransforms[observation],
-                                        targetMesh.triangles[
-                                            observedOverlap.targetIndex].centre);
-                                directions[directionCount++] =
-                                    weaponCentre - targetCentre;
-                            }
-                        }
-                        directions[directionCount++] =
-                            weaponTransform.position -
-                            targetTransforms[observation].position;
-                    }
-                    directions[directionCount++] = weaponTransform.forward;
-                    directions[directionCount++] =
-                        weaponTransform.forward * -1.0f;
-                    directions[directionCount++] = weaponTransform.left;
-                    directions[directionCount++] =
-                        weaponTransform.left * -1.0f;
-                    directions[directionCount++] = weaponTransform.up;
-                    directions[directionCount++] =
-                        weaponTransform.up * -1.0f;
-                    PhysicalContactWallConstraint correction{};
-                    for (int direction = 0;
-                         direction < directionCount; ++direction)
-                    {
-                        const PhysicalContactWallConstraint candidate =
-                            PhysicalContactVerifiedSeparationOffset(
-                                weaponTransform, directions[direction], 0.0f,
-                                0.001f * worldScale, worldScale, overlapsAt);
-                        if (candidate.constrained &&
-                            (!correction.constrained ||
-                             candidate.setbackWorldUnits <
-                                 correction.setbackWorldUnits))
-                        {
-                            correction = candidate;
-                        }
-                    }
+                    const PhysicalContactVec3 outward =
+                        weaponTransform.position -
+                        targetTransforms[overlapObservation].position;
+                    const PhysicalContactWallConstraint correction =
+                        PhysicalContactVerifiedSeparationOffset(
+                            weaponTransform, outward, 0.0f,
+                            0.001f * worldScale, worldScale, overlapsAt);
                     if (correction.constrained)
                     {
                         for (uint32_t node = 0;
