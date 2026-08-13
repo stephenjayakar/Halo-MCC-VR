@@ -9732,6 +9732,11 @@ int main()
                             0.00125f, 1) - 0.00125f) < 1.0e-6f &&
               std::fabs(PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
                             0.040f, 0) - 0.040f) < 1.0e-6f &&
+              PhysicalContactVisualTargetBodyIndex(1, 0) == -1 &&
+              PhysicalContactVisualTargetBodyIndex(2, 7) == -1 &&
+              PhysicalContactVisualTargetBodyIndex(3, -1) == -1 &&
+              PhysicalContactVisualTargetBodyIndex(3, 0) == 0 &&
+              PhysicalContactVisualTargetBodyIndex(3, 7) == 7 &&
               armedEnemyContinuation &&
               !PhysicalContactTargetMeleeSpeedEligible(false, 0, false) &&
               !PhysicalContactTargetMeleeSpeedEligible(false, 1, true) &&

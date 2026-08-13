@@ -2647,6 +2647,16 @@ inline float PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
         : exactSurfaceRadiusMeters;
 }
 
+// Only the animated-body collision path binds contact to a specific render
+// node. Ordinary props still report a rigid-body index for native mass and
+// impulse handling, but their authored visible collision remains at node zero.
+inline int32_t PhysicalContactVisualTargetBodyIndex(
+    uint32_t targetShapeSource, int32_t targetBodyIndex)
+{
+    return targetShapeSource == 3 && targetBodyIndex >= 0
+        ? targetBodyIndex : -1;
+}
+
 inline bool PhysicalContactTargetMeleeSpeedEligible(
     bool firstContact, uint8_t targetKind, bool meleeArmed)
 {

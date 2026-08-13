@@ -5917,6 +5917,9 @@ namespace
                 const uint32_t finalTargetShapeSource =
                     g_halo3ContactTargetShapeSource.load(
                         std::memory_order_acquire);
+                const int32_t finalVisualTargetBodyIndex =
+                    PhysicalContactVisualTargetBodyIndex(
+                        finalTargetShapeSource, finalTargetBodyIndex);
                 Halo3Matrix4x3* finalTargetNodes = nullptr;
                 int finalTargetNodeCount = 0;
                 if (g_config.physical_weapon_contact &&
@@ -5924,7 +5927,7 @@ namespace
                         std::memory_order_acquire) &&
                     finalTargetHandle != -1 &&
                     (finalTargetShapeSource != 3 ||
-                     finalTargetBodyIndex >= 0) &&
+                     finalVisualTargetBodyIndex >= 0) &&
                     Halo3ContactReadInterpolatedNodes(
                         finalTargetHandle, &finalTargetNodes,
                         &finalTargetNodeCount) &&
@@ -5932,10 +5935,10 @@ namespace
                     Halo3MatrixValid(finalTargetNodes[0]))
                 {
                     int32_t finalTargetNodeIndex = 0;
-                    if (finalTargetBodyIndex >= 0)
+                    if (finalVisualTargetBodyIndex >= 0)
                     {
                         const bool resolved = Halo3ContactResolveBodyNodeIndex(
-                            finalTargetHandle, finalTargetBodyIndex,
+                            finalTargetHandle, finalVisualTargetBodyIndex,
                             finalTargetNodes, finalTargetNodeCount,
                             finalTargetNodeIndex);
                         if (!resolved)
@@ -5960,7 +5963,7 @@ namespace
                             activeWeaponHandle, finalTargetHandle,
                             finalTargetRoot, destination,
                             static_cast<uint32_t>(renderNodeCount), true,
-                            finalTargetBodyIndex);
+                            finalVisualTargetBodyIndex);
                         if (!finalGuardProved && guardFallbackValid)
                         {
                             memcpy(destination, guardFallbackNodes.data(),

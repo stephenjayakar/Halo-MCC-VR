@@ -2239,6 +2239,24 @@ that mutation and restores the worker-approved palette instead of publishing a
 known intersecting correction. Runtime validation and headset acceptance remain
 pending.
 
+The first strict rotating-body replay of source `6855b72` rejected that repair
+after 1,253 same-frame comparisons found one confirmed penetration. The final
+guard recorded zero timed samples, proving it never reached its geometry
+predicate. The new body index had been read from the general contact target:
+ordinary props report body zero for native mass and impulse handling, but their
+root physics body authors node `-1`. Treating that index as an animated
+render-node binding therefore made the final guard return unresolved. The
+preserved log is
+`out/debug-openxr/20260813-045336454Z-rotating-body-gap.log`, SHA-256
+`E763DC6F5CACCDFB5171C8BFB3F6F08894D398453FD27AE6A186E093808D450B`.
+
+The follow-up carries a body index into the visible guard only for target shape
+source `3`, the exact animated-body path. Detailed and physics-fallback props
+continue to use their authored node-zero collision transaction while retaining
+the native rigid-body index for mass and impulse. Pure coverage locks that
+source-to-index policy. A fresh strict replay is required before the candidate
+can survive.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
