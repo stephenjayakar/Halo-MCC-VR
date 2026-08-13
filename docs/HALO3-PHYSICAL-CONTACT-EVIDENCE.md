@@ -2442,3 +2442,31 @@ the fixed search tries triangle-centre, object-centre, and weapon-local axis
 directions, accepting only the shortest candidate directly verified clear of
 all banks. The extra searches run only on an overlap. Packaging, cost
 measurement, and the 8,000-sample replay remain pending.
+
+Candidate `4ec4241` passed the exact rotating-body replay under SteamVR's null
+driver. The final sample contained 8,039 same-frame authored-triangle checks,
+zero same-frame geometry overlaps, zero confirmed penetrations, 70 final render
+separations, and zero separation failures. Only 101 of 19,341 final guard
+samples exceeded 0.25 ms (0.52%, safely below the 5% p95 boundary). The high
+one-off peak was 11.78 ms and did not affect p95. The preserved log is
+`out/debug-openxr/20260813-004927658Z-rotating-body-gap.log`, SHA-256
+`7D89273EE20601CB90447834955AAD415CFCE933875BB628B33224E2E5B1134F`.
+
+The same exact code candidate also passed these visible Forge regressions:
+
+- loose-weapon scoop/carry/toss: `20260813-005613062Z-weapon-scoop.log`,
+  SHA-256 `3F048DCBC899710627E3579FB47BCCDDFEFF8337932834C94C9F4EB622CC5824`;
+- left-hand acquire/carry/release: `20260813-005906604Z-left-grab.log`,
+  SHA-256 `681A24A41CA8394DB707AE2B84A1D330C1FBA66A9EF2740842D09E61425E1ADF`;
+- native melee plus contact haptic: `20260813-010134499Z-melee.log`,
+  SHA-256 `C6E1DAE5DB3B6077B400DE48EEE77A39B63FD4826FDA083D141137F5C6878F88`;
+- High Ground vehicle nudge with no melee: `20260813-010405319Z-vehicle-nudge.log`,
+  SHA-256 `FDD283B3EC5031260FBCE63CD0D749751230C14913FA1D60D042481806CC8802`;
+- Valhalla structure and object wall validation: `20260813-010657984Z-wall.log`,
+  SHA-256 `37CE5F91548CDC0F4A95ACCBABA3F0EA1712B430D23356987B0259C70FABB7AE`;
+- Valhalla decorator/rock self-test: `20260813-010958706Z-decorator-wall.log`,
+  SHA-256 `647D3408F781E5859883A27C8C66CC6308D718F239966F17B21E35375FC9B00D`.
+
+These null-driver results are automated evidence, not headset acceptance. The
+accepted-build pointer remains unchanged until the user verifies this behavior
+in a real headset.
