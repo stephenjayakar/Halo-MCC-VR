@@ -164,6 +164,25 @@ inline bool PhysicalContactTransformFinite(const PhysicalContactTransform& t)
         t.scale > 1.0e-4f && t.scale < 1000.0f;
 }
 
+inline bool PhysicalContactTransformExactlyEqual(
+    const PhysicalContactTransform& a,
+    const PhysicalContactTransform& b)
+{
+    return a.position.x == b.position.x &&
+        a.position.y == b.position.y &&
+        a.position.z == b.position.z &&
+        a.forward.x == b.forward.x &&
+        a.forward.y == b.forward.y &&
+        a.forward.z == b.forward.z &&
+        a.left.x == b.left.x &&
+        a.left.y == b.left.y &&
+        a.left.z == b.left.z &&
+        a.up.x == b.up.x &&
+        a.up.y == b.up.y &&
+        a.up.z == b.up.z &&
+        a.scale == b.scale;
+}
+
 inline PhysicalContactVec3 PhysicalContactTransformVector(
     const PhysicalContactTransform& t, PhysicalContactVec3 local)
 {

@@ -9737,6 +9737,15 @@ int main()
               PhysicalContactVisualTargetBodyIndex(3, -1) == -1 &&
               PhysicalContactVisualTargetBodyIndex(3, 0) == 0 &&
               PhysicalContactVisualTargetBodyIndex(3, 7) == 7 &&
+              PhysicalContactTransformExactlyEqual(
+                  PhysicalContactTransform{}, PhysicalContactTransform{}) &&
+              !PhysicalContactTransformExactlyEqual(
+                  PhysicalContactTransform{},
+                  PhysicalContactTransform{
+                      {0.001f, 0.0f, 0.0f},
+                      {1.0f, 0.0f, 0.0f},
+                      {0.0f, 1.0f, 0.0f},
+                      {0.0f, 0.0f, 1.0f}, 1.0f}) &&
               armedEnemyContinuation &&
               !PhysicalContactTargetMeleeSpeedEligible(false, 0, false) &&
               !PhysicalContactTargetMeleeSpeedEligible(false, 1, true) &&

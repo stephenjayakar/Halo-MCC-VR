@@ -8942,8 +8942,29 @@ namespace
                         const PhysicalContactTransform observedTransform =
                             Halo3ContactTransformFromBone(observedRoot);
                         if (PhysicalContactTransformFinite(observedTransform))
-                            targetTransforms[observationCount++] =
-                                observedTransform;
+                        {
+                            bool duplicate = false;
+                            for (int observation = 0;
+                                 observation < observationCount;
+                                 ++observation)
+                            {
+                                if (PhysicalContactTransformExactlyEqual(
+                                        observedTransform,
+                                        targetTransforms[observation]))
+                                {
+                                    duplicate = true;
+                                    break;
+                                }
+                            }
+                            // The renderer commonly exposes the identical
+                            // interpolated target bank on all three immediate
+                            // reads. Test that pose once. If the bank advances
+                            // during the callback, retain every distinct pose
+                            // so the moving-target proof is unchanged.
+                            if (!duplicate)
+                                targetTransforms[observationCount++] =
+                                    observedTransform;
+                        }
                     }
                 }
             }

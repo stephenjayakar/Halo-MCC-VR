@@ -2257,6 +2257,28 @@ the native rigid-body index for mass and impulse. Pure coverage locks that
 source-to-index policy. A fresh strict replay is required before the candidate
 can survive.
 
+Three strict rotating-body replays of installed source `2a247b7` then proved
+the root-space repair: the longest run made 11,710 same-frame comparisons and
+26,629 final-render checks with zero confirmed overlap and zero render
+separation failure. The preserved log is
+`out/debug-openxr/20260813-052236359Z-rotating-body-gap.log`, SHA-256
+`BC3E73617A8FAA5E536DF34F6570F9E4086FE40D0474197C963C1D4A7D0E23E8`.
+That run did not pass the complete gate because 1,589 checks (5.97%) exceeded
+0.25 ms, above the 5% p95 boundary. The two earlier preserved runs are
+`20260813-050401368Z-rotating-body-gap.log` and
+`20260813-051228044Z-rotating-body-gap.log`; neither recorded a penetration or
+separation refusal, and neither met the timing gate.
+
+The timing path immediately reads the target's interpolated render bank three
+times to catch a bank change during the callback. Logs showed the common case
+still paid three complete intersection queries for three bit-identical target
+transforms. The next isolated candidate retains every distinct observed pose
+but collapses exact duplicates before geometry testing. This does not merge
+nearby or approximately equal poses: any float component change keeps the
+observation. The final guard therefore proves the same set of target poses
+while avoiding redundant exact geometry work. Pure coverage locks exact-equal
+and one-component-different cases; fresh runtime timing is required.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
