@@ -269,6 +269,14 @@ struct H3DecoratorFrameDraw
     uint32_t geometryBytes = 0;
     uint32_t startVertex = 0;
     uint32_t vertexCount = 0;
+    const uint8_t* indexSource = nullptr;
+    uint32_t indexBytes = 0;
+    uint32_t indexOffset = 0;
+    uint32_t indexCount = 0;
+    int32_t baseVertex = 0;
+    uint32_t indexStride = 0;
+    bool indexed = false;
+    bool triangleStrip = true;
     const uint8_t* placementSource = nullptr;
     uint32_t placementBytes = 0;
     uint32_t placementOffset = 0;
@@ -383,13 +391,20 @@ static void H3ProbeRegisterBuffer(
             const bool halo3VertexBuffer =
                 halo3CreatorRva != UINTPTR_MAX && source &&
                 (desc->BindFlags & D3D11_BIND_VERTEX_BUFFER) != 0u;
+            const bool halo3IndexBuffer =
+                halo3CreatorRva != UINTPTR_MAX && source &&
+                (desc->BindFlags & D3D11_BIND_INDEX_BUFFER) != 0u;
             const bool retainPlacement = halo3VertexBuffer &&
                 decoratorPlacement && desc->ByteWidth <= 256u * 1024u;
             const bool retainPotentialGeometry = halo3VertexBuffer &&
                 !decoratorPlacement && desc->ByteWidth >= 3u * 20u &&
                 desc->ByteWidth <= 16u * 1024u &&
                 (desc->ByteWidth % 20u) == 0u;
-            if (retainPlacement || retainPotentialGeometry)
+            const bool retainPotentialIndices = halo3IndexBuffer &&
+                desc->ByteWidth >= 3u * sizeof(uint16_t) &&
+                desc->ByteWidth <= 64u * 1024u;
+            if (retainPlacement || retainPotentialGeometry ||
+                retainPotentialIndices)
             {
                 const uint32_t reservedBytes =
                     (desc->ByteWidth + 15u) & ~15u;
@@ -772,9 +787,19 @@ static void H3ProbeCaptureDraw(
     }
     if (placementSlot != UINT_MAX)
     {
-        if (g_h3DecoratorContactCaptureEnabled && kind == 3u &&
+        const bool linearStrip = kind == 3u &&
+            g_h3ProbeBoundTopology ==
+                D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+        const bool indexedTriangles = kind == 0u &&
+            (g_h3ProbeBoundTopology ==
+                 D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP ||
+             g_h3ProbeBoundTopology ==
+                 D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST) &&
+            (g_h3ProbeBoundIndexFormat == DXGI_FORMAT_R16_UINT ||
+             g_h3ProbeBoundIndexFormat == DXGI_FORMAT_R32_UINT);
+        if (g_h3DecoratorContactCaptureEnabled &&
+            (linearStrip || indexedTriangles) &&
             placementSlot != 0u &&
-            g_h3ProbeBoundTopology == D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP &&
             g_h3ProbeBoundVertexStrides[0] == 20u &&
             g_h3ProbeBoundVertexStrides[placementSlot] == 16u)
         {
@@ -783,6 +808,8 @@ static void H3ProbeCaptureDraw(
             const H3ProbeBufferMetadata* placements =
                 H3ProbeFindBuffer(
                     g_h3ProbeBoundVertexBuffers[placementSlot]);
+            const H3ProbeBufferMetadata* indices = indexedTriangles
+                ? H3ProbeFindBuffer(g_h3ProbeBoundIndexBuffer) : nullptr;
             float meshConstants[12]{};
             float blockConstants[24]{};
             const bool constants = H3DecoratorCopyConstant(
@@ -793,9 +820,17 @@ static void H3ProbeCaptureDraw(
                     sizeof(blockConstants));
             const uint64_t geometryFirstByte =
                 static_cast<uint64_t>(g_h3ProbeBoundVertexOffsets[0]) +
-                static_cast<uint64_t>(startLocation) * 20u;
+                static_cast<uint64_t>(linearStrip ? startLocation : 0u) * 20u;
             const uint64_t geometryEndByte = geometryFirstByte +
-                static_cast<uint64_t>(countPerInstance) * 20u;
+                static_cast<uint64_t>(linearStrip ? countPerInstance : 0u) *
+                    20u;
+            const uint32_t indexStride =
+                g_h3ProbeBoundIndexFormat == DXGI_FORMAT_R32_UINT ? 4u : 2u;
+            const uint64_t indexFirstByte =
+                static_cast<uint64_t>(g_h3ProbeBoundIndexOffset) +
+                static_cast<uint64_t>(startLocation) * indexStride;
+            const uint64_t indexEndByte = indexFirstByte +
+                static_cast<uint64_t>(countPerInstance) * indexStride;
             const uint64_t placementFirstByte =
                 static_cast<uint64_t>(
                     g_h3ProbeBoundVertexOffsets[placementSlot]) +
@@ -803,21 +838,50 @@ static void H3ProbeCaptureDraw(
             const uint64_t placementEndByte = placementFirstByte +
                 static_cast<uint64_t>(instanceCount) * 16u;
             H3DecoratorFrameDraw candidate{};
+            const uint32_t maximumIndexCount =
+                g_h3ProbeBoundTopology ==
+                    D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST
+                ? PhysicalContactTriangleMesh::kMaximumTriangles * 3u
+                : PhysicalContactTriangleMesh::kMaximumTriangles + 2u;
             if (geometry && placements && geometry->source &&
                 placements->source && constants && countPerInstance >= 3u &&
-                countPerInstance <=
-                    PhysicalContactTriangleMesh::kMaximumTriangles + 2u &&
+                countPerInstance <= (linearStrip
+                    ? PhysicalContactTriangleMesh::kMaximumTriangles + 2u
+                    : maximumIndexCount) &&
                 instanceCount > 0u && instanceCount <= 4096u &&
                 (g_h3ProbeBoundVertexOffsets[0] % 20u) == 0u &&
-                geometryEndByte <= geometry->byteWidth &&
+                (linearStrip
+                    ? geometryEndByte <= geometry->byteWidth
+                    : indices && indices->source &&
+                      indexEndByte <= indices->byteWidth) &&
                 placementEndByte <= placements->byteWidth)
             {
                 candidate.geometrySource = static_cast<const uint8_t*>(
                     geometry->source);
                 candidate.geometryBytes = geometry->byteWidth;
                 candidate.startVertex =
-                    g_h3ProbeBoundVertexOffsets[0] / 20u + startLocation;
-                candidate.vertexCount = countPerInstance;
+                    linearStrip
+                    ? g_h3ProbeBoundVertexOffsets[0] / 20u + startLocation
+                    : 0u;
+                candidate.vertexCount = linearStrip
+                    ? countPerInstance : geometry->byteWidth / 20u;
+                if (indexedTriangles)
+                {
+                    candidate.indexSource = static_cast<const uint8_t*>(
+                        indices->source);
+                    candidate.indexBytes = indices->byteWidth;
+                    candidate.indexOffset = static_cast<uint32_t>(
+                        indexFirstByte);
+                    candidate.indexCount = countPerInstance;
+                    candidate.baseVertex = baseVertexLocation +
+                        static_cast<int32_t>(
+                            g_h3ProbeBoundVertexOffsets[0] / 20u);
+                    candidate.indexStride = indexStride;
+                    candidate.indexed = true;
+                    candidate.triangleStrip =
+                        g_h3ProbeBoundTopology ==
+                            D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+                }
                 candidate.placementSource = static_cast<const uint8_t*>(
                     placements->source);
                 candidate.placementBytes = placements->byteWidth;
@@ -1026,9 +1090,11 @@ size_t D3D_Halo3DecoratorWallPlanes(
     }
 
     constexpr uint32_t kMaximumExactInstances = 16u;
-    constexpr size_t kGeometryBytes =
-        (PhysicalContactTriangleMesh::kMaximumTriangles + 2u) * 20u;
+    constexpr size_t kGeometryBytes = 16u * 1024u;
+    constexpr size_t kIndexBytes =
+        PhysicalContactTriangleMesh::kMaximumTriangles * 3u * 4u;
     std::array<uint8_t, kGeometryBytes> geometryBytes{};
+    std::array<uint8_t, kIndexBytes> indexBytes{};
     std::array<uint8_t, 4096u * 16u> placementBytes{};
     const float weaponRadius = H3DecoratorMeshRadius(weapon) *
         std::max(previousWeapon.scale, currentWeapon.scale);
@@ -1088,9 +1154,32 @@ size_t D3D_Halo3DecoratorWallPlanes(
                 std::max(selfTestStage, kH3DecoratorSelfTestCopiedGeometry),
                 std::memory_order_release);
         PhysicalContactTriangleMesh target{};
-        if (!PhysicalContactDecodeH3DecoratorTriangleStrip(
+        bool decoded = false;
+        if (draw.indexed)
+        {
+            const size_t indexSize =
+                static_cast<size_t>(draw.indexCount) * draw.indexStride;
+            if (draw.indexSource && indexSize <= indexBytes.size() &&
+                draw.indexOffset <= draw.indexBytes &&
+                indexSize <= draw.indexBytes - draw.indexOffset &&
+                H3DecoratorSafeCopy(
+                    indexBytes.data(),
+                    draw.indexSource + draw.indexOffset, indexSize))
+            {
+                decoded =
+                    PhysicalContactDecodeH3DecoratorIndexedTriangles(
+                        geometryBytes.data(), geometrySize,
+                        indexBytes.data(), indexSize, 0u, draw.indexCount,
+                        draw.baseVertex, draw.indexStride,
+                        draw.triangleStrip, draw.positionMinimum,
+                        draw.positionSize, target);
+            }
+        }
+        else
+            decoded = PhysicalContactDecodeH3DecoratorTriangleStrip(
                 geometryBytes.data(), geometrySize, 0u, draw.vertexCount,
-                draw.positionMinimum, draw.positionSize, target) ||
+                draw.positionMinimum, draw.positionSize, target);
+        if (!decoded ||
             !PhysicalContactH3DecoratorMeshIsSolid(target))
             continue;
         if (selfTestPending)
@@ -3422,7 +3511,15 @@ bool InstallD3D11Hooks()
             MH_CreateHook(contextVtbl[24],
                           (void*)&H3ProbeIASetPrimitiveTopologyHook,
                           (void**)&g_origIASetPrimitiveTopology) == MH_OK;
-        const bool instancedOk = topologyBindingOk &&
+        const bool indexBindingOk = topologyBindingOk &&
+            MH_CreateHook(contextVtbl[19],
+                          (void*)&H3ProbeIASetIndexBufferHook,
+                          (void**)&g_origIASetIndexBuffer) == MH_OK;
+        const bool indexedInstancedOk = indexBindingOk &&
+            MH_CreateHook(contextVtbl[20],
+                          (void*)&H3ProbeDrawIndexedInstancedHook,
+                          (void**)&g_origDrawIndexedInstanced) == MH_OK;
+        const bool instancedOk = indexedInstancedOk &&
             MH_CreateHook(contextVtbl[21],
                           (void*)&H3ProbeDrawInstancedHook,
                           (void**)&g_origH3ProbeDrawInstanced) == MH_OK;
@@ -3434,7 +3531,8 @@ bool InstallD3D11Hooks()
             first.drawCount = 0;
             g_h3DecoratorContactCaptureEnabled =
                 g_config.physical_weapon_contact;
-            LOG("H3 decorator contact capture installed: contact=%u diagnostic=%u",
+            LOG("H3 decorator contact capture installed: contact=%u "
+                "draws=linear+indexed-instanced diagnostic=%u",
                 g_h3DecoratorContactCaptureEnabled ? 1u : 0u,
                 g_h3DecoratorDiagnosticEnabled ? 1u : 0u);
         }
@@ -3455,11 +3553,7 @@ bool InstallD3D11Hooks()
                 MH_CreateHook(contextVtbl[17],
                               (void*)&H3ProbeIASetInputLayoutHook,
                               (void**)&g_origIASetInputLayout) == MH_OK;
-            const bool indexOk = inputLayoutOk &&
-                MH_CreateHook(contextVtbl[19],
-                              (void*)&H3ProbeIASetIndexBufferHook,
-                              (void**)&g_origIASetIndexBuffer) == MH_OK;
-            const bool drawIndexedOk = indexOk &&
+            const bool drawIndexedOk = inputLayoutOk &&
                 MH_CreateHook(contextVtbl[12],
                               (void*)&H3ProbeDrawIndexedHook,
                               (void**)&g_origH3ProbeDrawIndexed) == MH_OK;
@@ -3467,11 +3561,7 @@ bool InstallD3D11Hooks()
                 MH_CreateHook(contextVtbl[13],
                               (void*)&H3ProbeDrawHook,
                               (void**)&g_origH3ProbeDraw) == MH_OK;
-            const bool indexedInstancedOk = drawOk &&
-                MH_CreateHook(contextVtbl[20],
-                              (void*)&H3ProbeDrawIndexedInstancedHook,
-                              (void**)&g_origDrawIndexedInstanced) == MH_OK;
-            const bool indexedIndirectOk = indexedInstancedOk &&
+            const bool indexedIndirectOk = drawOk &&
                 MH_CreateHook(contextVtbl[39],
                               (void*)&H3ProbeDrawIndexedInstancedIndirectHook,
                               (void**)&g_origH3ProbeDrawIndexedInstancedIndirect) == MH_OK;

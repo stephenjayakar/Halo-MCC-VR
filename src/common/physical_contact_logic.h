@@ -730,6 +730,145 @@ inline bool PhysicalContactDecodeH3DecoratorTriangleStrip(
     return PhysicalContactTriangleMeshValid(output);
 }
 
+inline bool PhysicalContactDecodeH3DecoratorIndexedTriangles(
+    const uint8_t* vertexBytes, size_t vertexByteCount,
+    const uint8_t* indexBytes, size_t indexByteCount,
+    uint32_t startIndex, uint32_t indexCount, int32_t baseVertex,
+    uint32_t indexStride, bool triangleStrip,
+    PhysicalContactVec3 positionMinimum, PhysicalContactVec3 positionSize,
+    PhysicalContactTriangleMesh& output)
+{
+    output = {};
+    constexpr size_t kVertexStride = 20u;
+    constexpr uint32_t kMaximumIndices =
+        PhysicalContactTriangleMesh::kMaximumTriangles * 3u;
+    const uint32_t minimumIndices = 3u;
+    const uint32_t maximumIndices = triangleStrip
+        ? PhysicalContactTriangleMesh::kMaximumTriangles + 2u
+        : kMaximumIndices;
+    if (!vertexBytes || !indexBytes || indexCount < minimumIndices ||
+        indexCount > maximumIndices ||
+        (indexStride != 2u && indexStride != 4u) ||
+        (!triangleStrip && indexCount % 3u != 0u) ||
+        !PhysicalContactFinite(positionMinimum) ||
+        !PhysicalContactFinite(positionSize) || positionSize.x <= 0.0f ||
+        positionSize.y <= 0.0f || positionSize.z <= 0.0f ||
+        positionSize.x > 10.0f || positionSize.y > 10.0f ||
+        positionSize.z > 10.0f ||
+        startIndex > SIZE_MAX / indexStride ||
+        indexCount > (SIZE_MAX / indexStride) - startIndex ||
+        (static_cast<size_t>(startIndex) + indexCount) * indexStride >
+            indexByteCount)
+        return false;
+
+    const size_t vertexCount = vertexByteCount / kVertexStride;
+    if (vertexCount < 3u || vertexByteCount % kVertexStride != 0u)
+        return false;
+    std::array<PhysicalContactVec3, kMaximumIndices> points{};
+    const auto decodePoint = [&](uint32_t relativeIndex,
+                                 PhysicalContactVec3& point) {
+        const int64_t signedVertex =
+            static_cast<int64_t>(baseVertex) + relativeIndex;
+        if (signedVertex < 0 ||
+            static_cast<uint64_t>(signedVertex) >= vertexCount)
+            return false;
+        const uint8_t* vertex = vertexBytes +
+            static_cast<size_t>(signedVertex) * kVertexStride;
+        const auto word = [&](size_t offset) {
+            return static_cast<uint16_t>(
+                static_cast<uint16_t>(vertex[offset]) |
+                static_cast<uint16_t>(vertex[offset + 1]) << 8u);
+        };
+        constexpr float kInverseUnsignedShortMaximum = 1.0f / 65535.0f;
+        point = {
+            positionMinimum.x + static_cast<float>(word(0)) *
+                kInverseUnsignedShortMaximum * positionSize.x,
+            positionMinimum.y + static_cast<float>(word(2)) *
+                kInverseUnsignedShortMaximum * positionSize.y,
+            positionMinimum.z + static_cast<float>(word(4)) *
+                kInverseUnsignedShortMaximum * positionSize.z};
+        return PhysicalContactFinite(point);
+    };
+    for (uint32_t index = 0; index < indexCount; ++index)
+    {
+        const uint8_t* packed = indexBytes +
+            (static_cast<size_t>(startIndex) + index) * indexStride;
+        uint32_t vertexIndex = static_cast<uint32_t>(packed[0]) |
+            (static_cast<uint32_t>(packed[1]) << 8u);
+        if (indexStride == 4u)
+            vertexIndex |= (static_cast<uint32_t>(packed[2]) << 16u) |
+                (static_cast<uint32_t>(packed[3]) << 24u);
+        if (!decodePoint(vertexIndex, points[index]))
+            return false;
+    }
+
+    PhysicalContactVec3 groupMinimum{INFINITY, INFINITY, INFINITY};
+    PhysicalContactVec3 groupMaximum{-INFINITY, -INFINITY, -INFINITY};
+    const uint32_t primitiveCount = triangleStrip
+        ? indexCount - 2u : indexCount / 3u;
+    for (uint32_t primitive = 0; primitive < primitiveCount; ++primitive)
+    {
+        uint32_t a = triangleStrip ? primitive : primitive * 3u;
+        uint32_t b = triangleStrip ? primitive + 1u : primitive * 3u + 1u;
+        const uint32_t c = triangleStrip
+            ? primitive + 2u : primitive * 3u + 2u;
+        if (triangleStrip && ((primitive + 2u) & 1u) != 0u)
+            std::swap(a, b);
+        const PhysicalContactVec3 edgeA = points[b] - points[a];
+        const PhysicalContactVec3 edgeB = points[c] - points[a];
+        if (PhysicalContactLengthSquared(
+                PhysicalContactCross(edgeA, edgeB)) <= 1.0e-16f)
+            continue;
+        if (output.triangleCount >=
+            PhysicalContactTriangleMesh::kMaximumTriangles)
+            return false;
+        PhysicalContactTriangle& triangle =
+            output.triangles[output.triangleCount++];
+        triangle.vertices = {points[a], points[b], points[c]};
+        PhysicalContactVec3 minimum{INFINITY, INFINITY, INFINITY};
+        PhysicalContactVec3 maximum{-INFINITY, -INFINITY, -INFINITY};
+        for (const PhysicalContactVec3 point : triangle.vertices)
+        {
+            minimum.x = std::min(minimum.x, point.x);
+            minimum.y = std::min(minimum.y, point.y);
+            minimum.z = std::min(minimum.z, point.z);
+            maximum.x = std::max(maximum.x, point.x);
+            maximum.y = std::max(maximum.y, point.y);
+            maximum.z = std::max(maximum.z, point.z);
+            groupMinimum.x = std::min(groupMinimum.x, point.x);
+            groupMinimum.y = std::min(groupMinimum.y, point.y);
+            groupMinimum.z = std::min(groupMinimum.z, point.z);
+            groupMaximum.x = std::max(groupMaximum.x, point.x);
+            groupMaximum.y = std::max(groupMaximum.y, point.y);
+            groupMaximum.z = std::max(groupMaximum.z, point.z);
+        }
+        triangle.centre = (minimum + maximum) * 0.5f;
+        triangle.halfExtents = (maximum - minimum) * 0.5f;
+        for (const PhysicalContactVec3 point : triangle.vertices)
+            triangle.boundRadius = std::max(
+                triangle.boundRadius,
+                PhysicalContactLength(point - triangle.centre));
+    }
+    if (!output.triangleCount)
+        return false;
+    output.groupCount = 1;
+    PhysicalContactTriangleGroup& group = output.groups[0];
+    group.firstTriangle = 0;
+    group.triangleCount = output.triangleCount;
+    group.centre = (groupMinimum + groupMaximum) * 0.5f;
+    group.halfExtents = (groupMaximum - groupMinimum) * 0.5f;
+    for (uint32_t triangleIndex = 0;
+         triangleIndex < output.triangleCount; ++triangleIndex)
+    {
+        for (const PhysicalContactVec3 point :
+             output.triangles[triangleIndex].vertices)
+            group.boundRadius = std::max(
+                group.boundRadius,
+                PhysicalContactLength(point - group.centre));
+    }
+    return PhysicalContactTriangleMeshValid(output);
+}
+
 inline bool PhysicalContactH3DecoratorMeshIsSolid(
     const PhysicalContactTriangleMesh& mesh, float minimumAxisRatio = 0.08f)
 {

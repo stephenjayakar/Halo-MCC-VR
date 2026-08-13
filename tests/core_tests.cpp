@@ -9380,6 +9380,20 @@ int main()
             PhysicalContactDecodeH3DecoratorTriangleStrip(
                 packedPlaneStrip.data(), packedPlaneStrip.size(), 0, 3,
                 {}, {1.0f, 1.0f, 1.0f}, decodedPlaneStrip);
+        const std::array<uint8_t, 12u> packedIndexedTriangles = {
+            0, 0, 1, 0, 2, 0,
+            0, 0, 2, 0, 3, 0};
+        PhysicalContactTriangleMesh decodedIndexedList{};
+        const bool decodedIndexed =
+            PhysicalContactDecodeH3DecoratorIndexedTriangles(
+                packedSolidStrip.data(), packedSolidStrip.size(),
+                packedIndexedTriangles.data(), packedIndexedTriangles.size(),
+                0, 6, 0, 2, false, {}, {1.0f, 1.0f, 1.0f},
+                decodedIndexedList);
+        const std::array<uint8_t, 12u> packedOutOfRangeIndices = {
+            0, 0, 1, 0, 9, 0,
+            0, 0, 2, 0, 3, 0};
+        PhysicalContactTriangleMesh rejectedIndexedList{};
         const bool decoratorBlockCrossed =
             PhysicalContactSegmentIntersectsExpandedAabb(
                 {-2.0f, 0.5f, 0.5f}, {2.0f, 0.5f, 0.5f},
@@ -9405,6 +9419,13 @@ int main()
               decodedRockUp.z > 0.99f && decodedSolid &&
               decodedSolidStrip.triangleCount == 2 &&
               PhysicalContactH3DecoratorMeshIsSolid(decodedSolidStrip) &&
+              decodedIndexed && decodedIndexedList.triangleCount == 2 &&
+              PhysicalContactH3DecoratorMeshIsSolid(decodedIndexedList) &&
+              !PhysicalContactDecodeH3DecoratorIndexedTriangles(
+                  packedSolidStrip.data(), packedSolidStrip.size(),
+                  packedOutOfRangeIndices.data(),
+                  packedOutOfRangeIndices.size(), 0, 6, 0, 2, false,
+                  {}, {1.0f, 1.0f, 1.0f}, rejectedIndexedList) &&
               decodedPlane && decodedPlaneStrip.triangleCount == 1 &&
               !PhysicalContactH3DecoratorMeshIsSolid(decodedPlaneStrip) &&
               decoratorBlockCrossed && decoratorBlockNearMissAccepted &&
@@ -9413,8 +9434,9 @@ int main()
                   packedRockPlacement.data(), {}, {},
                   decodedRockPlacement),
             "Halo 3 decorator decoding reconstructs Valhalla position, "
-            "rotation, and scale, expands exact strips, rejects planar foliage "
-            "as a rigid wall, rejects distant blocks before decoding, and "
+            "rotation, and scale, expands exact strips and indexed lists, "
+            "rejects invalid indices and planar foliage as a rigid wall, "
+            "rejects distant blocks before decoding, and "
             "fails closed on invalid block bounds");
 
         const auto makeBenchmarkMesh = [&](uint16_t triangleCount,

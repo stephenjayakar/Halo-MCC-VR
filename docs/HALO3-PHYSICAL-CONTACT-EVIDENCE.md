@@ -2803,3 +2803,31 @@ unchanged and still requires the exact selected body to be dynamic, so living
 enemies do not receive synthetic rigid-body impulses. Pure tests cover dynamic
 props, keyframed and unresolved enemy kinds, fixed non-enemy objects, vehicles,
 and excluded objects. Headset acceptance remains pending.
+
+### 2026-08-13 indexed-instanced solid decorators
+
+The rejected campaign report also identified a visible rock that the weapon
+passed through. The preserved `a3efc86` log accumulated native wall rays but no
+blocking plane for that contact. Existing exact decorator capture covered only
+non-indexed `DrawInstanced` triangle strips. D3D11 and the already bounded
+diagnostic hooks show that Halo also submits instanced geometry through
+`DrawIndexedInstanced`; production did not observe that draw family at all.
+This is a general renderer boundary, not a map or rock allowlist.
+
+The production capture now also observes the bound index buffer and
+`DrawIndexedInstanced`. It accepts only the already proven 20-byte compressed
+decorator vertex format, 16-byte placement format, exact 48/96-byte constants,
+triangle-list or triangle-strip topology, and 16- or 32-bit indices. Initial
+vertex and index bytes are copied once into fixed owned storage at buffer
+creation. Draw callbacks publish only pointers, sizes, constants, and bounded
+draw parameters into the existing fixed frame snapshot; they perform no
+allocation, logging, GPU readback, COM call, file I/O, or lock.
+
+The contact worker bounds index count to the triangle-mesh structural maximum,
+copies at most 16 KiB of vertex data and 1.5 KiB of indices to fixed stack
+storage, validates every signed base-vertex result, decodes exact indexed
+triangles, and retains the existing three-axis solid-mesh rejection so planar
+foliage cannot become a wall. Pure tests cover a 16-bit indexed solid mesh and
+out-of-range-index rejection. Existing non-indexed Valhalla capture is
+unchanged. The specific campaign rock and indexed runtime path remain pending
+headset acceptance.
