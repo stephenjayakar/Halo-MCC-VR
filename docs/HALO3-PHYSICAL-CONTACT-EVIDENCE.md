@@ -2547,3 +2547,40 @@ ray/sphere exit for each of the three observed target roots takes fixed scalar
 work, after which one complete triangle-versus-compound predicate must prove
 the proposed visible pose clear. Failure still leaves the correction disabled
 for that frame and increments the existing loud failure counter.
+
+### Direct-bound validation (`4cf1be3`)
+
+The installed Steam candidate from source `4cf1be3990595dd682661eb809df7804f7d6a9a6`
+(`halo3xr.dll` SHA-256
+`EAEDEA32735D579EB01A95A3A50103792C99A8FDEC7634504B4F79424609EB7D`)
+passed the long rotating-body test in visibly confirmed Halo 3 Forge on
+Construct. The final status recorded 19,302 render checks, 27 over 0.25 ms
+(0.14%), 19,302 conservative target fallbacks, 2,815 visible separations, and
+zero separation failures. The independent exact-target same-frame comparison
+recorded 8,006 samples and zero confirmed penetrations. Preserved log:
+`out/debug-openxr/20260813-015531560Z-rotating-body-gap.log`, SHA-256
+`D446AC3343ADADAEBDFCD2AAF709761E7159FF6160419921BA4EE72E5EB28D90`.
+
+The same installed candidate also passed all focused regressions through
+visible Halo 3 Forge navigation:
+
+- loose weapon push, lift, and release: `20260813-020501796Z-weapon-scoop.log`
+  (`9CE04C32009E8D5E384135779F57DA83011FF6F1D0DBFED287CFC18397DEDB67`);
+- left-hand pickup with native mass and release velocity:
+  `20260813-020846495Z-left-grab.log`
+  (`1F607BAAC0218E2FA67D305BF30F92EF645EBF596F85C79D693D0E864955E6FD`);
+- native melee plus contact haptic: `20260813-021159426Z-melee.log`
+  (`6FB16A949B574A2483975FB40717AD45C34C2C808098F8001C07CA65D93E6F0D`);
+- heavy vehicle nudge without melee on High Ground:
+  `20260813-021501426Z-vehicle-nudge.log`
+  (`B123BB96C0D11A9963231284F459D9BF67C35B46FE47C37CF5FDDD94017794AD`);
+- structure and placed-object wall contact on Valhalla:
+  `20260813-021826281Z-wall.log`
+  (`18298496980715636523129AAB82ACB2D74761A4F88710282EE3DAC2E772BD6D`);
+- Valhalla decorator/rock collision: `20260813-022200192Z-decorator-wall.log`
+  (`B12C03C005C6943471350A3252B22B04F458AC566A3F7869FC548A792F59B81A`).
+
+Every run used the SteamVR null driver only for automation and restored the
+original settings hash
+`F8B2C009AE05A2AC796D3458B9AA8B072A5BEA97CA8EC5A74FAA5DD585DBAB9E`.
+These passes are strong runtime evidence, but are not headset acceptance.
