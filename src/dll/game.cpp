@@ -6853,6 +6853,10 @@ namespace
         int32_t unitHandle, float* origin, float* forward,
         float* inheritedVelocity, const float* firstPersonWeaponOffset,
         bool offsetOrigin, bool offsetAim, bool verifyOrigin);
+    using Halo3ProjectileTargetingFn = bool(__fastcall*)(
+        uint32_t weaponIndex, void* targetingState, uint32_t targetHandle,
+        uint8_t flags, float* origin, float* inheritedVelocity,
+        float* forward);
     // Read-only render-node accessors used by Halo's own native camera-marker
     // path. The first returns the same interpolated 0x34-byte node bank the
     // visible-object renderer consumes; the second resolves an interpolated
@@ -6885,6 +6889,7 @@ namespace
     void** g_halo3AimAssistTagDataBase = nullptr;
     std::atomic<bool> g_halo3AimAssistBinding{false};
     Halo3UnitAdjustProjectileRayFn g_origHalo3UnitAdjustProjectileRay = nullptr;
+    Halo3ProjectileTargetingFn g_origHalo3ProjectileTargeting = nullptr;
     std::atomic<bool> g_halo3DirectWeaponAimBinding{false};
     struct Halo3DirectWeaponAimPublication
     {
@@ -6895,7 +6900,15 @@ namespace
     };
     Halo3DirectWeaponAimPublication g_halo3DirectWeaponAim;
     std::atomic<uint32_t> g_halo3DirectWeaponAimOverrides{0};
+    std::atomic<uint32_t> g_halo3DirectWeaponAimFinalOverrides{0};
     std::atomic<uint32_t> g_halo3DirectWeaponAimFaults{0};
+    struct Halo3DirectWeaponAimTargetingContext
+    {
+        bool active = false;
+        float direction[3]{};
+    };
+    thread_local Halo3DirectWeaponAimTargetingContext
+        g_halo3DirectWeaponAimTargetingContext;
     Halo3InterpolatedNodesFn g_halo3InterpolatedNodes = nullptr;
     Halo3MarkersInternalFn g_halo3MarkersInternal = nullptr;
     using Halo3ObjectSetVelocityFn = void(__fastcall*)(
@@ -8469,6 +8482,7 @@ namespace
         float* inheritedVelocity, const float* firstPersonWeaponOffset,
         bool offsetOrigin, bool offsetAim, bool verifyOrigin)
     {
+        g_halo3DirectWeaponAimTargetingContext = {};
         const Halo3UnitAdjustProjectileRayFn original =
             g_origHalo3UnitAdjustProjectileRay;
         if (!original)
@@ -8523,8 +8537,48 @@ namespace
             return;
         }
         memcpy(forward, direction, sizeof(direction));
+        g_halo3DirectWeaponAimTargetingContext.active = true;
+        memcpy(g_halo3DirectWeaponAimTargetingContext.direction,
+               direction, sizeof(direction));
         g_halo3DirectWeaponAimOverrides.fetch_add(
             1, std::memory_order_relaxed);
+    }
+
+    bool __fastcall Halo3ProjectileTargetingHook(
+        uint32_t weaponIndex, void* targetingState, uint32_t targetHandle,
+        uint8_t flags, float* origin, float* inheritedVelocity,
+        float* forward)
+    {
+        const Halo3ProjectileTargetingFn original =
+            g_origHalo3ProjectileTargeting;
+        if (!original)
+            return false;
+        const bool result = original(
+            weaponIndex, targetingState, targetHandle, flags, origin,
+            inheritedVelocity, forward);
+        const Halo3DirectWeaponAimTargetingContext context =
+            g_halo3DirectWeaponAimTargetingContext;
+        g_halo3DirectWeaponAimTargetingContext = {};
+        if (!g_halo3DirectWeaponAimBinding.load(
+                std::memory_order_acquire) || !context.active)
+            return result;
+        __try
+        {
+            if (Halo3DirectWeaponAimRestoreAfterTargeting(
+                    true, context.direction, forward))
+            {
+                g_halo3DirectWeaponAimFinalOverrides.fetch_add(
+                    1, std::memory_order_relaxed);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            g_halo3DirectWeaponAimBinding.store(
+                false, std::memory_order_release);
+            g_halo3DirectWeaponAimFaults.fetch_add(
+                1, std::memory_order_relaxed);
+        }
+        return result;
     }
 
     bool Halo3ContactMassForObjectBodyData(
@@ -11728,12 +11782,14 @@ namespace
                 directAimFaults);
             directAimFaultsLogged = directAimFaults;
         }
-        const uint32_t directAimOverrides =
-            g_halo3DirectWeaponAimOverrides.load(std::memory_order_relaxed);
-        if (!directAimFirstShotLogged && directAimOverrides != 0)
+        const uint32_t directAimFinalOverrides =
+            g_halo3DirectWeaponAimFinalOverrides.load(
+                std::memory_order_relaxed);
+        if (!directAimFirstShotLogged && directAimFinalOverrides != 0)
         {
             LOG("H3 direct weapon aim: first local on-foot shot used the "
-                "fresh visible-weapon direction before native aim assist");
+                "fresh visible-weapon direction after native targeting and "
+                "before authored spread");
             directAimFirstShotLogged = true;
         }
 
@@ -22093,6 +22149,22 @@ namespace
         "48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 "
         "55 41 56 41 57 48 8D 68 C1 48 81 EC C0 00 00 00 "
         "44 8B 15 ?? ?? ?? ?? 48 8B FA 0F 29 70 D8";
+    // H3EK and pinned retail place this sole projectile-targeting call after
+    // unit_adjust_projectile_ray and before authored spread. The helper's
+    // seven-argument ABI carries the mutable forward vector as argument 7.
+    inline constexpr uintptr_t kHalo3ProjectileTargetingExpectedRva =
+        0x13BAD0;
+    inline constexpr uintptr_t kHalo3ProjectileTargetingCallerExpectedRva =
+        0x368DD8;
+    inline constexpr size_t kHalo3ProjectileTargetingCallOffset = 38;
+    const char* kHalo3ProjectileTargetingSig =
+        "48 8B C4 44 88 48 20 44 89 40 18 55 53 56 57 "
+        "41 54 41 55 41 56 41 57 48 8D A8 D8 FE FF FF "
+        "48 81 EC E8 01 00 00 44 8B 15 ?? ?? ?? ?? 4C 8B F2";
+    const char* kHalo3ProjectileTargetingCallerSig =
+        "44 8B 44 24 48 48 8D 45 C0 48 89 44 24 30 49 8B D5 "
+        "48 8D 45 90 41 8B CA 48 89 44 24 28 48 8D 45 D0 "
+        "48 89 44 24 20 E8 ?? ?? ?? ?? 8A 44 24 41";
 
 #if HALOMCCVR_EXPERIMENTAL_ODST_BRINGUP
     const char* kOdstFpInterpolateSig =
@@ -23069,8 +23141,11 @@ namespace
             g_halo3DirectWeaponAimBinding.store(
                 false, std::memory_order_release);
             g_origHalo3UnitAdjustProjectileRay = nullptr;
+            g_origHalo3ProjectileTargeting = nullptr;
             Halo3ClearDirectWeaponAim();
             g_halo3DirectWeaponAimOverrides.store(
+                0, std::memory_order_relaxed);
+            g_halo3DirectWeaponAimFinalOverrides.store(
                 0, std::memory_order_relaxed);
             g_halo3DirectWeaponAimFaults.store(
                 0, std::memory_order_relaxed);
@@ -23080,46 +23155,106 @@ namespace
             const bool rayUnique = rayHit && !sig::Find(
                 rayHit + 1, base + size - rayHit - 1,
                 kHalo3UnitAdjustProjectileRaySig);
-            MH_STATUS createStatus = MH_ERROR_NOT_CREATED;
-            MH_STATUS enableStatus = MH_ERROR_NOT_CREATED;
-            if (rayUnique)
+            const uintptr_t targetingHit =
+                sig::Find(base, size, kHalo3ProjectileTargetingSig);
+            const uintptr_t targetingCallerHit =
+                sig::Find(base, size, kHalo3ProjectileTargetingCallerSig);
+            const bool targetingUnique = targetingHit && !sig::Find(
+                targetingHit + 1, base + size - targetingHit - 1,
+                kHalo3ProjectileTargetingSig);
+            const bool targetingCallerUnique = targetingCallerHit &&
+                !sig::Find(targetingCallerHit + 1,
+                           base + size - targetingCallerHit - 1,
+                           kHalo3ProjectileTargetingCallerSig);
+            bool targetingCallerConsistent = targetingUnique &&
+                targetingCallerUnique;
+            if (targetingCallerConsistent)
             {
-                createStatus = MH_CreateHook(
+                const uintptr_t call = targetingCallerHit +
+                    kHalo3ProjectileTargetingCallOffset;
+                targetingCallerConsistent =
+                    *reinterpret_cast<const uint8_t*>(call) == 0xE8 &&
+                    call + 5 + *reinterpret_cast<const int32_t*>(call + 1) ==
+                        targetingHit;
+            }
+            MH_STATUS rayCreateStatus = MH_ERROR_NOT_CREATED;
+            MH_STATUS targetCreateStatus = MH_ERROR_NOT_CREATED;
+            MH_STATUS rayEnableStatus = MH_ERROR_NOT_CREATED;
+            MH_STATUS targetEnableStatus = MH_ERROR_NOT_CREATED;
+            if (rayUnique && targetingCallerConsistent)
+            {
+                rayCreateStatus = MH_CreateHook(
                     reinterpret_cast<void*>(rayHit),
                     reinterpret_cast<void*>(
                         &Halo3UnitAdjustProjectileRayHook),
                     reinterpret_cast<void**>(
                         &g_origHalo3UnitAdjustProjectileRay));
-                if (createStatus == MH_OK)
-                    enableStatus = MH_EnableHook(
+                if (rayCreateStatus == MH_OK)
+                    targetCreateStatus = MH_CreateHook(
+                        reinterpret_cast<void*>(targetingHit),
+                        reinterpret_cast<void*>(
+                            &Halo3ProjectileTargetingHook),
+                        reinterpret_cast<void**>(
+                            &g_origHalo3ProjectileTargeting));
+                if (targetCreateStatus == MH_OK)
+                    rayEnableStatus = MH_EnableHook(
                         reinterpret_cast<void*>(rayHit));
+                if (rayEnableStatus == MH_OK)
+                    targetEnableStatus = MH_EnableHook(
+                        reinterpret_cast<void*>(targetingHit));
             }
-            if (createStatus == MH_OK && enableStatus == MH_OK)
+            if (rayCreateStatus == MH_OK &&
+                targetCreateStatus == MH_OK &&
+                rayEnableStatus == MH_OK &&
+                targetEnableStatus == MH_OK)
             {
                 RememberInstalledGameHook(reinterpret_cast<void*>(rayHit));
+                RememberInstalledGameHook(
+                    reinterpret_cast<void*>(targetingHit));
                 g_halo3DirectWeaponAimBinding.store(
                     true, std::memory_order_release);
                 LOG("H3 direct weapon aim: installed ray=+0x%llX "
-                    "[unique; expected +0x%llX]; local on-foot shots use "
-                    "fresh visible-weapon direction before native aim assist",
+                    "targeting=+0x%llX caller=+0x%llX [unique; expected "
+                    "+0x%llX/+0x%llX/+0x%llX]; local on-foot shots restore "
+                    "the visible-barrel ray after native targeting and before "
+                    "authored spread",
                     (unsigned long long)(rayHit - base),
+                    (unsigned long long)(targetingHit - base),
+                    (unsigned long long)(targetingCallerHit - base),
                     (unsigned long long)
-                        kHalo3UnitAdjustProjectileRayExpectedRva);
+                        kHalo3UnitAdjustProjectileRayExpectedRva,
+                    (unsigned long long)
+                        kHalo3ProjectileTargetingExpectedRva,
+                    (unsigned long long)
+                        kHalo3ProjectileTargetingCallerExpectedRva);
             }
             else
             {
-                if (createStatus == MH_OK)
-                {
+                if (targetEnableStatus == MH_OK)
+                    MH_DisableHook(reinterpret_cast<void*>(targetingHit));
+                if (rayEnableStatus == MH_OK)
                     MH_DisableHook(reinterpret_cast<void*>(rayHit));
-                    MH_RemoveHook(reinterpret_cast<void*>(rayHit));
+                if (targetCreateStatus == MH_OK)
+                {
+                    MH_RemoveHook(reinterpret_cast<void*>(targetingHit));
                 }
+                if (rayCreateStatus == MH_OK)
+                    MH_RemoveHook(reinterpret_cast<void*>(rayHit));
                 g_origHalo3UnitAdjustProjectileRay = nullptr;
+                g_origHalo3ProjectileTargeting = nullptr;
                 LOG("H3 direct weapon aim: stock fallback "
-                    "(ray=%d/%d hook=%d/%d); right-stick aim, native firing, "
-                    "aim assist, camera, and all other features unaffected",
+                    "(ray=%d/%d targeting=%d/%d caller=%d/%d relation=%d "
+                    "hooks=%d/%d/%d/%d); right-stick aim, native firing, "
+                    "camera, and all other features unaffected",
                     rayHit ? 1 : 0, rayUnique ? 1 : 0,
-                    static_cast<int>(createStatus),
-                    static_cast<int>(enableStatus));
+                    targetingHit ? 1 : 0, targetingUnique ? 1 : 0,
+                    targetingCallerHit ? 1 : 0,
+                    targetingCallerUnique ? 1 : 0,
+                    targetingCallerConsistent ? 1 : 0,
+                    static_cast<int>(rayCreateStatus),
+                    static_cast<int>(targetCreateStatus),
+                    static_cast<int>(rayEnableStatus),
+                    static_cast<int>(targetEnableStatus));
             }
         }
 

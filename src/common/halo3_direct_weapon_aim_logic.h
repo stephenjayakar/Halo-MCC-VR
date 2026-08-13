@@ -61,6 +61,34 @@ inline bool Halo3DirectWeaponAimFromVisibleBasis(
     return true;
 }
 
+// Halo's projectile-targeting helper is downstream of
+// unit_adjust_projectile_ray and may replace that helper's direction. Restore
+// the already validated visible-barrel ray at this last targeting boundary;
+// the caller applies authored weapon spread afterward.
+inline bool Halo3DirectWeaponAimRestoreAfterTargeting(
+    bool localVrShot, const float* visibleDirection,
+    float* targetedDirection) noexcept
+{
+    if (!localVrShot || !visibleDirection || !targetedDirection)
+        return false;
+    const float lengthSquared =
+        visibleDirection[0] * visibleDirection[0] +
+        visibleDirection[1] * visibleDirection[1] +
+        visibleDirection[2] * visibleDirection[2];
+    if (!std::isfinite(visibleDirection[0]) ||
+        !std::isfinite(visibleDirection[1]) ||
+        !std::isfinite(visibleDirection[2]) ||
+        !std::isfinite(lengthSquared) ||
+        lengthSquared < 0.9025f || lengthSquared > 1.1025f)
+        return false;
+    const float inverseLength = 1.0f / std::sqrt(lengthSquared);
+    if (!std::isfinite(inverseLength))
+        return false;
+    for (int axis = 0; axis < 3; ++axis)
+        targetedDirection[axis] = visibleDirection[axis] * inverseLength;
+    return true;
+}
+
 // The detour calls Halo first, then may replace only the resulting direction.
 // Every lifecycle or identity doubt keeps that original direction unchanged.
 inline bool Halo3DirectWeaponAimDirectionForShot(

@@ -156,6 +156,36 @@ sample no older than 100 ms. Halo still owns origin correction and verification,
 targeting, aim assist, spread, ballistics, and all non-local or vehicle shots.
 Pure coverage exercises both boolean modes. Headset acceptance remains pending.
 
+### 2026-08-13 downstream targeting overwrite
+
+The next headset report against `a3efc86` still described shots as relative to
+the torso even though the installed log recorded a local direct-ray override.
+Pinned retail disassembly identified the missing downstream writer. The sole
+caller of `unit_adjust_projectile_ray` at `halo3.dll+0x368B92` later calls the
+projectile-targeting helper at `+0x368DFE`. That helper's mutable seventh
+argument is the same `[rbp-0x40]` direction overwritten by the direct-ray hook.
+It writes the direction again before the caller copies it into the projectile
+transaction at `+0x369118`. The caller applies authored random spread only
+after that copy.
+
+The targeting helper is uniquely identified at pinned retail RVA `0x13BAD0` by
+its 48-byte entry signature. It has exactly one direct caller in the module.
+The 47-byte caller signature is also unique at RVA `0x368DD8`; install-time
+validation decodes its `E8 rel32` edge and requires it to target the matched
+helper. The helper's seven-argument ABI and ordering are homologous to the
+official H3EK firing path.
+
+The direct-ray transaction now carries its validated local-shot direction in
+thread-local state from `unit_adjust_projectile_ray` to that exact downstream
+helper. The helper still runs normally, preserving its target bookkeeping and
+other effects, then the detour restores only the visible-barrel direction. The
+thread-local state is cleared at every projectile-ray call and consumed once,
+so AI or a later shot cannot inherit it. Halo's authored spread and ballistics
+remain downstream. Either signature, caller-edge, or hook failure leaves the
+entire optional direct-ray transaction on stock fallback. Pure tests cover the
+final normalized restore and its local-shot, pointer, finite-value, and
+unit-length rejects. Headset acceptance remains pending.
+
 ## Always-scoped VR auto-aim
 
 ### Pinned evidence
