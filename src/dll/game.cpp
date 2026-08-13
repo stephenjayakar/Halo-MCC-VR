@@ -7048,9 +7048,9 @@ namespace
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactFinalRenderReserveMeters = 0.050f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Keep the 5 cm target-bank reserve, but use one verified target-centre
-    // escape direction so overlap correction remains bounded and cheap.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    // The one-direction binary search still exceeded the render budget when
+    // active. Keep it dormant before replacing iteration with a direct bound.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};

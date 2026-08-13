@@ -2534,3 +2534,8 @@ The replacement retains the 5 cm motion reserve but runs one directly verified
 target-centre escape direction. The conservative target compound makes that
 direction well-defined; the existing fixed expansion and binary search still
 refuse any result that is not clear of all three observed target roots.
+
+Candidate `7358ca0` kept its first 846 same-frame comparisons clear, but 219 of
+2,095 render checks exceeded 0.25 ms (10.45%). The single-direction binary
+search was still too expensive when the 5 cm reserve activated. The run was
+stopped before the long threshold and the behavior is disabled.
