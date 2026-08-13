@@ -7051,11 +7051,12 @@ namespace
     // The target shape has at most 16 children and the render guard retains at
     // most three target poses. Forward-only clearing therefore needs no more
     // than 48 distinct child/pose steps.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     constexpr int kHalo3ExactRenderChildSeparationSteps =
         static_cast<int>(PhysicalContactCompoundShape::kMaximumChildren) *
         kHalo3ExactRenderSeparationPasses;
+    constexpr float kHalo3ExactRenderMaximumSeparationMeters = 16.0f;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<uint32_t> g_halo3ContactTargetMotionType{0};
@@ -8924,7 +8925,8 @@ namespace
                                 targetTransforms[hitObservation], outwardUnit);
                         }
                         const float remaining =
-                            4.0f * worldScale - directDistance;
+                            kHalo3ExactRenderMaximumSeparationMeters *
+                                worldScale - directDistance;
                         const float stepDistance =
                             PhysicalContactSupportPlaneSeparationDistance(
                                 weaponMinimum, targetMaximum, outwardUnit,

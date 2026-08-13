@@ -2659,3 +2659,10 @@ remained safe (zero over-budget samples at the failure). Preserved log:
 `out/debug-openxr/20260813-025816999Z-rotating-body-gap.log`, SHA-256
 `E167CD15708CB99DCB30B689314ABB85721020C940D3654FD5AF862E13F45AF1`.
 The four-metre-ceiling behavior is rejected and disabled.
+
+The next candidate retains the 48 structural steps and permits up to 16 m of
+cumulative forward escape for the deliberately extreme rotating replay. This
+is a fail-closed upper bound, not an ordinary setback: every step requires a
+current expanded-geometry intersection, and the result is published only after
+all three observed poses are proven clear. Headset testing must still reject
+any visible jump in ordinary push/lift use even if the stress test passes.
