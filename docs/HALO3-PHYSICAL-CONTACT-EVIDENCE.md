@@ -3197,3 +3197,28 @@ remain allocation-free, lock-free, logging-free, and scan-free. Pure tests
 cover a valid 36-instance stream, wrong and unavailable creator identity, the
 unchanged large-stream rule, and malformed record ratios. The reported rock
 still requires Campaign headset acceptance.
+
+### 2026-08-13 complete weapon-face native enemy samples
+
+The failed Campaign report had no newer reproducible headset log, so the native
+damage transaction itself could not be blamed: that same verified selector,
+owner, damage, effects, and exact-target path has applied enemy melee in earlier
+Campaign sessions. Inspection instead found that its independent native enemy
+fallback swept only the authored convex proxy's vertices and child centres.
+For the assault rifle this is 21 points, while the retained exact visible weapon
+has 36 triangles. A broad face can cross an enemy between all 21 proxy points,
+leaving both the native exact handle fallback and its known-good damage path
+unreached.
+
+The native vector-query sweep now keeps every existing convex sample and appends
+one local-space centroid from each authored weapon triangle. When a weapon has
+more triangles than the fixed 264-point array permits, it selects evenly across
+the complete triangle range; it never allocates or overruns the fixed buffer.
+The assault rifle therefore covers all 36 authored faces in addition to its 21
+existing proxy points. Each ray still uses Halo's native first-obstruction
+result, excludes the player and held weapon, requires a live root biped,
+creature, or giant, and cannot pass a wall on that same ray. An authored object
+winner still cannot be replaced. The exact animated-body path remains preferred
+and unchanged. Pure tests cover preserved prior samples, exact face centroids,
+even bounds, malformed inputs, and capacity rejection. Campaign headset melee
+acceptance remains pending.

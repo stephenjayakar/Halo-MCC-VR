@@ -16065,10 +16065,17 @@ namespace
                 PhysicalContactNormalize(intendedTip - previousTip,
                                          forward);
             std::array<PhysicalContactVec3, 264> nativeLocalSamples{};
-            const size_t nativeLocalSampleCount =
+            size_t nativeLocalSampleCount =
                 PhysicalContactCompoundSamplePoints(
                     weaponShape, nativeLocalSamples.data(),
                     nativeLocalSamples.size());
+            if (collisionShape)
+            {
+                nativeLocalSampleCount =
+                    PhysicalContactAppendTriangleCentroidSamples(
+                        weaponTriangleMesh, nativeLocalSamples.data(),
+                        nativeLocalSampleCount, nativeLocalSamples.size());
+            }
             g_halo3ContactNativeSamples.store(
                 static_cast<uint32_t>(nativeLocalSampleCount),
                 std::memory_order_relaxed);

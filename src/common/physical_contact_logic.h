@@ -645,6 +645,36 @@ inline bool PhysicalContactTriangleMeshValid(
     return true;
 }
 
+// Add a bounded, evenly distributed set of exact authored surface points for
+// Halo's native continuous vector query. Convex vertices alone leave the broad
+// faces of a weapon unsampled; triangle centroids cover those faces without
+// multiplying the native query count by three duplicate edge vertices.
+inline size_t PhysicalContactAppendTriangleCentroidSamples(
+    const PhysicalContactTriangleMesh& mesh, PhysicalContactVec3* samples,
+    size_t sampleCount, size_t sampleCapacity)
+{
+    if (!samples || sampleCount > sampleCapacity || !mesh.triangleCount ||
+        mesh.triangleCount > PhysicalContactTriangleMesh::kMaximumTriangles)
+        return sampleCount;
+    const size_t available = sampleCapacity - sampleCount;
+    const size_t addCount = std::min<size_t>(available, mesh.triangleCount);
+    for (size_t sample = 0; sample < addCount; ++sample)
+    {
+        const size_t triangleIndex =
+            sample * static_cast<size_t>(mesh.triangleCount) / addCount;
+        const PhysicalContactTriangle& triangle =
+            mesh.triangles[triangleIndex];
+        if (!PhysicalContactTriangleValid(triangle))
+            continue;
+        const PhysicalContactVec3 centroid =
+            (triangle.vertices[0] + triangle.vertices[1] +
+             triangle.vertices[2]) * (1.0f / 3.0f);
+        if (PhysicalContactFinite(centroid))
+            samples[sampleCount++] = centroid;
+    }
+    return sampleCount;
+}
+
 inline bool PhysicalContactH3DecoratorPlacementBufferEvidence(
     uintptr_t creatorRva, uintptr_t verifiedCreatorRva,
     uint32_t sampledRecords,

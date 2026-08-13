@@ -9477,6 +9477,28 @@ int main()
             "contact skin from geometric intersection, and rejects malformed "
             "fixed mesh bounds");
 
+        std::array<PhysicalContactVec3, 8> nativeSurfaceSamples{};
+        nativeSurfaceSamples[0] = {9.0f, 9.0f, 9.0f};
+        const size_t nativeSurfaceSampleCount =
+            PhysicalContactAppendTriangleCentroidSamples(
+                separatedSurfaceMesh, nativeSurfaceSamples.data(), 1,
+                nativeSurfaceSamples.size());
+        std::array<PhysicalContactVec3, 2> boundedNativeSurfaceSamples{};
+        const size_t boundedNativeSurfaceSampleCount =
+            PhysicalContactAppendTriangleCentroidSamples(
+                separatedSurfaceMesh, boundedNativeSurfaceSamples.data(), 0,
+                boundedNativeSurfaceSamples.size());
+        Check(nativeSurfaceSampleCount == 3 &&
+              nativeSurfaceSamples[0].x == 9.0f &&
+              std::fabs(nativeSurfaceSamples[1].x + 0.50f) < 1.0e-6f &&
+              std::fabs(nativeSurfaceSamples[2].x - 0.50f) < 1.0e-6f &&
+              boundedNativeSurfaceSampleCount == 2 &&
+              PhysicalContactAppendTriangleCentroidSamples(
+                  separatedSurfaceMesh, nativeSurfaceSamples.data(), 9,
+                  nativeSurfaceSamples.size()) == 9,
+            "Native Halo 3 contact samples retain prior convex points and add "
+            "bounded exact triangle-face centroids across the authored weapon");
+
         const std::array<uint8_t, 16> packedRockPlacement{
             0xA9, 0xBE, 0xA5, 0x22, 0x65, 0x35, 0x00, 0x00,
             0x7E, 0x7D, 0xC7, 0x52, 0x78, 0x96, 0xE7, 0x77};
