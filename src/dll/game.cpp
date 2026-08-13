@@ -7016,8 +7016,9 @@ namespace
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
     // The first render-callback exact guard used no motion reserve and failed
-    // runtime validation. Keep the replacement dormant until its own commit.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    // runtime validation. The replacement keeps exact triangles and adds the
+    // already-proven 8 mm visual reserve for one concurrent target update.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<uint32_t> g_halo3ContactTargetMotionType{0};

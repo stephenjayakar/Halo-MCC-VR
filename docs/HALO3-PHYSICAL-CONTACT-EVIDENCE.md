@@ -2359,3 +2359,9 @@ failure log is
 The failed zero-margin guard is disabled. Its code remains dormant as required
 by the candidate discipline; the next candidate will enable the 8 mm authored-
 triangle reserve as a separate behavior. Packaging and replay remain pending.
+
+The replacement candidate enables that dormant path with the existing 8 mm
+visual reserve around the same exact authored triangles. The 1 mm verified-
+clear padding remains unchanged. This covers one concurrent interpolation
+update without switching to a bounds proxy. Packaging and replay remain
+pending.
