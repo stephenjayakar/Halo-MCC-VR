@@ -3052,3 +3052,22 @@ finite, count, broad-phase, root-object, static-motion, and plane-capacity
 guards remain unchanged. The full continuous triangle sweep tests cover the
 underlying geometry path; the reported campaign rock still requires headset
 acceptance.
+
+### 2026-08-13 fast enemy swing saturation
+
+The preserved Quest headset Campaign session contains 977 physical-contact
+status samples. Tracked weapon speed has a 90th percentile of `8.99 m/s`, a
+95th percentile of `13.75 m/s`, and a maximum of `22.35 m/s`. The shared melee
+plausibility guard rejected every impact above `8.0 m/s`. That guard was useful
+for rigid targets, but on an exact animated-enemy contact it made a harder swing
+less likely to melee—the opposite of the requested behavior.
+
+Exact biped, creature, and giant contacts now saturate their damage decision at
+the existing safe `8.0 m/s` ceiling instead of exceeding it and being rejected.
+The native authored damage/effect is still applied once; the cap changes only
+the admission signal. Vehicles, props, and loose objects retain the uncapped
+measured impact and the existing over-`8.0 m/s` rejection, so a tracking outlier
+cannot turn a fast Mongoose or prop contact into melee. Pure tests cover a
+`13.75 m/s` enemy hit becoming melee at the capped signal and the identical
+vehicle hit remaining physics-only. Headset Campaign acceptance remains
+pending.

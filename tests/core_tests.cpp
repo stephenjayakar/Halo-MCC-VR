@@ -9872,6 +9872,14 @@ int main()
             PhysicalContactTargetMeleeImpactSpeed(
                 false, armedEnemyContinuation, 0, {-3.0f, 0.0f, 0.0f}, {},
                 {1.0f, 0.0f, 0.0f});
+        const float fastEnemyImpact =
+            PhysicalContactTargetMeleeImpactSpeed(
+                true, true, 0, {-13.75f, 0.0f, 0.0f},
+                {-13.75f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f});
+        const float fastVehicleImpact =
+            PhysicalContactTargetMeleeImpactSpeed(
+                true, true, 1, {-13.75f, 0.0f, 0.0f},
+                {-13.75f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f});
         const PhysicalContactVec3 fallbackEnemyNormal =
             PhysicalContactEnemyMeleeFallbackNormal(
                 {0.0f, 2.0f, 0.0f}, {1.0f, 0.0f, 0.0f});
@@ -9890,6 +9898,8 @@ int main()
               stationaryEnemyImpact == 0.0f &&
               std::fabs(continuedEnemyImpact - 2.1f) < 1.0e-6f &&
               enemyRunsIntoStillWeapon == 0.0f &&
+              std::fabs(fastEnemyImpact - 8.0f) < 1.0e-6f &&
+              std::fabs(fastVehicleImpact - 13.75f) < 1.0e-6f &&
               PhysicalContactEnemyMeleeKind(0) &&
               PhysicalContactEnemyMeleeKind(12) &&
               PhysicalContactEnemyMeleeKind(13) &&
@@ -9971,6 +9981,10 @@ int main()
                   PhysicalContactAction::ImpulseAndMelee &&
               PhysicalContactClassify(25.03f, 8.01f, 1.50f) ==
                   PhysicalContactAction::ImpulseOnly &&
+              PhysicalContactClassify(13.75f, fastEnemyImpact, 0.05f) ==
+                  PhysicalContactAction::ImpulseAndMelee &&
+              PhysicalContactClassify(13.75f, fastVehicleImpact, 1.50f) ==
+                  PhysicalContactAction::ImpulseOnly &&
               PhysicalContactMeleeSpeedPlausible(8.0f) &&
               !PhysicalContactMeleeSpeedPlausible(8.01f) &&
               PhysicalContactClassify(
@@ -9987,8 +10001,9 @@ int main()
             "relative speed, plus a motion-facing effects normal, "
             "target rebound and vehicle/prop tangential or sustained shoving "
             "stay physics-only, enemies begin at the tracking-noise boundary, "
-            "rigid targets begin exactly at the configured threshold, and implausible "
-            "headset spikes remain impulse-only");
+            "rigid targets begin exactly at the configured threshold, exact "
+            "enemy hits saturate instead of disappearing above 8 m/s, and "
+            "rigid-target headset spikes remain impulse-only");
 
         PhysicalContactDebounce debounce;
         bool first = false;

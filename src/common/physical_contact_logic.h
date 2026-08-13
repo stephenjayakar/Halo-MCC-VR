@@ -3013,8 +3013,19 @@ inline float PhysicalContactTargetMeleeImpactSpeed(
     // rule used by every target kind.
     const float weaponSpeed = PhysicalContactLength(
         weaponVelocityMetersPerSecond);
-    return std::isfinite(weaponSpeed)
-        ? std::max(normalImpact, weaponSpeed) : normalImpact;
+    if (!std::isfinite(weaponSpeed))
+        return normalImpact;
+
+    // The preserved Quest headset trace puts ordinary fast swings above the
+    // generic 8 m/s spike ceiling more than ten percent of the time. Once an
+    // exact animated enemy body has been contacted, throwing those samples
+    // away makes swinging harder suppress melee. Saturate the enemy-only
+    // damage signal at the proven safe ceiling instead. Rigid targets still
+    // return their uncapped normal impact and retain the generic spike reject,
+    // so a vehicle or prop cannot gain melee from a tracking outlier.
+    return std::min(
+        std::max(normalImpact, weaponSpeed),
+        kPhysicalContactMaximumMeleeSpeedMetersPerSecond);
 }
 
 inline float PhysicalContactTargetActionSpeed(
