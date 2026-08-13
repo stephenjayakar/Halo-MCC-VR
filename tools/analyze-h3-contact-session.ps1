@@ -75,6 +75,9 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
     $directAimOriginShiftMeters = $null
     $directAimDirectionChangeDegrees = $null
     $directAimVisibleRootGapMeters = $null
+    $directAimNativeTargetingRewriteDegrees = $null
+    $directAimNativeTargetingBranch = $null
+    $directAimNativeTargetingResult = $null
 
     foreach ($line in ($Text -split "`r?`n")) {
         if (-not $sourceCommit -and
@@ -122,6 +125,18 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
                 $directAimOriginShiftMeters = $originShift
                 $directAimDirectionChangeDegrees = $directionChange
                 $directAimVisibleRootGapMeters = $visibleRootGap
+            }
+            if ($line -match
+                'native targeting rewrite=([-+0-9.eE]+)deg branch=([0-9]+) result=([01])') {
+                $rewrite = 0.0
+                if ([double]::TryParse(
+                        $Matches[1], [Globalization.NumberStyles]::Float,
+                        [Globalization.CultureInfo]::InvariantCulture,
+                        [ref]$rewrite)) {
+                    $directAimNativeTargetingRewriteDegrees = $rewrite
+                    $directAimNativeTargetingBranch = [uint32]$Matches[2]
+                    $directAimNativeTargetingResult = [bool][int]$Matches[3]
+                }
             }
         }
         if ($line -like '*H3 physical contact status:*') {
@@ -273,6 +288,10 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
             stock_origin_shift_m = $directAimOriginShiftMeters
             stock_direction_change_deg = $directAimDirectionChangeDegrees
             visible_root_gap_m = $directAimVisibleRootGapMeters
+            native_targeting_rewrite_deg =
+                $directAimNativeTargetingRewriteDegrees
+            native_targeting_branch = $directAimNativeTargetingBranch
+            native_targeting_result = $directAimNativeTargetingResult
         }
         observed = [pscustomobject]$checks
         object_kinds = $kindObjects
@@ -322,7 +341,7 @@ if ($SelfTest) {
 [10:00:00.004] headset: panel is running at 90.0Hz
 [10:00:00.005] H3 physical contact: optional native bindings installed
 [10:00:00.006] H3 direct weapon aim: installed ray=+0x3524B0 targeting=+0x13BAD0/+0x5B15A4 [unique]
-[10:00:00.007] H3 direct weapon aim: first local on-foot shot used fresh visible origin+direction after native targeting, before authored spread (stock origin shift=0.423m direction change=37.5deg visible-root gap=0.233m telemetry=1)
+[10:00:00.007] H3 direct weapon aim: first local on-foot shot used fresh visible origin+direction after native targeting, before authored spread (stock origin shift=0.423m direction change=37.5deg visible-root gap=0.233m native targeting rewrite=4.5deg branch=2 result=1 telemetry=1)
 [10:00:01.000] H3 physical contact status: sweeps=2 hits=1 impulses=1 releases=0 melees=1 commandStatus=2 meleeStatus=2 target=0x12340001 candidate=0x12340001 kind=0 weaponMass=2.764 targetMass=0.382 contactHaptic=0.250 authoredShapeHits=1 animatedBodyHits=1 enemyAssistHits=1 weaponTriangles=36 targetShapeSource=3 targetTriangles=8 targetDetailed=1 targetFallback=0 wallBlocks=1 bodyConstraints=1 bodyFallbackNormalConstraints=1 bodyUncertainHolds=1 bodyRenderSeparations=1 bodyRenderSeparationFailures=0 bodyRenderSamples=12 bodyRenderOver250us=0 bodyRenderConvexFallbacks=0 bodyRenderExactTargets=12 bodyRenderExactClears=12 wallRays=4 wallObjectPlanes=2 wallPlanes=3 decoratorPlanes=5 decoratorSelfTest=0
 [10:00:01.001] H3 left grab status: bindings=1 acquisitions=1 commands=2 applied=2 releases=1 mass=0.382
 [10:00:01.002] H3 physical contact visible IDs: slotMatches=3 slotMisses=0 submissions=3
@@ -344,6 +363,9 @@ if ($SelfTest) {
         $report.direct_weapon_aim.stock_origin_shift_m -ne 0.423 -or
         $report.direct_weapon_aim.stock_direction_change_deg -ne 37.5 -or
         $report.direct_weapon_aim.visible_root_gap_m -ne 0.233 -or
+        $report.direct_weapon_aim.native_targeting_rewrite_deg -ne 4.5 -or
+        $report.direct_weapon_aim.native_targeting_branch -ne 2 -or
+        -not $report.direct_weapon_aim.native_targeting_result -or
         $report.object_kinds.Count -ne 1 -or
         $report.object_kinds[0].name -ne 'biped') {
         throw 'Halo 3 contact-session analyzer self-test failed.'

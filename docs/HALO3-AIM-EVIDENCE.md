@@ -371,3 +371,24 @@ weapons without zoom, invalid counts, already-scoped levels, and VR-off calls.
 The remaining acceptance test is in a Halo 3 headset: compare the same scoped
 weapon unscoped versus scoped and confirm that target adhesion is unchanged,
 while the visible barrel, reticle, muzzle effect, and shot still share one line.
+
+### 2026-08-13 native targeting rewrite telemetry
+
+The post-targeting visible-ray restore fixes the verified downstream overwrite,
+but the official targeting helper also owns aim-assist work. Official H3EK RVA
+`0x00411F60` calls the pinned `aim_assist_build_query_parameters` at
+`0x0040DE60`, consumes the resulting query, and writes its final direction to
+the caller's seventh argument at `0x00412822`. Therefore the native direction
+immediately before the restore can contain either useful authored targeting or
+the torso-relative rewrite reported by the user. A guessed angular clamp would
+not distinguish them.
+
+The first-shot diagnostic now measures the angle between that native output and
+the already validated visible-barrel direction before restoring the latter. It
+also records which of the two mutually exclusive targeting branches ran and the
+native helper's boolean result. The hot hook performs only finite arithmetic and
+atomic stores; formatting remains on the existing 50 ms worker. This changes no
+shot, aim-assist, spread, target, or input behavior. A headset run can now show
+whether Halo attempted a small aim-assist correction or a large torso-owned
+replacement, which is the evidence required before preserving or constraining
+any part of that rewrite.
