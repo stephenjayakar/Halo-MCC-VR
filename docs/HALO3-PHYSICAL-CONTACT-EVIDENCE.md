@@ -2603,3 +2603,13 @@ that actually overlap the intended weapon pose contribute, the result is
 bounded to four metres, and one complete triangle-versus-compound query must
 still prove all observed target poses clear. This keeps constant query count
 while avoiding the sphere bound's false one-metre refusal.
+
+Candidate `c34dad4` disproved the whole-compound version. Its first run found
+one confirmed same-frame penetration after eleven render separation failures.
+The target collision model contained a distant authored child, producing a
+43 m root-space span even though the actual overlapping child was local. A
+support plane over every child therefore exceeded the four-metre guard and
+correctly refused to move, but left the visible weapon intersecting. Preserved
+log: `out/debug-openxr/20260813-023617291Z-rotating-body-gap.log`, SHA-256
+`567D3A5F3B4DBFEE2ABE7C6C12BE661B5CCD874973A51FAC7C2C48C7CADA26E3`.
+The whole-compound behavior is rejected and disabled.

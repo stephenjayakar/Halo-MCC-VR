@@ -7048,9 +7048,10 @@ namespace
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactFinalRenderReserveMeters = 0.050f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Separate the exact weapon and conservative target along one actual
-    // support plane, then prove the result with one complete geometry query.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    // A whole-compound support plane can inherit a distant authored child and
+    // refuse the four-metre bound. Keep it dormant before selecting the exact
+    // overlapping child and triangle as the escape reference.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
