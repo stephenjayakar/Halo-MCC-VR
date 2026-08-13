@@ -280,8 +280,13 @@ transforms its local translation and +X direction through its exact final,
 post-contact visible node palette and publishes that world muzzle ray. The old
 wrist-point publication is removed, so a later controller-pose query cannot
 overwrite the final visible muzzle. Missing marker data, a stale generation,
-invalid node, non-finite transform, or malformed quaternion clears this
-optional publication and keeps Halo's stock shot. The callback performs no
+invalid node, non-finite transform, or malformed quaternion no longer sends a
+local VR shot back to Halo's torso-owned origin. When the final visible weapon
+palette is valid but its authored marker is unavailable, the transaction uses
+that palette's exact rendered root and forward direction as a temporary
+weapon-owned fallback. The exact `primary_trigger` marker remains preferred
+whenever it validates. A missing or invalid visible palette still keeps Halo's
+stock shot. The callback performs no
 allocation, logging, signature scan, file I/O, COM call, or lock. Native target
 selection, the already proven aim-assist query, authored spread, projectile
 type, and ballistics remain downstream and unchanged. Pure coverage proves the

@@ -8601,9 +8601,16 @@ namespace
                 cache.present = false;
             }
         }
-        if (!cache.present || cache.nodeIndex >= nodeCount)
+        if (Halo3DirectWeaponAimAnchorForPalette(
+                true, cache.present && cache.nodeIndex < nodeCount) ==
+            Halo3DirectWeaponAimAnchor::VisibleRoot)
         {
-            Halo3ClearDirectWeaponAim();
+            // A missing optional marker must not send local VR firing back to
+            // Halo's torso-owned origin. The final visible root is still an
+            // exact weapon-owned world pose and direction; use it until the
+            // authored muzzle marker becomes available.
+            Halo3PublishDirectWeaponAimFromVisiblePose(
+                nodes[0].rotation, nodes[0].translation);
             return;
         }
         const BoneMatrix& node = nodes[cache.nodeIndex];
@@ -8613,7 +8620,8 @@ namespace
                 node.scale, node.rotation, node.translation,
                 cache.translation, cache.quaternion, origin, direction))
         {
-            Halo3ClearDirectWeaponAim();
+            Halo3PublishDirectWeaponAimFromVisiblePose(
+                nodes[0].rotation, nodes[0].translation);
             return;
         }
         Halo3PublishDirectWeaponAim(generation, origin, direction);

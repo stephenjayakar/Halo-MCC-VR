@@ -1504,6 +1504,15 @@ int main()
                 "Halo 3 direct weapon aim publishes the normalized forward "
                 "column of the final visible right-hand pose");
 
+            Check(Halo3DirectWeaponAimAnchorForPalette(false, false) ==
+                      Halo3DirectWeaponAimAnchor::Stock &&
+                  Halo3DirectWeaponAimAnchorForPalette(true, false) ==
+                      Halo3DirectWeaponAimAnchor::VisibleRoot &&
+                  Halo3DirectWeaponAimAnchorForPalette(true, true) ==
+                      Halo3DirectWeaponAimAnchor::AuthoredMarker,
+                "Halo 3 firing keeps a valid visible weapon anchor when an "
+                "optional authored muzzle marker is unavailable");
+
             const float markerNodeBasis[9] = {
                 0.0f, 1.0f, 0.0f,
                 -1.0f, 0.0f, 0.0f,

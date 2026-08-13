@@ -20,6 +20,23 @@ struct Halo3DirectWeaponAimComparison
     bool valid = false;
 };
 
+enum class Halo3DirectWeaponAimAnchor : uint8_t
+{
+    Stock,
+    VisibleRoot,
+    AuthoredMarker,
+};
+
+inline Halo3DirectWeaponAimAnchor Halo3DirectWeaponAimAnchorForPalette(
+    bool visiblePaletteValid, bool authoredMarkerValid) noexcept
+{
+    if (!visiblePaletteValid)
+        return Halo3DirectWeaponAimAnchor::Stock;
+    return authoredMarkerValid
+        ? Halo3DirectWeaponAimAnchor::AuthoredMarker
+        : Halo3DirectWeaponAimAnchor::VisibleRoot;
+}
+
 inline Halo3DirectWeaponAimComparison Halo3CompareDirectWeaponAim(
     const float* stockOrigin, const float* stockDirection,
     const float* visibleOrigin, const float* visibleDirection,
