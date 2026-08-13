@@ -2651,3 +2651,11 @@ times three observed target poses, or 48 forward-only steps. It remains fixed,
 bounded, allocation-free, and monotonic. Runtime validation must prove both
 zero refused corrections/penetrations and that fewer than 5% of callbacks
 exceed the 0.25 ms budget before this can survive.
+
+Candidate `48d6ba4` reached all 48 steps but still accumulated 44 refused
+corrections before two confirmed penetrations. The observed target rotation
+required more than the four-metre cumulative forward ceiling; callback cost
+remained safe (zero over-budget samples at the failure). Preserved log:
+`out/debug-openxr/20260813-025816999Z-rotating-body-gap.log`, SHA-256
+`E167CD15708CB99DCB30B689314ABB85721020C940D3654FD5AF862E13F45AF1`.
+The four-metre-ceiling behavior is rejected and disabled.
