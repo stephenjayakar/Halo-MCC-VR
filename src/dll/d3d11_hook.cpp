@@ -335,10 +335,15 @@ static void H3ProbeRegisterConstantBuffer(
     ID3D11Buffer* buffer, const D3D11_BUFFER_DESC* desc,
     const D3D11_SUBRESOURCE_DATA* initialData)
 {
-    if (!buffer || !desc ||
-        (desc->BindFlags & D3D11_BIND_CONSTANT_BUFFER) == 0u ||
-        (!g_h3DecoratorDiagnosticEnabled &&
-         desc->ByteWidth != 48u && desc->ByteWidth != 96u))
+    const bool constantBuffer = desc &&
+        (desc->BindFlags & D3D11_BIND_CONSTANT_BUFFER) != 0u;
+    const bool indirectArguments = desc &&
+        (desc->MiscFlags & D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS) != 0u &&
+        desc->ByteWidth <= kH3ProbeConstantBytes;
+    if (!buffer || !desc || (!constantBuffer && !indirectArguments) ||
+        (!g_h3DecoratorDiagnosticEnabled && constantBuffer &&
+         !indirectArguments && desc->ByteWidth != 48u &&
+         desc->ByteWidth != 96u))
         return;
     const unsigned first = H3ProbeConstantBufferHash(buffer);
     ID3D11Buffer* const reserved = reinterpret_cast<ID3D11Buffer*>(1u);
@@ -354,7 +359,8 @@ static void H3ProbeRegisterConstantBuffer(
             entry.byteWidth = desc->ByteWidth;
             if (initialData && initialData->pSysMem && desc->ByteWidth > 0u)
             {
-                const unsigned limit = g_h3DecoratorDiagnosticEnabled
+                const unsigned limit =
+                    (g_h3DecoratorDiagnosticEnabled || indirectArguments)
                     ? kH3ProbeConstantBytes : 96u;
                 const unsigned bytes = std::min(desc->ByteWidth, limit);
                 std::memcpy(entry.data, initialData->pSysMem, bytes);
@@ -474,8 +480,7 @@ static void H3ProbePublishBufferData(
     H3ProbeConstantBufferState* state = H3ProbeFindConstantBuffer(buffer);
     if (!state)
         return;
-    const unsigned limit = g_h3DecoratorDiagnosticEnabled
-        ? kH3ProbeConstantBytes : 96u;
+    const unsigned limit = kH3ProbeConstantBytes;
     const unsigned bytes = std::min(
         std::min(sourceBytes, state->byteWidth), limit);
     if (bytes == 0u)
@@ -541,6 +546,35 @@ static bool H3DecoratorCopyConstant(
             state->dataSequence.load(std::memory_order_acquire);
         if (before == after && (after & 1u) == 0u)
             return true;
+    }
+    return false;
+}
+
+static bool H3DecoratorDecodeIndirectDraw(
+    ID3D11Buffer* buffer, UINT byteOffset, bool indexed,
+    PhysicalContactIndirectDrawArguments& decoded)
+{
+    H3ProbeConstantBufferState* state = H3ProbeFindConstantBuffer(buffer);
+    if (!state || state->byteWidth > kH3ProbeConstantBytes)
+        return false;
+    uint8_t snapshot[kH3ProbeConstantBytes]{};
+    for (unsigned attempt = 0; attempt < 3u; ++attempt)
+    {
+        const unsigned before =
+            state->dataSequence.load(std::memory_order_acquire);
+        const unsigned bytes = std::min(
+            state->dataBytes.load(std::memory_order_relaxed),
+            kH3ProbeConstantBytes);
+        if ((before & 1u) != 0u || bytes == 0u)
+            continue;
+        std::memcpy(snapshot, state->data, bytes);
+        const unsigned after =
+            state->dataSequence.load(std::memory_order_acquire);
+        if (before == after && (after & 1u) == 0u)
+        {
+            return PhysicalContactDecodeIndirectDrawArguments(
+                snapshot, bytes, byteOffset, indexed, decoded);
+        }
     }
     return false;
 }
@@ -722,7 +756,9 @@ static HRESULT STDMETHODCALLTYPE H3ProbeMapHook(
         ID3D11Buffer* buffer = reinterpret_cast<ID3D11Buffer*>(resource);
         const H3ProbeBufferMetadata* metadata = H3ProbeFindBuffer(buffer);
         if (metadata &&
-            (metadata->bindFlags & D3D11_BIND_CONSTANT_BUFFER) != 0u)
+            ((metadata->bindFlags & D3D11_BIND_CONSTANT_BUFFER) != 0u ||
+             (metadata->miscFlags &
+                  D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS) != 0u))
         {
             g_h3ProbeMappedResource = resource;
             g_h3ProbeMappedData = mapped->pData;
@@ -759,7 +795,9 @@ static void STDMETHODCALLTYPE H3ProbeUpdateSubresourceHook(
         ID3D11Buffer* buffer = reinterpret_cast<ID3D11Buffer*>(destination);
         const H3ProbeBufferMetadata* metadata = H3ProbeFindBuffer(buffer);
         if (metadata &&
-            (metadata->bindFlags & D3D11_BIND_CONSTANT_BUFFER) != 0u)
+            ((metadata->bindFlags & D3D11_BIND_CONSTANT_BUFFER) != 0u ||
+             (metadata->miscFlags &
+                  D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS) != 0u))
         {
             H3ProbePublishBufferData(buffer, source, metadata->byteWidth);
         }
@@ -774,6 +812,22 @@ static void H3ProbeCaptureDraw(
     UINT startLocation, INT baseVertexLocation, UINT startInstanceLocation,
     ID3D11Buffer* indirectArgsBuffer = nullptr, UINT indirectArgsOffset = 0u)
 {
+    const unsigned submittedKind = kind;
+    if (kind == 4u || kind == 5u)
+    {
+        PhysicalContactIndirectDrawArguments decoded{};
+        const bool indexed = kind == 4u;
+        if (H3DecoratorDecodeIndirectDraw(
+                indirectArgsBuffer, indirectArgsOffset, indexed, decoded))
+        {
+            kind = indexed ? 0u : 3u;
+            countPerInstance = decoded.countPerInstance;
+            instanceCount = decoded.instanceCount;
+            startLocation = decoded.startLocation;
+            baseVertexLocation = decoded.baseVertex;
+            startInstanceLocation = decoded.startInstance;
+        }
+    }
     unsigned placementSlot = UINT_MAX;
     for (unsigned slot = 0; slot < kH3ProbeVertexSlots; ++slot)
     {
@@ -956,7 +1010,7 @@ static void H3ProbeCaptureDraw(
             record.baseVertexLocation = baseVertexLocation;
             record.startInstanceLocation = startInstanceLocation;
             record.placementSlot = placementSlot;
-            record.kind = kind;
+            record.kind = submittedKind;
             record.indirectArgsBuffer = indirectArgsBuffer;
             record.indirectArgsOffset = indirectArgsOffset;
             record.inputLayout = g_h3ProbeBoundInputLayout;
@@ -3523,6 +3577,14 @@ bool InstallD3D11Hooks()
             MH_CreateHook(contextVtbl[21],
                           (void*)&H3ProbeDrawInstancedHook,
                           (void**)&g_origH3ProbeDrawInstanced) == MH_OK;
+        const bool indexedIndirectOk = instancedOk &&
+            MH_CreateHook(contextVtbl[39],
+                          (void*)&H3ProbeDrawIndexedInstancedIndirectHook,
+                          (void**)&g_origH3ProbeDrawIndexedInstancedIndirect) == MH_OK;
+        const bool indirectOk = indexedIndirectOk &&
+            MH_CreateHook(contextVtbl[40],
+                          (void*)&H3ProbeDrawInstancedIndirectHook,
+                          (void**)&g_origH3ProbeDrawInstancedIndirect) == MH_OK;
         if (instancedOk)
         {
             H3DecoratorFrame& first =
@@ -3532,8 +3594,9 @@ bool InstallD3D11Hooks()
             g_h3DecoratorContactCaptureEnabled =
                 g_config.physical_weapon_contact;
             LOG("H3 decorator contact capture installed: contact=%u "
-                "draws=linear+indexed-instanced diagnostic=%u",
+                "draws=linear+indexed-instanced indirect=%u diagnostic=%u",
                 g_h3DecoratorContactCaptureEnabled ? 1u : 0u,
+                indirectOk ? 1u : 0u,
                 g_h3DecoratorDiagnosticEnabled ? 1u : 0u);
         }
         else
@@ -3561,14 +3624,7 @@ bool InstallD3D11Hooks()
                 MH_CreateHook(contextVtbl[13],
                               (void*)&H3ProbeDrawHook,
                               (void**)&g_origH3ProbeDraw) == MH_OK;
-            const bool indexedIndirectOk = drawOk &&
-                MH_CreateHook(contextVtbl[39],
-                              (void*)&H3ProbeDrawIndexedInstancedIndirectHook,
-                              (void**)&g_origH3ProbeDrawIndexedInstancedIndirect) == MH_OK;
-            const bool diagnosticOk = indexedIndirectOk &&
-                MH_CreateHook(contextVtbl[40],
-                              (void*)&H3ProbeDrawInstancedIndirectHook,
-                              (void**)&g_origH3ProbeDrawInstancedIndirect) == MH_OK;
+            const bool diagnosticOk = drawOk && indirectOk;
             if (diagnosticOk)
             {
                 g_h3DecoratorDrawProbeEnabled.store(

@@ -14,6 +14,45 @@ struct PhysicalContactVec3
     float z = 0.0f;
 };
 
+struct PhysicalContactIndirectDrawArguments
+{
+    uint32_t countPerInstance = 0;
+    uint32_t instanceCount = 0;
+    uint32_t startLocation = 0;
+    int32_t baseVertex = 0;
+    uint32_t startInstance = 0;
+};
+
+inline bool PhysicalContactDecodeIndirectDrawArguments(
+    const uint8_t* data, size_t dataBytes, size_t byteOffset, bool indexed,
+    PhysicalContactIndirectDrawArguments& out)
+{
+    out = {};
+    const size_t required = indexed ? 20u : 16u;
+    if (!data || byteOffset > dataBytes || required > dataBytes - byteOffset)
+        return false;
+    const auto readU32 = [&](size_t relativeOffset) {
+        const uint8_t* p = data + byteOffset + relativeOffset;
+        return static_cast<uint32_t>(p[0]) |
+            (static_cast<uint32_t>(p[1]) << 8u) |
+            (static_cast<uint32_t>(p[2]) << 16u) |
+            (static_cast<uint32_t>(p[3]) << 24u);
+    };
+    out.countPerInstance = readU32(0u);
+    out.instanceCount = readU32(4u);
+    out.startLocation = readU32(8u);
+    if (indexed)
+    {
+        out.baseVertex = static_cast<int32_t>(readU32(12u));
+        out.startInstance = readU32(16u);
+    }
+    else
+    {
+        out.startInstance = readU32(12u);
+    }
+    return out.countPerInstance > 0u && out.instanceCount > 0u;
+}
+
 inline PhysicalContactVec3 operator+(
     PhysicalContactVec3 a, PhysicalContactVec3 b)
 {

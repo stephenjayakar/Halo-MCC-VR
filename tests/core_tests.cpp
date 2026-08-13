@@ -9406,6 +9406,24 @@ int main()
             !PhysicalContactSegmentIntersectsExpandedAabb(
                 {-2.0f, 1.20f, 0.5f}, {2.0f, 1.20f, 0.5f},
                 {}, {1.0f, 1.0f, 1.0f}, 0.10f);
+        std::array<uint8_t, 24u> indirectIndexedBytes{};
+        const auto writeIndirectU32 = [&indirectIndexedBytes](
+            size_t offset, uint32_t value) {
+            for (size_t byte = 0; byte < 4u; ++byte)
+                indirectIndexedBytes[offset + byte] =
+                    static_cast<uint8_t>(value >> (byte * 8u));
+        };
+        writeIndirectU32(4u, 36u);
+        writeIndirectU32(8u, 7u);
+        writeIndirectU32(12u, 12u);
+        writeIndirectU32(16u, static_cast<uint32_t>(-3));
+        writeIndirectU32(20u, 9u);
+        PhysicalContactIndirectDrawArguments indirectIndexed{};
+        const bool decodedIndirectIndexed =
+            PhysicalContactDecodeIndirectDrawArguments(
+                indirectIndexedBytes.data(), indirectIndexedBytes.size(),
+                4u, true, indirectIndexed);
+        PhysicalContactIndirectDrawArguments rejectedIndirect{};
         Check(decodedRock && decodedRockPart == 0 &&
               std::fabs(decodedRockPlacement.position.x - 83.8972266f) <
                   2.0e-5f &&
@@ -9428,13 +9446,23 @@ int main()
                   {}, {1.0f, 1.0f, 1.0f}, rejectedIndexedList) &&
               decodedPlane && decodedPlaneStrip.triangleCount == 1 &&
               !PhysicalContactH3DecoratorMeshIsSolid(decodedPlaneStrip) &&
-              decoratorBlockCrossed && decoratorBlockNearMissAccepted &&
-              decoratorBlockFarMissRejected &&
-              !PhysicalContactDecodeH3DecoratorPlacement(
+               decoratorBlockCrossed && decoratorBlockNearMissAccepted &&
+               decoratorBlockFarMissRejected &&
+               decodedIndirectIndexed &&
+               indirectIndexed.countPerInstance == 36u &&
+               indirectIndexed.instanceCount == 7u &&
+               indirectIndexed.startLocation == 12u &&
+               indirectIndexed.baseVertex == -3 &&
+               indirectIndexed.startInstance == 9u &&
+               !PhysicalContactDecodeIndirectDrawArguments(
+                   indirectIndexedBytes.data(), indirectIndexedBytes.size(),
+                   5u, true, rejectedIndirect) &&
+               !PhysicalContactDecodeH3DecoratorPlacement(
                   packedRockPlacement.data(), {}, {},
                   decodedRockPlacement),
             "Halo 3 decorator decoding reconstructs Valhalla position, "
-            "rotation, and scale, expands exact strips and indexed lists, "
+            "rotation, and scale, expands exact strips, indexed lists, and "
+            "bounded indirect draw arguments, "
             "rejects invalid indices and planar foliage as a rigid wall, "
             "rejects distant blocks before decoding, and "
             "fails closed on invalid block bounds");

@@ -2848,3 +2848,26 @@ catch zone to cover the render/physics clock split; it cannot constrain the
 weapon or create a vehicle/prop melee. The existing armed latch, 250 ms global
 cooldown, tracked-weapon speed, and native exact-target melee call remain.
 Headset acceptance is pending.
+
+### 2026-08-13 indirect instanced decorator draws
+
+The indexed-instanced candidate still missed the reported campaign rock. The
+production renderer boundary observed direct `DrawInstanced` and
+`DrawIndexedInstanced`, while its already existing diagnostic boundary showed
+that D3D11 also exposes `DrawInstancedIndirect` and
+`DrawIndexedInstancedIndirect`. Those two production hooks were absent, so an
+otherwise valid 20-byte solid decorator mesh and 16-byte placement stream could
+remain invisible to contact solely because Halo selected an indirect draw.
+
+Production now observes both indirect draw families. Buffers carrying D3D11's
+`DRAWINDIRECT_ARGS` flag are copied into an existing bounded 512-byte lock-free
+snapshot when Halo supplies or CPU-updates their contents. The hot draw hook
+only reads that owned snapshot and decodes the documented 16-byte or 20-byte
+argument record; it performs no COM call, GPU readback, allocation, lock,
+logging, or file I/O. Missing, stale, GPU-only, zero-count, or out-of-bounds
+arguments fail closed for that draw. Decoded draws still must pass every
+existing decorator invariant: exact vertex/placement strides, topology and
+index format, owned geometry bounds, finite shader constants, and the solid
+three-axis mesh test. Pure coverage checks the indexed indirect layout,
+negative base vertices, nonzero offsets, and truncation rejection. The exact
+campaign-rock headset check remains pending.
