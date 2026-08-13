@@ -77,6 +77,7 @@ typedef void(STDMETHODCALLTYPE* CopyResourceFn)(ID3D11DeviceContext*,
 #endif
 
 static PresentFn g_origPresent = nullptr;
+static std::atomic<uintptr_t> g_h3DecoratorPlacementCreatorRva{0};
 static Present1Fn g_origPresent1 = nullptr;
 static ResizeBuffersFn g_origResizeBuffers = nullptr;
 static OMSetRenderTargetsFn g_origOMSetRenderTargets = nullptr;
@@ -1407,6 +1408,11 @@ uint32_t D3D_Halo3DecoratorSelfTestState()
     return g_h3DecoratorSelfTestState.load(std::memory_order_acquire);
 }
 
+void D3D_SetHalo3DecoratorPlacementCreatorRva(uintptr_t rva)
+{
+    g_h3DecoratorPlacementCreatorRva.store(rva, std::memory_order_release);
+}
+
 static void STDMETHODCALLTYPE H3ProbeDrawIndexedInstancedHook(
     ID3D11DeviceContext* context, UINT indexCountPerInstance,
     UINT instanceCount, UINT startIndexLocation, INT baseVertexLocation,
@@ -2267,7 +2273,7 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
     const uintptr_t mccRva = ProbeModuleRva(
         caller, GetModuleHandleW(nullptr));
     if (halo3Rva != UINTPTR_MAX && desc && initialData &&
-        initialData->pSysMem && desc->ByteWidth >= 16u * 256u &&
+        initialData->pSysMem && desc->ByteWidth >= 16u &&
         (desc->ByteWidth % 16u) == 0)
     {
         const uint8_t* bytes = static_cast<const uint8_t*>(initialData->pSysMem);
@@ -2353,11 +2359,13 @@ static HRESULT STDMETHODCALLTYPE CreateBufferHook(
             if (std::isfinite(scale) && scale >= 0.01f && scale <= 2.10f)
                 ++validScaledQuaternions;
         }
-        const bool placementLike = sampledRecords >= 256u &&
-            smallPartIndices * 100u >= sampledRecords * 99u &&
-            nonzeroPartIndices * 100u >= sampledRecords &&
-            validScaledQuaternions * 100u >= sampledRecords * 99u &&
-            nonzeroColors * 100u >= sampledRecords * 50u;
+        const bool placementLike =
+            PhysicalContactH3DecoratorPlacementBufferEvidence(
+                halo3Rva,
+                g_h3DecoratorPlacementCreatorRva.load(
+                    std::memory_order_acquire),
+                sampledRecords, smallPartIndices,
+                nonzeroPartIndices, validScaledQuaternions, nonzeroColors);
         if (placementLike)
         {
             decoratorPlacement = true;

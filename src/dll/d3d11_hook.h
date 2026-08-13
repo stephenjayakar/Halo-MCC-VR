@@ -52,3 +52,9 @@ size_t D3D_Halo3DecoratorWallPlanes(
 // Null-driver-only proof state: 0 waiting, 1 exact captured-mesh sweep passed,
 // 2 bounded attempts failed. Normal play never enables this path.
 uint32_t D3D_Halo3DecoratorSelfTestState();
+
+// Published once from Halo 3's non-render install pass after a unique retail
+// signature proves the exact CreateBuffer return site. Zero keeps small
+// placement streams rejected while retaining the established large-buffer
+// content classifier.
+void D3D_SetHalo3DecoratorPlacementCreatorRva(uintptr_t rva);

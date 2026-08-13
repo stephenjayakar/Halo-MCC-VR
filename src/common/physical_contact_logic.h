@@ -645,6 +645,22 @@ inline bool PhysicalContactTriangleMeshValid(
     return true;
 }
 
+inline bool PhysicalContactH3DecoratorPlacementBufferEvidence(
+    uintptr_t creatorRva, uintptr_t verifiedCreatorRva,
+    uint32_t sampledRecords,
+    uint32_t smallPartIndices, uint32_t nonzeroPartIndices,
+    uint32_t validScaledQuaternions, uint32_t nonzeroColors)
+{
+    if (!sampledRecords ||
+        (sampledRecords < 256u &&
+         (!verifiedCreatorRva || creatorRva != verifiedCreatorRva)))
+        return false;
+    return smallPartIndices * 100ull >= sampledRecords * 99ull &&
+        nonzeroPartIndices * 100ull >= sampledRecords &&
+        validScaledQuaternions * 100ull >= sampledRecords * 99ull &&
+        nonzeroColors * 100ull >= sampledRecords * 50ull;
+}
+
 // Halo 3 decorator instances use a fixed 16-byte vertex record. XYZ are
 // unsigned 16-bit values expanded by a draw-block minimum and step. The four
 // orientation bytes hold rotation * sqrt(scale): signed zero is byte 127 and

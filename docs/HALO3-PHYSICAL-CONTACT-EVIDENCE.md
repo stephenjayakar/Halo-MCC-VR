@@ -3167,3 +3167,33 @@ for visible weapon blocking. Invalid roots, attachments, the player, vehicles,
 props, and non-enemy kinds remain excluded. Pure tests cover no prior hit, an
 unrelated BSP hit, an authored-object winner, and an absent fallback. Headset
 Campaign acceptance remains pending.
+
+### 2026-08-13 small Campaign decorator placement streams
+
+The next Campaign headset rejection again identified a visible rock with no
+weapon collision. Inspection found an earlier general capture gate: the D3D11
+buffer hook considered a 16-byte stream to be decorator placements only when it
+contained at least 256 records. Existing captures prove Halo creates valid
+placement buffers through the same renderer path at several sizes, while a
+small Campaign decorator cluster can naturally contain fewer than 256
+instances. Such a stream was discarded before any of the later exact geometry,
+draw-family, constants, or solid-mesh checks could run.
+
+The pinned retail decorator uploader is now identified outside render callbacks
+by a 51-byte signature that occurs once in the complete pinned `halo3.dll`. Its
+indirect D3D `CreateBuffer` call is the exact `FF 50 18` at signature `+0x24`;
+the return site is derived as `+0x27`, retail RVA `0x2A109F`. The match and call
+shape are required before that derived RVA is published to the renderer bridge.
+The pinned module remains SHA-256
+`B209D8454B12DC77E54CCD2C9924EC8D44B8619D21CF98E36FFAF601E67EFB63`.
+
+Streams with at least 256 records keep the established content-only behavior.
+A smaller stream is admitted only when its runtime creator equals that uniquely
+derived return site and it passes every existing record invariant: 99% small
+part indices, at least one nonzero part, 99% valid scaled quaternions, and 50%
+nonzero colors. A missing or ambiguous signature keeps only small streams on
+stock fallback. Buffer creation performs bounded content checks; draw callbacks
+remain allocation-free, lock-free, logging-free, and scan-free. Pure tests
+cover a valid 36-instance stream, wrong and unavailable creator identity, the
+unchanged large-stream rule, and malformed record ratios. The reported rock
+still requires Campaign headset acceptance.

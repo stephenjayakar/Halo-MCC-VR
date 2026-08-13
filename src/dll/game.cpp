@@ -22843,6 +22843,15 @@ namespace
         "65 48 8B 04 25 58 00 00 00 41 BD 70 01 00 00 "
         "41 BF B0 00 00 00 BA 38 00 00 00 48 8B 1C C8 49 8B 04 1F "
         "4E 8B 2C 2B 49 63 8D 80 26 00 00 C6 40 03 01";
+    // Exact retail decorator placement-buffer CreateBuffer return site. The
+    // signature ends at the owning helper's return and is unique in the pinned
+    // module. The indirect D3D call begins at +0x24 and returns at +0x27.
+    const char* kHalo3DecoratorPlacementCreatorSig =
+        "48 8B 0D ?? ?? ?? ?? 89 44 24 40 48 85 C9 74 1A "
+        "48 8B 01 48 F7 DA 49 8D 53 C8 4D 1B C0 4C 23 C2 "
+        "49 8D 53 D8 FF 50 18 44 8B D0 41 8B C2 48 83 C4 58 C3";
+    inline constexpr size_t kHalo3DecoratorPlacementCreateCallOffset = 0x24;
+    inline constexpr size_t kHalo3DecoratorPlacementCreateReturnOffset = 0x27;
     // collision_test_vector_internal (+0x1FD748). Official H3EK's public
     // wrapper and this homolog prove the eight-argument ABI and 0x68-byte
     // result, including plane normal +0x2C and object handle +0x40.
@@ -23339,6 +23348,7 @@ namespace
     {
         if (!runtimeGeneration)
             return false;
+        D3D_SetHalo3DecoratorPlacementCreatorRva(0);
         wchar_t contactDebugValue[8]{};
         const DWORD contactDebugLength = GetEnvironmentVariableW(
             L"HALOMCCVR_H3_CONTACT_DEBUG_RIG", contactDebugValue,
@@ -24246,6 +24256,44 @@ namespace
         }
 
         {
+            const uintptr_t placementCreatorHit = sig::Find(
+                base, size, kHalo3DecoratorPlacementCreatorSig);
+            const bool placementCreatorUnique = placementCreatorHit &&
+                !sig::Find(
+                    placementCreatorHit + 1,
+                    base + size - placementCreatorHit - 1,
+                    kHalo3DecoratorPlacementCreatorSig);
+            const bool placementCreatorConsistent = placementCreatorUnique &&
+                placementCreatorHit +
+                        kHalo3DecoratorPlacementCreateReturnOffset <=
+                    base + size &&
+                *reinterpret_cast<const uint8_t*>(
+                    placementCreatorHit +
+                    kHalo3DecoratorPlacementCreateCallOffset) == 0xFF &&
+                *reinterpret_cast<const uint8_t*>(
+                    placementCreatorHit +
+                    kHalo3DecoratorPlacementCreateCallOffset + 1) == 0x50 &&
+                *reinterpret_cast<const uint8_t*>(
+                    placementCreatorHit +
+                    kHalo3DecoratorPlacementCreateCallOffset + 2) == 0x18;
+            if (placementCreatorConsistent)
+            {
+                D3D_SetHalo3DecoratorPlacementCreatorRva(
+                    placementCreatorHit - base +
+                    kHalo3DecoratorPlacementCreateReturnOffset);
+            }
+            LOG("H3 decorator small-placement identity: %s "
+                "creator=+0x%llX return=+0x%llX [match=%d unique=%d]",
+                placementCreatorConsistent ? "installed" : "disabled",
+                (unsigned long long)(placementCreatorHit
+                    ? placementCreatorHit - base : 0),
+                (unsigned long long)(placementCreatorConsistent
+                    ? placementCreatorHit - base +
+                        kHalo3DecoratorPlacementCreateReturnOffset
+                    : 0),
+                placementCreatorHit ? 1 : 0,
+                placementCreatorUnique ? 1 : 0);
+
             g_halo3PhysicalContactBindings.store(
                 false, std::memory_order_release);
             g_halo3PhysicalMeleeBindings.store(
@@ -40388,6 +40436,7 @@ namespace
                 g_autoVrUserVeto.store(false, std::memory_order_release);
                 g_halo3DirectWeaponAimBinding.store(
                     false, std::memory_order_release);
+                D3D_SetHalo3DecoratorPlacementCreatorRva(0);
                 Halo3ClearDirectWeaponAim();
                 g_halo3RuntimeGeneration.store(0, std::memory_order_release);
                 haloAttemptedGeneration = 0;
