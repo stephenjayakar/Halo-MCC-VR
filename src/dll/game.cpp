@@ -6910,6 +6910,10 @@ namespace
     std::atomic<uint32_t> g_halo3DirectWeaponAimOverrides{0};
     std::atomic<uint32_t> g_halo3DirectWeaponAimFinalOverrides{0};
     std::atomic<uint32_t> g_halo3DirectWeaponAimFaults{0};
+    std::atomic<float> g_halo3DirectWeaponAimOriginDeltaMeters{-1.0f};
+    std::atomic<float> g_halo3DirectWeaponAimDirectionDeltaDegrees{-1.0f};
+    std::atomic<float> g_halo3DirectWeaponAimVisibleRootDeltaMeters{-1.0f};
+    std::atomic<uint64_t> g_halo3DirectWeaponAimTelemetrySerial{0};
     struct Halo3DirectWeaponAimTargetingContext
     {
         bool active = false;
@@ -8561,6 +8565,28 @@ namespace
         if (!origin || !Halo3DirectWeaponAimOriginForShot(
                 sample, visibleOrigin))
             return;
+        const float stockOrigin[3] = {origin[0], origin[1], origin[2]};
+        const float stockDirection[3] = {
+            forward[0], forward[1], forward[2]};
+        const float worldScale =
+            g_worldScale.load(std::memory_order_relaxed);
+        const Halo3DirectWeaponAimComparison comparison =
+            Halo3CompareDirectWeaponAim(
+                stockOrigin, stockDirection, visibleOrigin, direction,
+                worldScale);
+        float visibleRootDeltaMeters = -1.0f;
+        float renderedBasis[9]{}, renderedOrigin[3]{};
+        float renderedScale = 1.0f;
+        uint64_t renderedMs = 0;
+        const uint64_t nowMs = GetTickCount64();
+        if (Halo3ReadWeaponPose(
+                g_halo3VisibleWeaponPose, renderedBasis, renderedOrigin,
+                renderedScale, renderedMs) && nowMs >= renderedMs &&
+            nowMs - renderedMs <= kHalo3DirectWeaponAimMaxAgeMs)
+        {
+            visibleRootDeltaMeters = Halo3DirectWeaponAimOriginDistanceMeters(
+                visibleOrigin, renderedOrigin, worldScale);
+        }
         memcpy(origin, visibleOrigin, sizeof(visibleOrigin));
         memcpy(forward, direction, sizeof(direction));
         g_halo3DirectWeaponAimTargetingContext.active = true;
@@ -8568,6 +8594,16 @@ namespace
                direction, sizeof(direction));
         g_halo3DirectWeaponAimOverrides.fetch_add(
             1, std::memory_order_relaxed);
+        g_halo3DirectWeaponAimOriginDeltaMeters.store(
+            comparison.valid ? comparison.originDeltaMeters : -1.0f,
+            std::memory_order_relaxed);
+        g_halo3DirectWeaponAimDirectionDeltaDegrees.store(
+            comparison.valid ? comparison.directionDeltaDegrees : -1.0f,
+            std::memory_order_relaxed);
+        g_halo3DirectWeaponAimVisibleRootDeltaMeters.store(
+            visibleRootDeltaMeters, std::memory_order_relaxed);
+        g_halo3DirectWeaponAimTelemetrySerial.fetch_add(
+            1, std::memory_order_release);
     }
 
     bool __fastcall Halo3ProjectileTargetingHook(
@@ -11836,6 +11872,8 @@ namespace
     {
         static uint32_t directAimGenerationLogged = 0;
         static uint32_t directAimFaultsLogged = 0;
+        static uint32_t directAimFinalOverridesAtGeneration = 0;
+        static uint64_t directAimTelemetryAtGeneration = 0;
         static bool directAimFirstShotLogged = false;
         const uint32_t directAimGeneration =
             g_halo3RuntimeGeneration.load(std::memory_order_acquire);
@@ -11843,6 +11881,12 @@ namespace
         {
             directAimGenerationLogged = directAimGeneration;
             directAimFaultsLogged = 0;
+            directAimFinalOverridesAtGeneration =
+                g_halo3DirectWeaponAimFinalOverrides.load(
+                    std::memory_order_relaxed);
+            directAimTelemetryAtGeneration =
+                g_halo3DirectWeaponAimTelemetrySerial.load(
+                    std::memory_order_acquire);
             directAimFirstShotLogged = false;
         }
         const uint32_t directAimFaults =
@@ -11858,11 +11902,28 @@ namespace
         const uint32_t directAimFinalOverrides =
             g_halo3DirectWeaponAimFinalOverrides.load(
                 std::memory_order_relaxed);
-        if (!directAimFirstShotLogged && directAimFinalOverrides != 0)
+        const uint64_t directAimTelemetrySerial =
+            g_halo3DirectWeaponAimTelemetrySerial.load(
+                std::memory_order_acquire);
+        if (!directAimFirstShotLogged &&
+            directAimFinalOverrides != directAimFinalOverridesAtGeneration &&
+            directAimTelemetrySerial != directAimTelemetryAtGeneration)
         {
-            LOG("H3 direct weapon aim: first local on-foot shot used the "
-                "fresh visible-weapon direction after native targeting and "
-                "before authored spread");
+            const float originDelta =
+                g_halo3DirectWeaponAimOriginDeltaMeters.load(
+                    std::memory_order_relaxed);
+            const float directionDelta =
+                g_halo3DirectWeaponAimDirectionDeltaDegrees.load(
+                    std::memory_order_relaxed);
+            const float visibleRootDelta =
+                g_halo3DirectWeaponAimVisibleRootDeltaMeters.load(
+                    std::memory_order_relaxed);
+            LOG("H3 direct weapon aim: first local on-foot shot used fresh "
+                "visible origin+direction after native targeting, before "
+                "authored spread (stock origin shift=%.3fm direction "
+                "change=%.1fdeg visible-root gap=%.3fm telemetry=%llu)",
+                originDelta, directionDelta, visibleRootDelta,
+                (unsigned long long)directAimTelemetrySerial);
             directAimFirstShotLogged = true;
         }
 
@@ -23421,6 +23482,14 @@ namespace
             g_halo3DirectWeaponAimFinalOverrides.store(
                 0, std::memory_order_relaxed);
             g_halo3DirectWeaponAimFaults.store(
+                0, std::memory_order_relaxed);
+            g_halo3DirectWeaponAimOriginDeltaMeters.store(
+                -1.0f, std::memory_order_relaxed);
+            g_halo3DirectWeaponAimDirectionDeltaDegrees.store(
+                -1.0f, std::memory_order_relaxed);
+            g_halo3DirectWeaponAimVisibleRootDeltaMeters.store(
+                -1.0f, std::memory_order_relaxed);
+            g_halo3DirectWeaponAimTelemetrySerial.store(
                 0, std::memory_order_relaxed);
 
             const uintptr_t rayHit =

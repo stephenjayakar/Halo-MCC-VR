@@ -237,6 +237,16 @@ verified branch hooks before its joined copy at `+0x369118`. Therefore an
 additional post-targeting origin restore is unnecessary; candidate `2c9f099`
 was reverted by `527d8b8` rather than retaining that disproven mechanism.
 
+The next candidate adds read-only first-shot telemetry at the already hooked
+shot boundary. It records the distance from Halo's stock origin to the
+published visible origin, the angle from stock direction to visible direction,
+and the distance from the published origin to the newest final rendered weapon
+root. The hook performs only finite arithmetic and atomic stores; the existing
+50 ms worker formats the one-time log. This does not change firing behavior.
+It makes the next headset result distinguish a hook/gate failure, a coordinate
+space error, and an authored wrist-to-render-root offset without relying only
+on visual judgement.
+
 ## Always-scoped VR auto-aim
 
 ### Pinned evidence

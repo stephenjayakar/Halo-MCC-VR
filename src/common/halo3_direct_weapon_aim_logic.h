@@ -13,6 +13,82 @@ struct Halo3DirectWeaponAimSample
     float direction[3]{};
 };
 
+struct Halo3DirectWeaponAimComparison
+{
+    float originDeltaMeters = 0.0f;
+    float directionDeltaDegrees = 0.0f;
+    bool valid = false;
+};
+
+inline Halo3DirectWeaponAimComparison Halo3CompareDirectWeaponAim(
+    const float* stockOrigin, const float* stockDirection,
+    const float* visibleOrigin, const float* visibleDirection,
+    float worldUnitsPerMeter) noexcept
+{
+    Halo3DirectWeaponAimComparison result{};
+    if (!stockOrigin || !stockDirection || !visibleOrigin ||
+        !visibleDirection || !std::isfinite(worldUnitsPerMeter) ||
+        worldUnitsPerMeter <= 0.0f)
+        return result;
+    float originDeltaSquared = 0.0f;
+    float stockLengthSquared = 0.0f;
+    float visibleLengthSquared = 0.0f;
+    float directionDot = 0.0f;
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        if (!std::isfinite(stockOrigin[axis]) ||
+            !std::isfinite(stockDirection[axis]) ||
+            !std::isfinite(visibleOrigin[axis]) ||
+            !std::isfinite(visibleDirection[axis]))
+            return result;
+        const float delta = visibleOrigin[axis] - stockOrigin[axis];
+        originDeltaSquared += delta * delta;
+        stockLengthSquared += stockDirection[axis] * stockDirection[axis];
+        visibleLengthSquared +=
+            visibleDirection[axis] * visibleDirection[axis];
+        directionDot += stockDirection[axis] * visibleDirection[axis];
+    }
+    if (!std::isfinite(originDeltaSquared) ||
+        !std::isfinite(stockLengthSquared) ||
+        !std::isfinite(visibleLengthSquared) ||
+        stockLengthSquared < 1.0e-8f || visibleLengthSquared < 1.0e-8f)
+        return result;
+    const float denominator = std::sqrt(
+        stockLengthSquared * visibleLengthSquared);
+    if (!std::isfinite(denominator) || denominator <= 0.0f)
+        return result;
+    const float cosine = std::fmax(
+        -1.0f, std::fmin(1.0f, directionDot / denominator));
+    result.originDeltaMeters =
+        std::sqrt(originDeltaSquared) / worldUnitsPerMeter;
+    result.directionDeltaDegrees = std::acos(cosine) * 57.2957795f;
+    result.valid = std::isfinite(result.originDeltaMeters) &&
+        std::isfinite(result.directionDeltaDegrees);
+    return result;
+}
+
+inline float Halo3DirectWeaponAimOriginDistanceMeters(
+    const float* firstOrigin, const float* secondOrigin,
+    float worldUnitsPerMeter) noexcept
+{
+    if (!firstOrigin || !secondOrigin ||
+        !std::isfinite(worldUnitsPerMeter) || worldUnitsPerMeter <= 0.0f)
+        return -1.0f;
+    float distanceSquared = 0.0f;
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        if (!std::isfinite(firstOrigin[axis]) ||
+            !std::isfinite(secondOrigin[axis]))
+            return -1.0f;
+        const float delta = secondOrigin[axis] - firstOrigin[axis];
+        distanceSquared += delta * delta;
+    }
+    if (!std::isfinite(distanceSquared))
+        return -1.0f;
+    const float result = std::sqrt(distanceSquared) / worldUnitsPerMeter;
+    return std::isfinite(result) ? result : -1.0f;
+}
+
 inline bool Halo3DirectWeaponAimOriginForShot(
     const Halo3DirectWeaponAimSample& sample, float (&outOrigin)[3]) noexcept
 {

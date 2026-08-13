@@ -1504,6 +1504,30 @@ int main()
                 "Halo 3 direct weapon aim publishes the normalized forward "
                 "column of the final visible right-hand pose");
 
+            const float stockAimOrigin[3] = {0.0f, 0.0f, 0.0f};
+            const float stockAimDirection[3] = {1.0f, 0.0f, 0.0f};
+            const float visibleAimOrigin[3] = {0.0f, 0.33f, 0.0f};
+            const float visibleAimDirection[3] = {0.0f, 2.0f, 0.0f};
+            const Halo3DirectWeaponAimComparison aimComparison =
+                Halo3CompareDirectWeaponAim(
+                    stockAimOrigin, stockAimDirection,
+                    visibleAimOrigin, visibleAimDirection, 0.33f);
+            Check(aimComparison.valid &&
+                  std::fabs(aimComparison.originDeltaMeters - 1.0f) <
+                      1.0e-6f &&
+                  std::fabs(aimComparison.directionDeltaDegrees - 90.0f) <
+                      1.0e-4f &&
+                  std::fabs(Halo3DirectWeaponAimOriginDistanceMeters(
+                      stockAimOrigin, visibleAimOrigin, 0.33f) - 1.0f) <
+                      1.0e-6f &&
+                  !Halo3CompareDirectWeaponAim(
+                      stockAimOrigin, stockAimDirection, visibleAimOrigin,
+                      invalid, 0.33f).valid &&
+                  Halo3DirectWeaponAimOriginDistanceMeters(
+                      stockAimOrigin, visibleAimOrigin, 0.0f) < 0.0f,
+                "Halo 3 direct weapon aim telemetry measures finite world "
+                "origin and direction differences and rejects invalid input");
+
             float targetedDirection[3] = {0.0f, 1.0f, 0.0f};
             const float finalVisibleDirection[3] = {0.6f, 0.8f, 0.0f};
             const float invalidFinalDirection[3] = {
