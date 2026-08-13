@@ -7015,6 +7015,9 @@ namespace
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
+    // The first render-callback exact guard used no motion reserve and failed
+    // runtime validation. Keep the replacement dormant until its own commit.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<uint32_t> g_halo3ContactTargetMotionType{0};
@@ -8705,12 +8708,14 @@ namespace
                     requiresNativeConfirmation, &targetMesh) &&
                 PhysicalContactTriangleMeshValid(weaponMesh) &&
                 PhysicalContactTriangleMeshValid(targetMesh);
-            if (exactGeometry)
+            if (exactGeometry && kEnableHalo3ExactRenderSeparationGuard)
             {
+                const float renderGuardRadius =
+                    kHalo3ContactVisualGuardRadiusMeters * worldScale;
                 const PhysicalContactTrianglePair overlap =
                     PhysicalContactTriangleMeshesIntersect(
                         weaponMesh, weaponTransform,
-                        targetMesh, targetTransform, 0.0f);
+                        targetMesh, targetTransform, renderGuardRadius);
                 if (overlap.hit)
                 {
                     const PhysicalContactVec3 weaponCentre =
@@ -8732,7 +8737,8 @@ namespace
                         const PhysicalContactTransform& candidate) {
                         return PhysicalContactTriangleMeshesIntersect(
                             weaponMesh, candidate,
-                            targetMesh, targetTransform, 0.0f).hit;
+                            targetMesh, targetTransform,
+                            renderGuardRadius).hit;
                     };
                     const PhysicalContactWallConstraint correction =
                         PhysicalContactVerifiedSeparationOffset(

@@ -2338,10 +2338,24 @@ preserved failure log is
 The next candidate keeps exact root follow and adds a final exact-triangle
 guard in that same render callback. During an active dynamic-body constraint,
 it builds the already bounded authored weapon and target meshes and performs
-one zero-radius overlap test. Most palettes end there. Only an actual overlap
-starts the fixed-count verified-separation search; the weapon moves by the
-smallest directly proven clear offset plus 1 mm, capped at one metre. Exact
+one authored-triangle guard test using the existing 8 mm visual reserve. Most
+palettes end there. Only a guard overlap starts the fixed-count verified-
+separation search; the weapon moves by the smallest directly proven clear
+offset plus 1 mm, capped at one metre. Exact
 render separations and failures are counted. A separation failure prevents the
 rotating validator from passing. This path still performs no allocation,
 logging, lock, file I/O, or scan. Packaging, runtime cost measurement, and the
 8,000-sample replay remain pending.
+
+Candidate `e04ec81` showed why a zero-margin render guard is insufficient. Its
+guard read was clear on all 1,132 samples, but the immediately following
+same-frame validator saw one confirmed penetration. The target's interpolated
+bank can therefore advance between two reads even inside the final palette
+transaction. Cost was already safe: only one of 1,132 guard samples exceeded
+0.25 ms (0.09%), and the measured peak was 335.1 microseconds. The preserved
+failure log is
+`out/debug-openxr/20260813-001220523Z-rotating-body-gap.log`, SHA-256
+`9D38CBA09CE32AFA0C990E52CC55B64EAF1427597BB4567820269ABC3FBEFEF1`.
+The failed zero-margin guard is disabled. Its code remains dormant as required
+by the candidate discipline; the next candidate will enable the 8 mm authored-
+triangle reserve as a separate behavior. Packaging and replay remain pending.
