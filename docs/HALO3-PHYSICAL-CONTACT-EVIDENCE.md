@@ -2645,3 +2645,9 @@ and then four confirmed same-frame penetrations. Preserved log:
 `out/debug-openxr/20260813-025144090Z-rotating-body-gap.log`, SHA-256
 `7FA782FFCB8B9D5D64EFD3E1168959E4FC0552864E917CA37E1B4629A5992F75`.
 The eight-step behavior is rejected and disabled.
+
+The replacement uses the structural maximum: 16 authored compound children
+times three observed target poses, or 48 forward-only steps. It remains fixed,
+bounded, allocation-free, and monotonic. Runtime validation must prove both
+zero refused corrections/penetrations and that fewer than 5% of callbacks
+exceed the 0.25 ms budget before this can survive.

@@ -7048,11 +7048,14 @@ namespace
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactFinalRenderReserveMeters = 0.050f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Eight forward steps did not cover every child/pose pair. Keep the failed
-    // behavior dormant before using the proven 16 children x 3 poses bound.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
-    constexpr int kHalo3ExactRenderChildSeparationSteps = 8;
+    // The target shape has at most 16 children and the render guard retains at
+    // most three target poses. Forward-only clearing therefore needs no more
+    // than 48 distinct child/pose steps.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
+    constexpr int kHalo3ExactRenderChildSeparationSteps =
+        static_cast<int>(PhysicalContactCompoundShape::kMaximumChildren) *
+        kHalo3ExactRenderSeparationPasses;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<uint32_t> g_halo3ContactTargetMotionType{0};
