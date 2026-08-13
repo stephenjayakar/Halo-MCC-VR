@@ -10233,6 +10233,24 @@ int main()
             "without an object-kind allowlist; fixed, unresolved, attached, "
             "and excluded objects do not");
 
+        Check(PhysicalContactObjectReceivesContact(
+                  true, false, true, 4, 1) &&
+              PhysicalContactObjectReceivesContact(
+                  true, false, true, 7, 0) &&
+              PhysicalContactObjectReceivesContact(
+                  true, false, false, 0, 12) &&
+              PhysicalContactObjectReceivesContact(
+                  true, false, false, 0, 13) &&
+              !PhysicalContactObjectReceivesContact(
+                  true, false, true, 7, 1) &&
+              !PhysicalContactObjectReceivesContact(
+                  true, false, false, 0, 2) &&
+              !PhysicalContactObjectReceivesContact(
+                  true, true, true, 4, 0),
+            "Living keyframed enemy kinds reach exact animated contact and "
+            "native melee without admitting fixed props, vehicles, or "
+            "excluded objects to contact");
+
         const float lightContactHaptic =
             PhysicalContactHapticAmplitude(0.08f, 0.04f, false);
         const float heavyContactHaptic =

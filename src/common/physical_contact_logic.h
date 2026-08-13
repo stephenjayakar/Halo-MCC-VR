@@ -3118,6 +3118,20 @@ inline bool PhysicalContactObjectReceivesImpulse(
         PhysicalContactMotionTypeIsDynamic(motionType);
 }
 
+// Living bipeds and creatures normally use keyframed Havok bodies.  They must
+// still enter the exact animated-body sweep so a tracked weapon strike can
+// reach native melee, while the later impulse path continues to require a
+// genuinely dynamic body.
+inline bool PhysicalContactObjectReceivesContact(
+    bool validRootObject, bool excludedObject, bool bodyResolved,
+    uint8_t motionType, uint8_t objectKind)
+{
+    return PhysicalContactObjectReceivesImpulse(
+               validRootObject, excludedObject, bodyResolved, motionType) ||
+        (validRootObject && !excludedObject &&
+         PhysicalContactEnemyMeleeKind(objectKind));
+}
+
 // A bounded inelastic collision response. Native Halo masses decide how much
 // momentum the held weapon transfers. The engine's point-impulse function then
 // uses the target's authored mass and inertia to produce linear and angular

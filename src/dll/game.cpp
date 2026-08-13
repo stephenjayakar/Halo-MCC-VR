@@ -15525,9 +15525,9 @@ namespace
                     Halo3ContactMassForObjectData(
                         data, candidateComponent, candidateBodyIndex,
                         candidateMass, &candidateMotionType);
-                if (!PhysicalContactObjectReceivesImpulse(
+                if (!PhysicalContactObjectReceivesContact(
                         true, false, candidateBodyResolved,
-                        candidateMotionType))
+                        candidateMotionType, kind))
                 {
                     if (isConstrainedBodyTarget)
                         constrainedBodyTargetGeometryResolved = true;

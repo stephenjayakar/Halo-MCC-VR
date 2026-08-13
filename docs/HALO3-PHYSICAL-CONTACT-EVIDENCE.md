@@ -2784,3 +2784,22 @@ proof. Preserved log:
 `out/debug-openxr/20260813-032957152Z-rotating-body-gap.log`, SHA-256
 `ECD145FB50F42AF27F22A2E83E42DB7CD96C0E4A253F131D17BDC35E9E0EFD1A`.
 The unverified-correction behavior is rejected and disabled.
+
+### 2026-08-13 campaign living-enemy admission regression
+
+The headset-rejected `a3efc86` run installed the native melee bindings and
+tracked the right controller, but every contact report remained at
+`eligible=0` and no animated-body sweep or melee ran. Preserved log:
+`out/debug-openxr/20260813-092138-headset-rejected-a3efc86.log`, SHA-256
+`C0890B9EDF39A57D9A0FA12F383311B46C00E2F4FECB50DB09B9BDDFF8849142`.
+
+The object enumerator required the root Havok body to be dynamic before it
+called `Halo3ContactSweepAnimatedBodies`. That contradicts the already proven
+H3EK behavior above: living bipeds and creatures are normally keyframed, while
+their exact animated bodies are still valid native melee targets. The fixed
+admission rule therefore accepts either a validated dynamic root object or an
+enemy melee kind (biped, creature, or giant). The later impulse path is
+unchanged and still requires the exact selected body to be dynamic, so living
+enemies do not receive synthetic rigid-body impulses. Pure tests cover dynamic
+props, keyframed and unresolved enemy kinds, fixed non-enemy objects, vehicles,
+and excluded objects. Headset acceptance remains pending.
