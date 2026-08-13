@@ -2984,6 +2984,23 @@ inline bool PhysicalContactNativeEnemyMeleeFallbackEligible(
         PhysicalContactEnemyMeleeKind(targetKind);
 }
 
+inline bool PhysicalContactNativeEnemyMeleeFallbackMayReplace(
+    bool fallbackHit, bool closestHit, int32_t closestType,
+    int32_t closestObjectHandle)
+{
+    if (!fallbackHit)
+        return false;
+    if (!closestHit)
+        return true;
+
+    // The native enemy hit is already the first obstruction on its own exact
+    // weapon-point sweep. A BSP result from a different sample must not erase
+    // it: the separate wall transaction still owns visible blocking. Preserve
+    // an authored object winner so a prop or other exact object in front keeps
+    // the enemy behind it unreachable.
+    return closestType != 4 || closestObjectHandle == -1;
+}
+
 inline float PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
     float exactSurfaceRadiusMeters, uint8_t targetKind)
 {

@@ -3149,3 +3149,21 @@ The player, held weapon, attachments, dynamic bodies, invalid handles, and
 non-finite data retain their existing guards. Pure coverage proves all three
 enemy kinds bypass the wall predicate while unresolved scenery and fixed props
 still block. Headset Campaign acceptance remains pending.
+
+### 2026-08-13 cross-sample enemy fallback arbitration
+
+The user rejected source `dc1c698` in Campaign because physical melee did not
+work at all. The native fallback added above was still admitted only when no
+other weapon sample found any collision. That rule compared unrelated samples:
+one low or rear point touching BSP could erase a different point whose native
+query had already returned an unobstructed exact enemy handle.
+
+Each native vector query returns its own first obstruction. A valid enemy hit
+therefore already proves that exact weapon-point path did not cross a wall.
+The fallback may now replace a BSP result from another sample. It still cannot
+replace an authored object hit, so a prop or other exact object in front keeps
+the enemy behind it unreachable. The separate wall solver remains responsible
+for visible weapon blocking. Invalid roots, attachments, the player, vehicles,
+props, and non-enemy kinds remain excluded. Pure tests cover no prior hit, an
+unrelated BSP hit, an authored-object winner, and an absent fallback. Headset
+Campaign acceptance remains pending.

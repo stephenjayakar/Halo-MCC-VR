@@ -9947,6 +9947,14 @@ int main()
                   true, 4, 0x12340001, true, false, 1) &&
               !PhysicalContactNativeEnemyMeleeFallbackEligible(
                   true, 4, 0x12340001, true, true, 0) &&
+              PhysicalContactNativeEnemyMeleeFallbackMayReplace(
+                  true, false, -1, -1) &&
+              PhysicalContactNativeEnemyMeleeFallbackMayReplace(
+                  true, true, 1, -1) &&
+              !PhysicalContactNativeEnemyMeleeFallbackMayReplace(
+                  true, true, 4, 0x45670002) &&
+              !PhysicalContactNativeEnemyMeleeFallbackMayReplace(
+                  false, false, -1, -1) &&
                std::fabs(PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
                              0.00125f, 0) - 0.180f) < 1.0e-6f &&
                std::fabs(PhysicalContactAnimatedMeleeSurfaceRadiusMeters(

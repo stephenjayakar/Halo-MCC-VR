@@ -16519,8 +16519,10 @@ namespace
             // Havok decoder cannot resolve that target. Admit that exact
             // target for native melee only. Any authored object or static
             // surface already found wins, so this cannot strike through it.
-            if (!closest.hit && nativeEnemyMeleeFallback.hit &&
-                nativeEnemyMeleeFallbackHandle != -1)
+            if (nativeEnemyMeleeFallbackHandle != -1 &&
+                PhysicalContactNativeEnemyMeleeFallbackMayReplace(
+                    nativeEnemyMeleeFallback.hit, closest.hit,
+                    closestType, closestHandle))
             {
                 closest = nativeEnemyMeleeFallback;
                 closestType = 4;
