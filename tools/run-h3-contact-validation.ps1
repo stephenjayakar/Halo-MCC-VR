@@ -375,12 +375,13 @@ function Test-RotatingBodyGapResult([string]$Text) {
     $rotatingCommands = [int]$Matches[19]
     $status = Get-LatestContactStatusLine $Text
     if (-not $status -or $status -notmatch
-        'bodyRenderSamples=([0-9]+) bodyRenderOver250us=([0-9]+).*bodyRenderConvexFallbacks=([0-9]+)') {
+        'bodyRenderSamples=([0-9]+) bodyRenderOver250us=([0-9]+).*bodyRenderConvexFallbacks=([0-9]+) bodyRenderExactTargets=([0-9]+)') {
         return $false
     }
     $renderSamples = [int64]$Matches[1]
     $renderOverBudget = [int64]$Matches[2]
     $convexFallbacks = [int64]$Matches[3]
+    $exactTargets = [int64]$Matches[4]
     return $exactPalettes -ge 8000 -and
         $correctedPalettes -ge 2500 -and
         $approvedPalettes -ge 2500 -and
@@ -392,7 +393,7 @@ function Test-RotatingBodyGapResult([string]$Text) {
         $rotatingCommands -ge 100 -and
         $renderSamples -ge 8000 -and
         ($renderOverBudget * 20) -le $renderSamples -and
-        $convexFallbacks -ge 2500 -and
+        ($convexFallbacks + $exactTargets) -ge 2500 -and
         $Text -match 'bodyExactFollows=([1-9][0-9]*)' -and
         $Text -notmatch 'bodyRenderSeparationFailures=([1-9][0-9]*)'
 }

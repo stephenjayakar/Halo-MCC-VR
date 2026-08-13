@@ -1008,6 +1008,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactExactRenderSamples{0};
     std::atomic<uint64_t> g_halo3ContactExactRenderOver250Us{0};
     std::atomic<uint64_t> g_halo3ContactRenderConvexFallbacks{0};
+    std::atomic<uint64_t> g_halo3ContactRenderExactTargets{0};
     std::atomic<uint64_t> g_halo3ContactRenderExactClears{0};
     std::atomic<float> g_halo3ContactExactRenderPeakUs{0.0f};
     std::atomic<uint32_t> g_halo3ContactDebugLastResetReason{0};
@@ -7052,7 +7053,7 @@ namespace
     // The target shape has at most 16 children and the render guard retains at
     // most three target poses. Forward-only clearing therefore needs no more
     // than 48 distinct child/pose steps.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     constexpr int kHalo3ExactRenderChildSeparationSteps =
         static_cast<int>(PhysicalContactCompoundShape::kMaximumChildren) *
@@ -8755,41 +8756,59 @@ namespace
             targetShape = {};
             targetMesh = {};
             targetTransforms[0] = {};
-            constexpr bool exactTargetGeometry = false;
-            if (weaponGeometry &&
-                Halo3ContactObjectDataForHandle(
-                    targetHandle, targetData) &&
-                Halo3ContactDetailedTargetShape(
-                    targetHandle, targetData, targetShape,
-                    targetTransforms[0], requiresNativeConfirmation,
-                    exactTargetGeometry ? &targetMesh : nullptr) &&
-                PhysicalContactCompoundValid(targetShape) &&
-                (!exactTargetGeometry ||
-                 PhysicalContactTriangleMeshValid(targetMesh)))
+            bool exactTargetGeometry = false;
+            if (weaponGeometry && Halo3ContactObjectDataForHandle(
+                    targetHandle, targetData))
             {
+                exactTargetGeometry = Halo3ContactDetailedTargetShape(
+                        targetHandle, targetData, targetShape,
+                        targetTransforms[0], requiresNativeConfirmation,
+                        &targetMesh) &&
+                    PhysicalContactCompoundValid(targetShape) &&
+                    PhysicalContactTriangleMeshValid(targetMesh);
                 if (!exactTargetGeometry)
-                    g_halo3ContactRenderConvexFallbacks.fetch_add(
-                        1, std::memory_order_relaxed);
-                observationCount = 1;
-                for (int pass = 1;
-                     pass < kHalo3ExactRenderSeparationPasses; ++pass)
                 {
-                    Halo3Matrix4x3* observedNodes = nullptr;
-                    int observedNodeCount = 0;
-                    if (Halo3ContactReadInterpolatedNodes(
-                            targetHandle, &observedNodes,
-                            &observedNodeCount) &&
-                        observedNodes && observedNodeCount > 0 &&
-                        Halo3MatrixValid(observedNodes[0]))
+                    targetShape = {};
+                    targetMesh = {};
+                    exactTargetGeometry = false;
+                    if (!Halo3ContactDetailedTargetShape(
+                            targetHandle, targetData, targetShape,
+                            targetTransforms[0], requiresNativeConfirmation) ||
+                        !PhysicalContactCompoundValid(targetShape))
                     {
-                        BoneMatrix observedRoot{};
-                        std::memcpy(&observedRoot, &observedNodes[0],
-                                    sizeof(observedRoot));
-                        const PhysicalContactTransform observedTransform =
-                            Halo3ContactTransformFromBone(observedRoot);
-                        if (PhysicalContactTransformFinite(observedTransform))
-                            targetTransforms[observationCount++] =
-                                observedTransform;
+                        targetShape = {};
+                    }
+                }
+                if (exactTargetGeometry ||
+                    PhysicalContactCompoundValid(targetShape))
+                {
+                    if (exactTargetGeometry)
+                        g_halo3ContactRenderExactTargets.fetch_add(
+                            1, std::memory_order_relaxed);
+                    else
+                        g_halo3ContactRenderConvexFallbacks.fetch_add(
+                            1, std::memory_order_relaxed);
+                    observationCount = 1;
+                    for (int pass = 1;
+                         pass < kHalo3ExactRenderSeparationPasses; ++pass)
+                    {
+                        Halo3Matrix4x3* observedNodes = nullptr;
+                        int observedNodeCount = 0;
+                        if (Halo3ContactReadInterpolatedNodes(
+                                targetHandle, &observedNodes,
+                                &observedNodeCount) &&
+                            observedNodes && observedNodeCount > 0 &&
+                            Halo3MatrixValid(observedNodes[0]))
+                        {
+                            BoneMatrix observedRoot{};
+                            std::memcpy(&observedRoot, &observedNodes[0],
+                                        sizeof(observedRoot));
+                            const PhysicalContactTransform observedTransform =
+                                Halo3ContactTransformFromBone(observedRoot);
+                            if (PhysicalContactTransformFinite(observedTransform))
+                                targetTransforms[observationCount++] =
+                                    observedTransform;
+                        }
                     }
                 }
             }
@@ -11839,6 +11858,8 @@ namespace
         g_halo3ContactExactRenderOver250Us.store(
             0, std::memory_order_relaxed);
         g_halo3ContactRenderConvexFallbacks.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactRenderExactTargets.store(
             0, std::memory_order_relaxed);
         g_halo3ContactRenderExactClears.store(
             0, std::memory_order_relaxed);
@@ -16885,6 +16906,7 @@ namespace
             "bodyRenderSeparations=%llu bodyRenderSeparationFailures=%llu "
             "bodyRenderSamples=%llu bodyRenderOver250us=%llu "
             "bodyRenderPeakUs=%.1f bodyRenderConvexFallbacks=%llu "
+            "bodyRenderExactTargets=%llu "
             "bodyRenderExactClears=%llu "
             "bodyUncertainHolds=%llu bodyPeak=%.3fm "
             "wallRays=%llu "
@@ -17026,6 +17048,8 @@ namespace
             (unsigned long long)
                 g_halo3ContactRenderConvexFallbacks.load(
                     std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactRenderExactTargets.load(
+                std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactRenderExactClears.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactBodyUncertainHolds.load(
