@@ -7053,7 +7053,7 @@ namespace
     // The target shape has at most 16 children and the render guard retains at
     // most three target poses. Forward-only clearing therefore needs no more
     // than 48 distinct child/pose steps.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     constexpr int kHalo3ExactRenderChildSeparationSteps =
         static_cast<int>(PhysicalContactCompoundShape::kMaximumChildren) *
@@ -8756,59 +8756,37 @@ namespace
             targetShape = {};
             targetMesh = {};
             targetTransforms[0] = {};
-            bool exactTargetGeometry = false;
-            if (weaponGeometry && Halo3ContactObjectDataForHandle(
-                    targetHandle, targetData))
+            constexpr bool exactTargetGeometry = false;
+            if (weaponGeometry &&
+                Halo3ContactObjectDataForHandle(
+                    targetHandle, targetData) &&
+                Halo3ContactDetailedTargetShape(
+                    targetHandle, targetData, targetShape,
+                    targetTransforms[0], requiresNativeConfirmation) &&
+                PhysicalContactCompoundValid(targetShape))
             {
-                exactTargetGeometry = Halo3ContactDetailedTargetShape(
-                        targetHandle, targetData, targetShape,
-                        targetTransforms[0], requiresNativeConfirmation,
-                        &targetMesh) &&
-                    PhysicalContactCompoundValid(targetShape) &&
-                    PhysicalContactTriangleMeshValid(targetMesh);
-                if (!exactTargetGeometry)
+                g_halo3ContactRenderConvexFallbacks.fetch_add(
+                    1, std::memory_order_relaxed);
+                observationCount = 1;
+                for (int pass = 1;
+                     pass < kHalo3ExactRenderSeparationPasses; ++pass)
                 {
-                    targetShape = {};
-                    targetMesh = {};
-                    exactTargetGeometry = false;
-                    if (!Halo3ContactDetailedTargetShape(
-                            targetHandle, targetData, targetShape,
-                            targetTransforms[0], requiresNativeConfirmation) ||
-                        !PhysicalContactCompoundValid(targetShape))
+                    Halo3Matrix4x3* observedNodes = nullptr;
+                    int observedNodeCount = 0;
+                    if (Halo3ContactReadInterpolatedNodes(
+                            targetHandle, &observedNodes,
+                            &observedNodeCount) &&
+                        observedNodes && observedNodeCount > 0 &&
+                        Halo3MatrixValid(observedNodes[0]))
                     {
-                        targetShape = {};
-                    }
-                }
-                if (exactTargetGeometry ||
-                    PhysicalContactCompoundValid(targetShape))
-                {
-                    if (exactTargetGeometry)
-                        g_halo3ContactRenderExactTargets.fetch_add(
-                            1, std::memory_order_relaxed);
-                    else
-                        g_halo3ContactRenderConvexFallbacks.fetch_add(
-                            1, std::memory_order_relaxed);
-                    observationCount = 1;
-                    for (int pass = 1;
-                         pass < kHalo3ExactRenderSeparationPasses; ++pass)
-                    {
-                        Halo3Matrix4x3* observedNodes = nullptr;
-                        int observedNodeCount = 0;
-                        if (Halo3ContactReadInterpolatedNodes(
-                                targetHandle, &observedNodes,
-                                &observedNodeCount) &&
-                            observedNodes && observedNodeCount > 0 &&
-                            Halo3MatrixValid(observedNodes[0]))
-                        {
-                            BoneMatrix observedRoot{};
-                            std::memcpy(&observedRoot, &observedNodes[0],
-                                        sizeof(observedRoot));
-                            const PhysicalContactTransform observedTransform =
-                                Halo3ContactTransformFromBone(observedRoot);
-                            if (PhysicalContactTransformFinite(observedTransform))
-                                targetTransforms[observationCount++] =
-                                    observedTransform;
-                        }
+                        BoneMatrix observedRoot{};
+                        std::memcpy(&observedRoot, &observedNodes[0],
+                                    sizeof(observedRoot));
+                        const PhysicalContactTransform observedTransform =
+                            Halo3ContactTransformFromBone(observedRoot);
+                        if (PhysicalContactTransformFinite(observedTransform))
+                            targetTransforms[observationCount++] =
+                                observedTransform;
                     }
                 }
             }
@@ -8959,11 +8937,11 @@ namespace
                         directDistance += stepDistance;
                     }
                     // The per-child convexes deliberately enclose the authored
-                    // triangles. A rotating compound can therefore report an
-                    // overlap that no visible surface has. If the conservative
-                    // solver cannot clear, rebuild the authored target mesh
-                    // only for this rare frame and prove the unshifted followed
-                    // pose clear. Never use this path to accept a triangle hit.
+                    // triangles. If their fast one-axis solver cannot clear,
+                    // rebuild the authored target mesh only for this rare
+                    // frame. First reject hull-only overlap. For a real surface
+                    // overlap, search a fixed set of local escape directions
+                    // and choose the first (therefore shortest) clear shell.
                     if (!clear && !exactTargetGeometry)
                     {
                         PhysicalContactTransform exactTargetTransform{};
@@ -8975,27 +8953,180 @@ namespace
                             PhysicalContactTriangleMeshValid(targetMesh))
                         {
                             targetTransforms[0] = exactTargetTransform;
-                            bool authoredClear = true;
+                            const auto exactHit = [&] (
+                                const PhysicalContactTransform& pose,
+                                int observation) {
+                                return PhysicalContactTriangleMeshesIntersect(
+                                    weaponMesh, pose, targetMesh,
+                                    targetTransforms[observation],
+                                    renderGuardRadius);
+                            };
+                            int exactObservation = -1;
+                            PhysicalContactTrianglePair exactPair{};
                             for (int observation = 0;
                                  observation < observationCount; ++observation)
                             {
-                                if (PhysicalContactTriangleMeshesIntersect(
-                                        weaponMesh, weaponTransform, targetMesh,
-                                        targetTransforms[observation],
-                                        kHalo3ContactTriangleSurfaceRadiusMeters *
-                                            worldScale).hit)
+                                exactPair = exactHit(
+                                    weaponTransform, observation);
+                                if (exactPair.hit)
                                 {
-                                    authoredClear = false;
+                                    exactObservation = observation;
                                     break;
                                 }
                             }
-                            if (authoredClear)
+                            if (exactObservation < 0)
                             {
                                 clear = true;
                                 candidate = weaponTransform;
                                 directDistance = 0.0f;
                                 g_halo3ContactRenderExactClears.fetch_add(
                                     1, std::memory_order_relaxed);
+                            }
+                            else if (exactPair.weaponTriangle <
+                                         weaponMesh.triangleCount &&
+                                     exactPair.targetIndex <
+                                         targetMesh.triangleCount)
+                            {
+                                const PhysicalContactVec3 weaponCentre =
+                                    PhysicalContactTransformPoint(
+                                        weaponTransform,
+                                        weaponMesh.triangles[
+                                            exactPair.weaponTriangle].centre);
+                                const PhysicalContactTriangle& targetTriangle =
+                                    targetMesh.triangles[exactPair.targetIndex];
+                                const PhysicalContactVec3 targetCentre =
+                                    PhysicalContactTransformPoint(
+                                        targetTransforms[exactObservation],
+                                        targetTriangle.centre);
+                                PhysicalContactVec3 preferred =
+                                    PhysicalContactNormalize(
+                                        weaponCentre - targetCentre,
+                                        outwardUnit);
+                                const PhysicalContactVec3 targetA =
+                                    PhysicalContactTransformPoint(
+                                        targetTransforms[exactObservation],
+                                        targetTriangle.vertices[0]);
+                                const PhysicalContactVec3 targetB =
+                                    PhysicalContactTransformPoint(
+                                        targetTransforms[exactObservation],
+                                        targetTriangle.vertices[1]);
+                                const PhysicalContactVec3 targetC =
+                                    PhysicalContactTransformPoint(
+                                        targetTransforms[exactObservation],
+                                        targetTriangle.vertices[2]);
+                                PhysicalContactVec3 targetNormal =
+                                    PhysicalContactNormalize(
+                                        PhysicalContactCross(
+                                            targetB - targetA,
+                                            targetC - targetA), preferred);
+                                if (PhysicalContactDot(
+                                        targetNormal, preferred) < 0.0f)
+                                    targetNormal = targetNormal * -1.0f;
+
+                                std::array<PhysicalContactVec3, 16> directions{};
+                                int directionCount = 0;
+                                const auto addDirection = [&] (
+                                    PhysicalContactVec3 direction) {
+                                    direction = PhysicalContactNormalize(
+                                        direction, {});
+                                    if (PhysicalContactLengthSquared(direction) <=
+                                        1.0e-10f)
+                                        return;
+                                    for (int index = 0;
+                                         index < directionCount; ++index)
+                                    {
+                                        if (PhysicalContactDot(
+                                                direction,
+                                                directions[index]) > 0.999f)
+                                            return;
+                                    }
+                                    directions[directionCount++] = direction;
+                                };
+                                addDirection(preferred);
+                                addDirection(targetNormal);
+                                addDirection(weaponTransform.left);
+                                addDirection(weaponTransform.left * -1.0f);
+                                addDirection(weaponTransform.up);
+                                addDirection(weaponTransform.up * -1.0f);
+                                addDirection(weaponTransform.forward);
+                                addDirection(weaponTransform.forward * -1.0f);
+                                addDirection(preferred + weaponTransform.left);
+                                addDirection(preferred - weaponTransform.left);
+                                addDirection(preferred + weaponTransform.up);
+                                addDirection(preferred - weaponTransform.up);
+                                addDirection(preferred + weaponTransform.forward);
+                                addDirection(preferred - weaponTransform.forward);
+
+                                constexpr int kEscapeShells = 10;
+                                constexpr int kEscapeRefinementSteps = 6;
+                                float shellDistance = 0.025f * worldScale;
+                                for (int shell = 0;
+                                     shell < kEscapeShells && !clear; ++shell)
+                                {
+                                    for (int directionIndex = 0;
+                                         directionIndex < directionCount;
+                                         ++directionIndex)
+                                    {
+                                        PhysicalContactTransform probe =
+                                            weaponTransform;
+                                        probe.position = probe.position +
+                                            directions[directionIndex] *
+                                                shellDistance;
+                                        bool probeClear = true;
+                                        for (int observation = 0;
+                                             observation < observationCount;
+                                             ++observation)
+                                        {
+                                            if (exactHit(probe, observation).hit)
+                                            {
+                                                probeClear = false;
+                                                break;
+                                            }
+                                        }
+                                        if (!probeClear)
+                                            continue;
+
+                                        float low = shell == 0
+                                            ? 0.0f : shellDistance * 0.5f;
+                                        float high = shellDistance;
+                                        for (int refine = 0;
+                                             refine < kEscapeRefinementSteps;
+                                             ++refine)
+                                        {
+                                            const float middle =
+                                                (low + high) * 0.5f;
+                                            probe = weaponTransform;
+                                            probe.position = probe.position +
+                                                directions[directionIndex] *
+                                                    middle;
+                                            bool middleClear = true;
+                                            for (int observation = 0;
+                                                 observation < observationCount;
+                                                 ++observation)
+                                            {
+                                                if (exactHit(
+                                                        probe, observation).hit)
+                                                {
+                                                    middleClear = false;
+                                                    break;
+                                                }
+                                            }
+                                            if (middleClear)
+                                                high = middle;
+                                            else
+                                                low = middle;
+                                        }
+                                        candidate = weaponTransform;
+                                        candidate.position = candidate.position +
+                                            directions[directionIndex] * high;
+                                        directDistance = high;
+                                        clear = true;
+                                        g_halo3ContactRenderExactClears.fetch_add(
+                                            1, std::memory_order_relaxed);
+                                        break;
+                                    }
+                                    shellDistance *= 2.0f;
+                                }
                             }
                         }
                     }
