@@ -2683,3 +2683,11 @@ confirmed one penetration. Preserved log:
 `out/debug-openxr/20260813-031515820Z-rotating-body-gap.log`, SHA-256
 `44F02A10614EB6D0AA62765152EFFBBDE1112332C4D6934D10EF6A309C62055E`.
 The conservative-first behavior is rejected and disabled.
+
+Candidate `49c392c` used authored target triangles in every final-palette
+callback. It was both insufficient and too expensive: after 1,251 checks it
+had 66 unresolved separations and one confirmed same-frame penetration, while
+565 callbacks (45%) exceeded 0.25 ms. Preserved log:
+`out/debug-openxr/20260813-032325066Z-rotating-body-gap.log`, SHA-256
+`53127F4B9A2CCABD92D321F984AA940D1D6B2F2B555423DB817909B92F9880FF`.
+The always-exact behavior is rejected and disabled.
