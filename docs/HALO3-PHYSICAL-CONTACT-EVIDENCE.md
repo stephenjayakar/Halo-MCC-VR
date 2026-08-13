@@ -2217,6 +2217,28 @@ Runtime telemetry records `enemyAssistHits`. Pure coverage proves the radius is
 `30 mm` for the three animated enemy kinds, unchanged for vehicles, and never
 shrinks a larger exact radius. Headset acceptance remains pending.
 
+### 2026-08-13 animated-body render-frame repair
+
+The same Campaign report said interaction with bodies was poor and the weapon
+could clip after a nudge. Inspection found a concrete frame mismatch in the
+render-follow transaction. The worker correctly selected one H3EK-authored
+rigid body and saved that limb's node transform, but the render callback always
+compared it with interpolated node zero. For a biped, creature, giant, or
+ragdoll, node zero is the character root, not the contacted limb. The resulting
+root-versus-limb delta could move the held weapon incorrectly and the final
+guard could not rebuild the selected animated collision shape.
+
+The isolated repair carries the proven rigid-body index through the existing
+bounded lock-free publication. The render callback resolves that body's own
+authored node and Havok shape, follows the same node, and runs the final 5 cm
+render reserve against that exact convex body. Single-body props continue to
+use node zero. The enemy-only 30 mm melee sampling band does not publish a body
+index to the render guard, so it remains damage admission only and cannot form
+an invisible wall. A final render solve that cannot prove separation now refuses
+that mutation and restores the worker-approved palette instead of publishing a
+known intersecting correction. Runtime validation and headset acceptance remain
+pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
