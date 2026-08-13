@@ -7048,9 +7048,9 @@ namespace
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactFinalRenderReserveMeters = 0.050f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Clear encountered target children with fixed-direction, forward-only
-    // support-plane steps. Eight bounded steps replace an open-ended search.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    // Eight forward steps did not cover every child/pose pair. Keep the failed
+    // behavior dormant before using the proven 16 children x 3 poses bound.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr int kHalo3ExactRenderChildSeparationSteps = 8;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};

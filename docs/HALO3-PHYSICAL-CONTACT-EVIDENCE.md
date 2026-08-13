@@ -2637,3 +2637,11 @@ encountered, and repeat if that forward motion exposes another child. Because
 every step advances on one axis, a child already cleared cannot be re-entered.
 The loop is fixed and allocation-free; a correction is published only after a
 complete pass over all observed poses finds no remaining overlap.
+
+Candidate `307fb22` showed that eight steps are insufficient. A 16-child
+target observed at three poses can expose more than eight distinct child/pose
+pairs along the fixed outward ray. The run accumulated 58 refused corrections
+and then four confirmed same-frame penetrations. Preserved log:
+`out/debug-openxr/20260813-025144090Z-rotating-body-gap.log`, SHA-256
+`7FA782FFCB8B9D5D64EFD3E1168959E4FC0552864E917CA37E1B4629A5992F75`.
+The eight-step behavior is rejected and disabled.
