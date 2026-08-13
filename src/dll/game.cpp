@@ -15156,6 +15156,169 @@ namespace
                             (first + second) * 0.5f, triangleClearance);
                     }
 
+                    // Some placed scenery and machine objects own valid
+                    // H3EK-authored collision but do not return a useful
+                    // camera-to-weapon vector hit. Sweep the complete held
+                    // weapon against nearby fixed root objects directly. The
+                    // broad phase is bounded by the live object table and the
+                    // exact phase reuses the same immutable convex/triangle
+                    // shapes as dynamic contact; no map or object identity is
+                    // hardcoded.
+                    const PhysicalContactTransform& previousStaticPose =
+                        previousWallPoseValid
+                            ? g_halo3ContactPreviousWallTransform
+                            : unconstrainedWeaponTransform;
+                    const float weaponStaticRadius =
+                        (collisionShape && PhysicalContactTriangleMeshValid(
+                                               weaponTriangleMesh)
+                             ? PhysicalContactTriangleMeshBoundRadius(
+                                   weaponTriangleMesh)
+                             : PhysicalContactCompoundBoundRadius(
+                                   weaponShape)) *
+                        std::max(previousStaticPose.scale,
+                                 unconstrainedWeaponTransform.scale);
+                    const uint32_t staticObjectLimit = std::min(
+                        header.firstUnallocated, header.maximumCount);
+                    for (uint32_t index = 0;
+                         index < staticObjectLimit &&
+                         wallPlaneCount < wallPlanes.size(); ++index)
+                    {
+                        auto* entry = entries + static_cast<size_t>(index) *
+                            kHalo3ObjectEntryStride;
+                        const uint16_t identifier =
+                            *reinterpret_cast<const uint16_t*>(entry);
+                        if (!OdstObjectEntryIsLive(identifier))
+                            continue;
+                        const int32_t handle = static_cast<int32_t>(
+                            (uint32_t{identifier} << 16) | index);
+                        if (handle == unitHandle || handle == weaponHandle)
+                            continue;
+                        auto* data = *reinterpret_cast<unsigned char**>(
+                            entry + kHalo3ObjectEntryDataOffset);
+                        if (!data || *reinterpret_cast<const int32_t*>(
+                                         data + kHalo3ObjectParentOffset) != -1)
+                            continue;
+                        void* component = nullptr;
+                        int32_t bodyIndex = -1;
+                        float massKilograms = 0.0f;
+                        uint8_t motionType = 0;
+                        const bool bodyResolved =
+                            Halo3ContactMassForObjectData(
+                                data, component, bodyIndex, massKilograms,
+                                &motionType);
+                        if (!PhysicalContactObjectBlocksAsStatic(
+                                true, false, bodyResolved, motionType))
+                            continue;
+                        const auto* center = reinterpret_cast<const float*>(
+                            data + kHalo3ObjectBoundingCenterOffset);
+                        const float targetRadius =
+                            *reinterpret_cast<const float*>(data + 0x28);
+                        const PhysicalContactVec3 targetCenter{
+                            center[0], center[1], center[2]};
+                        if (!PhysicalContactFinite(targetCenter) ||
+                            !std::isfinite(targetRadius) ||
+                            targetRadius <= 0.01f || targetRadius > 20.0f)
+                            continue;
+                        const PhysicalContactHit broad =
+                            PhysicalContactSweepPoint(
+                                previousStaticPose.position,
+                                unconstrainedWeaponTransform.position,
+                                targetCenter,
+                                weaponStaticRadius + targetRadius);
+                        if (!broad.hit)
+                            continue;
+
+                        PhysicalContactCompoundShape targetShape{};
+                        PhysicalContactTransform targetTransform{};
+                        bool requiresNativeConfirmation = false;
+                        bool resolved = Halo3ContactDetailedTargetShape(
+                            handle, data, targetShape, targetTransform,
+                            requiresNativeConfirmation, nullptr);
+                        if (!resolved)
+                        {
+                            resolved = Halo3ContactShapeForObject(
+                                data, targetShape);
+                            if (resolved)
+                                targetTransform =
+                                    Halo3ContactObjectTransform(data);
+                        }
+                        if (!resolved ||
+                            !PhysicalContactTransformFinite(targetTransform))
+                            continue;
+
+                        PhysicalContactCompoundHit hit{};
+                        if (collisionShape &&
+                            PhysicalContactTriangleMeshValid(
+                                weaponTriangleMesh))
+                        {
+                            const PhysicalContactTriangleMeshHit meshHit =
+                                PhysicalContactSweepTriangleMeshCompound(
+                                    weaponTriangleMesh, previousStaticPose,
+                                    unconstrainedWeaponTransform,
+                                    targetShape, targetTransform,
+                                    kHalo3ContactTriangleStepMeters *
+                                        worldScale,
+                                    kHalo3ContactTriangleSurfaceRadiusMeters *
+                                        worldScale);
+                            static_cast<PhysicalContactConvexHit&>(hit) =
+                                meshHit;
+                            if (meshHit.hit)
+                            {
+                                hit.weaponChild = 0;
+                                hit.targetChild = meshHit.targetIndex;
+                            }
+                            else
+                            {
+                                hit = PhysicalContactSweepCompound(
+                                    weaponShape,
+                                    unconstrainedWeaponTransform,
+                                    unconstrainedWeaponTransform,
+                                    targetShape, targetTransform);
+                            }
+                        }
+                        else
+                        {
+                            hit = PhysicalContactSweepCompound(
+                                weaponShape, previousStaticPose,
+                                unconstrainedWeaponTransform,
+                                targetShape, targetTransform);
+                        }
+                        if (!hit.hit ||
+                            hit.targetChild >= targetShape.childCount)
+                            continue;
+                        PhysicalContactVec3 normal =
+                            PhysicalContactNormalize(
+                                hit.normal, camera - hit.targetPoint);
+                        if (PhysicalContactDot(
+                                camera - hit.targetPoint, normal) < 0.0f)
+                            normal = normal * -1.0f;
+                        const PhysicalContactVec3 weaponPoint =
+                            collisionShape &&
+                                PhysicalContactTriangleMeshValid(
+                                    weaponTriangleMesh)
+                            ? PhysicalContactTriangleMeshSupport(
+                                  weaponTriangleMesh,
+                                  unconstrainedWeaponTransform,
+                                  normal * -1.0f, 0.0f)
+                            : PhysicalContactCompoundSupport(
+                                  weaponShape,
+                                  unconstrainedWeaponTransform,
+                                  normal * -1.0f);
+                        const PhysicalContactVec3 targetPoint =
+                            PhysicalContactConvexSupport(
+                                targetShape.children[hit.targetChild],
+                                targetTransform, normal);
+                        if (!PhysicalContactFinite(weaponPoint) ||
+                            !PhysicalContactFinite(targetPoint) ||
+                            !PhysicalContactFinite(normal))
+                            continue;
+                        wallPlanes[wallPlaneCount++] = {
+                            weaponPoint, targetPoint, normal,
+                            0.005f * worldScale};
+                        g_halo3ContactWallObjectPlanes.fetch_add(
+                            1, std::memory_order_relaxed);
+                    }
+
                     if (collisionShape &&
                         PhysicalContactTriangleMeshValid(weaponTriangleMesh) &&
                         wallPlaneCount < wallPlanes.size())

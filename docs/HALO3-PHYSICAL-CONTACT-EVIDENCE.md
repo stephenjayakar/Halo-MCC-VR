@@ -2890,3 +2890,27 @@ visual constraint or physics impulse. Props, vehicles, static objects, and
 dynamic nudging keep exact geometry and their existing thresholds. Pure tests
 cover the convex fallback gap, exact child selection, enemy-kind radius, and
 unchanged vehicle radius. Headset acceptance remains pending.
+
+### 2026-08-13 fixed-object exact wall sweep
+
+The next campaign report still identified a rock that the weapon could cross.
+The wall transaction had three providers: native camera-to-weapon point rays,
+captured decorator meshes, and motion rays for thin-wall tunnelling. It did not
+directly compare the complete weapon solid with fixed object collision. A
+placed scenery or machine object could therefore own valid authored collision
+but remain absent when its native ray provider did not return the needed
+surface and its renderer did not use a captured decorator draw.
+
+The wall worker now enumerates the same bounded live Halo object table already
+used by dynamic contact. It admits only root objects that the proven Havok
+motion classification identifies as fixed/keyframed, or whose body cannot be
+resolved and must therefore fail closed as a blocker. A swept bounding-sphere
+test rejects distant objects. Nearby candidates resolve through the existing
+H3EK-authored detailed collision reader, with the native Havok compound as a
+fallback, and receive a continuous triangle/convex weapon sweep. An exact hit
+adds its target surface, weapon support point, and camera-facing normal to the
+existing multi-plane visual constraint solver. Dynamic bodies remain in the
+separate impulse path. The player, held weapon, attachments, invalid handles,
+and non-finite geometry are rejected. No map, scenario, tag, or rock identity
+is hardcoded. The cumulative Release build passes; the reported campaign rock
+remains pending headset acceptance.
