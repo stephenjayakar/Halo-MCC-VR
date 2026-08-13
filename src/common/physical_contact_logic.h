@@ -675,6 +675,41 @@ inline size_t PhysicalContactAppendTriangleCentroidSamples(
     return sampleCount;
 }
 
+// Add one exact edge midpoint per authored face. The selected edge rotates
+// with the physics sample so all three edges are covered over three samples,
+// while the native vector-query count stays bounded to one extra ray per face.
+// This complements convex vertices and face centroids for thin enemy-limb
+// contacts without paying for three mostly duplicated edge rays every frame.
+inline size_t PhysicalContactAppendRotatingTriangleEdgeSamples(
+    const PhysicalContactTriangleMesh& mesh, PhysicalContactVec3* samples,
+    size_t sampleCount, size_t sampleCapacity, uint64_t samplePhase)
+{
+    if (!samples || sampleCount > sampleCapacity || !mesh.triangleCount ||
+        mesh.triangleCount > PhysicalContactTriangleMesh::kMaximumTriangles)
+        return sampleCount;
+    const size_t available = sampleCapacity - sampleCount;
+    const size_t addCount = std::min<size_t>(available, mesh.triangleCount);
+    if (!addCount)
+        return sampleCount;
+    for (size_t sample = 0; sample < addCount; ++sample)
+    {
+        const size_t triangleIndex =
+            sample * static_cast<size_t>(mesh.triangleCount) / addCount;
+        const PhysicalContactTriangle& triangle =
+            mesh.triangles[triangleIndex];
+        if (!PhysicalContactTriangleValid(triangle))
+            continue;
+        const size_t edge = static_cast<size_t>(
+            (samplePhase + triangleIndex) % 3u);
+        const PhysicalContactVec3 midpoint =
+            (triangle.vertices[edge] +
+             triangle.vertices[(edge + 1u) % 3u]) * 0.5f;
+        if (PhysicalContactFinite(midpoint))
+            samples[sampleCount++] = midpoint;
+    }
+    return sampleCount;
+}
+
 inline bool PhysicalContactH3DecoratorPlacementBufferEvidence(
     uintptr_t creatorRva, uintptr_t verifiedCreatorRva,
     uint32_t sampledRecords,

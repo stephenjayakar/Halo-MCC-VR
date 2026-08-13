@@ -9521,6 +9521,38 @@ int main()
             "Native Halo 3 contact samples retain prior convex points and add "
             "bounded exact triangle-face centroids across the authored weapon");
 
+        std::array<PhysicalContactVec3, 8> nativeEdgeSamples{};
+        nativeEdgeSamples[0] = {9.0f, 9.0f, 9.0f};
+        const size_t nativeEdgePhase0Count =
+            PhysicalContactAppendRotatingTriangleEdgeSamples(
+                separatedSurfaceMesh, nativeEdgeSamples.data(), 1,
+                nativeEdgeSamples.size(), 0);
+        Check(nativeEdgePhase0Count == 3 &&
+              nativeEdgeSamples[0].x == 9.0f &&
+              std::fabs(nativeEdgeSamples[1].x + 0.50f) < 1.0e-6f &&
+              std::fabs(nativeEdgeSamples[1].y) < 1.0e-6f &&
+              std::fabs(nativeEdgeSamples[1].z + 0.10f) < 1.0e-6f &&
+              std::fabs(nativeEdgeSamples[2].x - 0.50f) < 1.0e-6f &&
+              std::fabs(nativeEdgeSamples[2].y - 0.05f) < 1.0e-6f &&
+              std::fabs(nativeEdgeSamples[2].z) < 1.0e-6f,
+            "Native enemy melee samples add one exact authored edge midpoint "
+            "per face without replacing existing samples");
+        std::array<PhysicalContactVec3, 2> nativeEdgePhase1Samples{};
+        const size_t nativeEdgePhase1Count =
+            PhysicalContactAppendRotatingTriangleEdgeSamples(
+                separatedSurfaceMesh, nativeEdgePhase1Samples.data(), 0,
+                nativeEdgePhase1Samples.size(), 1);
+        Check(nativeEdgePhase1Count == 2 &&
+              std::fabs(nativeEdgePhase1Samples[0].x + 0.50f) < 1.0e-6f &&
+              std::fabs(nativeEdgePhase1Samples[0].y - 0.05f) < 1.0e-6f &&
+              std::fabs(nativeEdgePhase1Samples[1].x - 0.50f) < 1.0e-6f &&
+              std::fabs(nativeEdgePhase1Samples[1].y + 0.05f) < 1.0e-6f &&
+              PhysicalContactAppendRotatingTriangleEdgeSamples(
+                  invalidTriangleMesh, nativeEdgePhase1Samples.data(), 2,
+                  nativeEdgePhase1Samples.size(), 0) == 2,
+            "Native enemy melee edge samples rotate across authored edges, "
+            "respect fixed capacity, and reject malformed meshes");
+
         const std::array<uint8_t, 16> packedRockPlacement{
             0xA9, 0xBE, 0xA5, 0x22, 0x65, 0x35, 0x00, 0x00,
             0x7E, 0x7D, 0xC7, 0x52, 0x78, 0x96, 0xE7, 0x77};

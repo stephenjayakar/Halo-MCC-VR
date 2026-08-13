@@ -2971,6 +2971,26 @@ kinds admit a moving hand when target-relative motion nearly cancels, while a
 vehicle keeps the low relative speed and remains below noise. Headset
 acceptance remains pending.
 
+### 2026-08-13 rotating authored-edge enemy samples
+
+The next Campaign headset report still described enemy melee as too hard and
+suggested the visible weapon was not contacting enemies consistently. The
+enemy threshold was already the `0.05 m/s` tracking-noise floor, so lowering it
+could not repair a missed contact. The retained native fallback covered convex
+vertices and exact face centroids, but not the long triangle edges between
+them. A thin animated limb can cross such an edge between controller samples
+without crossing either endpoint or the face centre.
+
+The bounded native sweep now adds one exact edge midpoint per authored weapon
+triangle. The selected edge rotates with the proposal serial, covering all
+three edges over three physics samples while adding only one ray per face per
+sample. The assault rifle therefore grows from 57 native surface samples to 93,
+not to the 165 required by all three edges every frame. Existing first-
+obstruction, exact-handle, live-root, enemy-kind, wall, authored-object, and
+fixed-capacity guards remain unchanged. Pure coverage proves preservation of
+existing samples, edge rotation, exact midpoint values, malformed-mesh reject,
+and capacity bounds. Campaign headset melee acceptance remains pending.
+
 ### 2026-08-13 fixed-object exact wall sweep
 
 The next campaign report still identified a rock that the weapon could cross.

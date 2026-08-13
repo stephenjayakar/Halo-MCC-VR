@@ -16082,6 +16082,11 @@ namespace
                     PhysicalContactAppendTriangleCentroidSamples(
                         weaponTriangleMesh, nativeLocalSamples.data(),
                         nativeLocalSampleCount, nativeLocalSamples.size());
+                nativeLocalSampleCount =
+                    PhysicalContactAppendRotatingTriangleEdgeSamples(
+                        weaponTriangleMesh, nativeLocalSamples.data(),
+                        nativeLocalSampleCount, nativeLocalSamples.size(),
+                        proposalSerial);
             }
             g_halo3ContactNativeSamples.store(
                 static_cast<uint32_t>(nativeLocalSampleCount),
