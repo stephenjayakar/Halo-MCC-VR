@@ -9099,6 +9099,12 @@ int main()
                 twoPartWeapon, compoundWeaponTransform,
                 compoundWeaponTransform, onePartTarget,
                 compoundTargetTransform);
+        compoundTargetTransform.position = {0.20f, 0, 0};
+        const PhysicalContactCompoundHit compoundEnemyCatch =
+            PhysicalContactSweepCompound(
+                twoPartWeapon, compoundWeaponTransform,
+                compoundWeaponTransform, onePartTarget,
+                compoundTargetTransform, 0.180f);
         compoundTargetTransform.position = {0.50f, 0, 0};
         const PhysicalContactCompoundHit compoundHead =
             PhysicalContactSweepCompound(
@@ -9119,7 +9125,8 @@ int main()
         const PhysicalContactVec3 symmetricCentroid =
             PhysicalContactCompoundWorldCentroid(
                 twoPartWeapon, centroidTransform);
-        Check(!compoundGap.hit && compoundHead.hit &&
+        Check(!compoundGap.hit && compoundEnemyCatch.hit &&
+              compoundEnemyCatch.weaponChild == 1 && compoundHead.hit &&
               compoundHead.weaponChild == 1 &&
               PhysicalContactCompoundValid(twoPartWeapon) &&
               PhysicalContactCompoundBoundRadius(twoPartWeapon) > 0.59f &&
@@ -9129,9 +9136,10 @@ int main()
               std::fabs(symmetricCentroid.x - 1.0f) < 1.0e-6f &&
               std::fabs(symmetricCentroid.y - 2.0f) < 1.0e-6f &&
               std::fabs(symmetricCentroid.z - 3.0f) < 1.0e-6f,
-            "Compound authored shapes keep disjoint parts separate and "
-            "publish bounded native-query samples and a transformed authored "
-            "centroid, and report the exact child that touched");
+            "Compound authored shapes keep disjoint parts separate, support "
+            "an enemy-only sampled-contact skin, publish bounded native-query "
+            "samples and a transformed authored centroid, and report the "
+            "exact child that touched");
 
         PhysicalContactCompoundShape tenPartTarget{};
         tenPartTarget.childCount = 10;
@@ -9807,16 +9815,16 @@ int main()
               PhysicalContactEnemyMeleeKind(0) &&
               PhysicalContactEnemyMeleeKind(12) &&
               PhysicalContactEnemyMeleeKind(13) &&
-              !PhysicalContactEnemyMeleeKind(1) &&
+               !PhysicalContactEnemyMeleeKind(1) &&
                !PhysicalContactEnemyMeleeKind(2) &&
                std::fabs(PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
-                             0.00125f, 0) - 0.080f) < 1.0e-6f &&
+                             0.00125f, 0) - 0.180f) < 1.0e-6f &&
                std::fabs(PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
-                             0.00125f, 12) - 0.080f) < 1.0e-6f &&
+                             0.00125f, 12) - 0.180f) < 1.0e-6f &&
               std::fabs(PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
                             0.00125f, 1) - 0.00125f) < 1.0e-6f &&
                std::fabs(PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
-                             0.090f, 0) - 0.090f) < 1.0e-6f &&
+                             0.090f, 0) - 0.180f) < 1.0e-6f &&
               PhysicalContactVisualTargetBodyIndex(1, 0) == -1 &&
               PhysicalContactVisualTargetBodyIndex(2, 7) == -1 &&
               PhysicalContactVisualTargetBodyIndex(3, -1) == -1 &&

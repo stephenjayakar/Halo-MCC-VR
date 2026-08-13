@@ -1841,11 +1841,18 @@ inline PhysicalContactCompoundHit PhysicalContactSweepCompound(
     const PhysicalContactTransform& previousWeaponTransform,
     const PhysicalContactTransform& currentWeaponTransform,
     const PhysicalContactCompoundShape& target,
-    const PhysicalContactTransform& targetTransform)
+    const PhysicalContactTransform& targetTransform,
+    float surfaceRadius = 0.0f)
 {
     PhysicalContactCompoundHit closest{};
     if (!PhysicalContactCompoundValid(weapon) ||
-        !PhysicalContactCompoundValid(target))
+        !PhysicalContactCompoundValid(target) ||
+        !std::isfinite(surfaceRadius) || surfaceRadius < 0.0f ||
+        surfaceRadius > 0.25f ||
+        !std::isfinite(previousWeaponTransform.scale) ||
+        previousWeaponTransform.scale <= 0.0f ||
+        !std::isfinite(currentWeaponTransform.scale) ||
+        currentWeaponTransform.scale <= 0.0f)
         return closest;
     for (uint16_t weaponChild = 0;
          weaponChild < weapon.childCount; ++weaponChild)
@@ -1853,9 +1860,15 @@ inline PhysicalContactCompoundHit PhysicalContactSweepCompound(
         for (uint16_t targetChild = 0;
              targetChild < target.childCount; ++targetChild)
         {
+            PhysicalContactConvexShape expandedWeapon =
+                weapon.children[weaponChild];
+            if (surfaceRadius > 0.0f)
+                expandedWeapon.radius += surfaceRadius /
+                    std::max(previousWeaponTransform.scale,
+                             currentWeaponTransform.scale);
             const PhysicalContactConvexHit candidate =
                 PhysicalContactSweepConvex(
-                    weapon.children[weaponChild], previousWeaponTransform,
+                    expandedWeapon, previousWeaponTransform,
                     currentWeaponTransform, target.children[targetChild],
                     targetTransform);
             if (!candidate.hit ||
@@ -2836,11 +2849,13 @@ inline float PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
         return exactSurfaceRadiusMeters;
     // A render-tracked controller and an animated limb are sampled on
     // different clocks.  The exact 1.25 mm physics surface is retained for
-    // blocking and impulse, but enemy melee gets an 8 cm catch zone so a fast
+    // blocking and impulse, but enemy melee gets an 18 cm catch zone so a fast
     // visible strike cannot pass entirely between two samples.  This is
-    // deliberately enemy-only: props and vehicles keep exact contact.
+    // deliberately enemy-only: props and vehicles keep exact contact.  The
+    // 18 cm skin covers a full 120 Hz fast-swing step plus the independently
+    // animated limb's own movement; it never becomes a physics or wall shape.
     return PhysicalContactEnemyMeleeKind(targetKind)
-        ? std::max(exactSurfaceRadiusMeters, 0.080f)
+        ? std::max(exactSurfaceRadiusMeters, 0.180f)
         : exactSurfaceRadiusMeters;
 }
 

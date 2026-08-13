@@ -9966,6 +9966,16 @@ namespace
                 candidate = PhysicalContactSweepCompound(
                     weaponShape, previousWeaponTransform,
                     currentWeaponTransform, targetShape, targetTransform);
+                if (!candidate.hit &&
+                    std::isfinite(meleeAssistSurfaceRadius) &&
+                    meleeAssistSurfaceRadius > triangleSurfaceRadius)
+                {
+                    candidate = PhysicalContactSweepCompound(
+                        weaponShape, previousWeaponTransform,
+                        currentWeaponTransform, targetShape, targetTransform,
+                        meleeAssistSurfaceRadius);
+                    candidateMeleeAssist = candidate.hit;
+                }
                 if (candidate.hit)
                 {
                     candidateWeaponShape =
@@ -16409,7 +16419,7 @@ namespace
                 else
                     bodyConstraint = {};
             }
-            // The 8 cm animated-limb catch zone exists only to prevent a
+            // The 18 cm animated-limb catch zone exists only to prevent a
             // sampled fast swing from missing native melee. It must never
             // create an invisible visual wall or a pre-contact physics shove.
             if (closestEnemyMeleeAssist)

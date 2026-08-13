@@ -2871,3 +2871,22 @@ index format, owned geometry bounds, finite shader constants, and the solid
 three-axis mesh test. Pure coverage checks the indexed indirect layout,
 negative base vertices, nonzero offsets, and truncation rejection. The exact
 campaign-rock headset check remains pending.
+
+### 2026-08-13 comprehensive animated-enemy catch
+
+The next campaign headset report still found no physical melee. The existing
+enemy-only catch had two remaining limits: its 8 cm radius did not cover a full
+fast 120 Hz weapon step plus independent limb animation, and the second pass
+ran only when triangle weapon geometry was present. A weapon using the approved
+authored convex fallback therefore remained millimeter-exact.
+
+The animated-body sweep now gives both weapon geometry paths the same 18 cm
+enemy-only sampled-contact skin. The triangle path uses its existing rounded
+surface query. The convex path temporarily increases the copied convex radius
+before its bounded continuous sweep, leaving the immutable authored shape
+unchanged. Both paths still return the exact contacted animated rigid-body
+index. A catch-only hit can request native melee, but it still cannot publish a
+visual constraint or physics impulse. Props, vehicles, static objects, and
+dynamic nudging keep exact geometry and their existing thresholds. Pure tests
+cover the convex fallback gap, exact child selection, enemy-kind radius, and
+unchanged vehicle radius. Headset acceptance remains pending.
