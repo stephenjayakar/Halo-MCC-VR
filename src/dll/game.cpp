@@ -7048,10 +7048,9 @@ namespace
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactFinalRenderReserveMeters = 0.050f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // The direct sphere bound can hit the one-metre cap on an extreme rotating
-    // sample and refuse correction. Keep it dormant before replacing the
-    // coarse radius with an exact support-plane distance.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    // Separate the exact weapon and conservative target along one actual
+    // support plane, then prove the result with one complete geometry query.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
@@ -8809,13 +8808,16 @@ namespace
                         renderGuardRadius).hit;
                 };
                 int overlapObservation = -1;
+                std::array<bool, kHalo3ExactRenderSeparationPasses>
+                    overlappingObservations{};
                 for (int observation = 0;
                      observation < observationCount; ++observation)
                 {
                     if (targetOverlaps(weaponTransform, observation))
                     {
-                        overlapObservation = observation;
-                        break;
+                        overlappingObservations[observation] = true;
+                        if (overlapObservation < 0)
+                            overlapObservation = observation;
                     }
                 }
                 if (overlapObservation >= 0)
@@ -8835,31 +8837,33 @@ namespace
                     const PhysicalContactVec3 outward =
                         weaponTransform.position -
                         targetTransforms[overlapObservation].position;
-                    const float weaponRadius =
-                        PhysicalContactTriangleMeshBoundRadius(weaponMesh) *
-                        weaponTransform.scale;
-                    const float targetLocalRadius =
-                        PhysicalContactCompoundBoundRadius(targetShape);
+                    const PhysicalContactVec3 outwardUnit =
+                        PhysicalContactNormalize(outward, {});
+                    const PhysicalContactVec3 weaponMinimum =
+                        PhysicalContactTriangleMeshSupport(
+                            weaponMesh, weaponTransform,
+                            outwardUnit * -1.0f, 0.0f);
                     float directDistance = 0.0f;
                     for (int observation = 0;
                          observation < observationCount; ++observation)
                     {
-                        const float targetRadius =
-                            targetLocalRadius *
-                            targetTransforms[observation].scale;
+                        if (!overlappingObservations[observation])
+                            continue;
+                        const PhysicalContactVec3 targetMaximum =
+                            PhysicalContactCompoundSupport(
+                                targetShape, targetTransforms[observation],
+                                outwardUnit);
                         directDistance = std::max(
                             directDistance,
-                            PhysicalContactSphereRayExitDistance(
-                                weaponTransform.position, outward,
-                                targetTransforms[observation].position,
-                                weaponRadius + targetRadius +
-                                    renderGuardRadius,
-                                0.001f * worldScale, worldScale));
+                            PhysicalContactSupportPlaneSeparationDistance(
+                                weaponMinimum, targetMaximum, outwardUnit,
+                                renderGuardRadius + 0.001f * worldScale,
+                                4.0f * worldScale));
                     }
                     PhysicalContactWallConstraint correction{};
                     PhysicalContactTransform candidate = weaponTransform;
                     candidate.position = candidate.position +
-                        PhysicalContactNormalize(outward, {}) * directDistance;
+                        outwardUnit * directDistance;
                     if (directDistance > 1.0e-5f && !overlapsAt(candidate))
                     {
                         correction.offset =

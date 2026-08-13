@@ -842,6 +842,27 @@ inline PhysicalContactVec3 PhysicalContactConvexSupport(
     return result;
 }
 
+inline PhysicalContactVec3 PhysicalContactCompoundSupport(
+    const PhysicalContactCompoundShape& shape,
+    const PhysicalContactTransform& transform,
+    PhysicalContactVec3 worldDirection)
+{
+    PhysicalContactVec3 result = transform.position;
+    float bestProjection = -FLT_MAX;
+    for (uint16_t child = 0; child < shape.childCount; ++child)
+    {
+        const PhysicalContactVec3 candidate = PhysicalContactConvexSupport(
+            shape.children[child], transform, worldDirection);
+        const float projection = PhysicalContactDot(candidate, worldDirection);
+        if (projection > bestProjection)
+        {
+            bestProjection = projection;
+            result = candidate;
+        }
+    }
+    return result;
+}
+
 inline PhysicalContactVec3 PhysicalContactTriangleSupport(
     const PhysicalContactTriangle& triangle,
     const PhysicalContactTransform& transform,
@@ -2310,6 +2331,32 @@ inline float PhysicalContactSphereRayExitDistance(
         return 0.0f;
     return std::min(
         maximumOffsetWorldUnits, farExit + clearanceWorldUnits);
+}
+
+inline float PhysicalContactSupportPlaneSeparationDistance(
+    PhysicalContactVec3 weaponMinimum,
+    PhysicalContactVec3 targetMaximum,
+    PhysicalContactVec3 outwardDirection, float clearanceWorldUnits,
+    float maximumOffsetWorldUnits)
+{
+    if (!PhysicalContactFinite(weaponMinimum) ||
+        !PhysicalContactFinite(targetMaximum) ||
+        !PhysicalContactFinite(outwardDirection) ||
+        !std::isfinite(clearanceWorldUnits) || clearanceWorldUnits < 0.0f ||
+        !std::isfinite(maximumOffsetWorldUnits) ||
+        maximumOffsetWorldUnits <= 0.0f ||
+        clearanceWorldUnits > maximumOffsetWorldUnits)
+        return 0.0f;
+    const PhysicalContactVec3 outward = PhysicalContactNormalize(
+        outwardDirection, {});
+    if (PhysicalContactLengthSquared(outward) <= 1.0e-12f)
+        return 0.0f;
+    const float distance = PhysicalContactDot(
+        targetMaximum - weaponMinimum, outward) + clearanceWorldUnits;
+    if (!std::isfinite(distance) || distance <= 1.0e-5f ||
+        distance > maximumOffsetWorldUnits)
+        return 0.0f;
+    return distance;
 }
 
 // Validate a proposed visual setback against the complete caller-supplied

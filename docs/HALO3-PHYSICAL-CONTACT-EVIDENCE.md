@@ -2594,3 +2594,12 @@ frames. Preserved log:
 `0D3C682078B084893341F0CA3BEB65570DC7014DED599949F5A7B3C8C00C3503`.
 This overrules the earlier pass: the direct-sphere behavior is rejected and
 disabled before the next candidate.
+
+The replacement measures the exact held-weapon mesh's minimum support point
+and the authored target compound's maximum support point along the selected
+outward direction. Their projected difference plus the 5 cm render reserve is
+the smallest translation that makes that plane separating. Only observations
+that actually overlap the intended weapon pose contribute, the result is
+bounded to four metres, and one complete triangle-versus-compound query must
+still prove all observed target poses clear. This keeps constant query count
+while avoiding the sphere bound's false one-metre refusal.

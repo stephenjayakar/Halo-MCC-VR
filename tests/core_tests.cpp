@@ -10516,6 +10516,18 @@ int main()
         const float directSphereInvalid =
             PhysicalContactSphereRayExitDistance(
                 {}, {}, {}, 0.50f, 0.01f, 1.0f);
+        const float supportPlaneDistance =
+            PhysicalContactSupportPlaneSeparationDistance(
+                {-0.40f, 0.0f, 0.0f}, {0.25f, 0.0f, 0.0f},
+                {1.0f, 0.0f, 0.0f}, 0.01f, 2.0f);
+        const float supportPlaneClear =
+            PhysicalContactSupportPlaneSeparationDistance(
+                {0.40f, 0.0f, 0.0f}, {0.25f, 0.0f, 0.0f},
+                {1.0f, 0.0f, 0.0f}, 0.01f, 2.0f);
+        const float supportPlaneCapped =
+            PhysicalContactSupportPlaneSeparationDistance(
+                {-3.0f, 0.0f, 0.0f}, {0.25f, 0.0f, 0.0f},
+                {1.0f, 0.0f, 0.0f}, 0.01f, 2.0f);
         bodyIntended.position = {1.0f, 0.0f, 0.0f};
         const PhysicalContactWallConstraint bodyTunnel =
             PhysicalContactDynamicBodyOffset(
@@ -10612,6 +10624,8 @@ int main()
               std::fabs(directSphereExit - 0.46f) < 1.0e-6f &&
               directSphereMiss == 0.0f && directSphereClamped == 1.0f &&
               directSphereInvalid == 0.0f &&
+              std::fabs(supportPlaneDistance - 0.66f) < 1.0e-6f &&
+              supportPlaneClear == 0.0f && supportPlaneCapped == 0.0f &&
               bodyTunnel.constrained &&
               std::fabs(bodyTunnel.offset.x + 0.51f) < 1.0e-6f &&
               std::fabs(bodyTunnel.offset.y) < 1.0e-6f &&
