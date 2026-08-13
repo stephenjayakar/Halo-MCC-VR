@@ -392,3 +392,26 @@ shot, aim-assist, spread, target, or input behavior. A headset run can now show
 whether Halo attempted a small aim-assist correction or a large torso-owned
 replacement, which is the evidence required before preserving or constraining
 any part of that rewrite.
+
+### 2026-08-13 authored-cone targeting preservation
+
+The Campaign report said firing remained torso-relative while aim assist still
+appeared active. Unconditionally restoring the visible direction after native
+targeting prevents a torso-owned replacement, but it also discards a legitimate
+authored target correction. The official Assault Rifle weapon export proves a
+`5` degree auto-aim cone and a `10` degree magnetism cone. The loaded retail
+definition stores those angle fields at the already proven `+0x328` and
+`+0x334` offsets, in the same native angle representation consumed by the
+official query builder.
+
+The final targeting hooks now read the active weapon's maximum authored cone.
+A successful native targeting result is normalized and preserved only when its
+change from the visible muzzle ray stays inside that cone, with a `0.5` degree
+floating-point boundary tolerance. A failed result, invalid tag field, or
+larger rewrite restores the exact visible muzzle direction. Origin remains the
+authored `primary_trigger` marker, and authored spread remains downstream.
+Non-local, vehicle, stale, invalid, and stock shots are unchanged. Pure tests
+cover a five-degree native correction being preserved inside a ten-degree cone,
+a thirty-degree torso rewrite being restored, and a no-target rewrite being
+restored. First-shot telemetry names the selected disposition. Headset
+acceptance remains pending.
