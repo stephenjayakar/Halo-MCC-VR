@@ -147,6 +147,10 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
                 'authoredShapeHits', 'animatedBodyHits', 'unsupportedShapes',
                 'rejectNormal', 'enemySustainedMelees',
                 'enemyFallbackNormalMelees', 'enemyAssistHits',
+                'enemyCandidates', 'enemyGeometry', 'enemyExactHits',
+                'enemyMeleeRequests', 'enemyMeleeApplied',
+                'enemyMeleeRejected', 'enemyMeleeFaulted',
+                'enemyMeleeNoDamage',
                 'rejectPose', 'rejectVelocity',
                 'rejectMeleeSpike', 'weaponTriangles', 'targetTriangles',
                 'targetDetailed', 'targetFallback', 'nativeSamples',
@@ -253,6 +257,14 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
             (Test-Positive $maximum 'decoratorPlanes')
         animated_body = Test-Positive $maximum 'animatedBodyHits'
         enemy_contact_catch = Test-Positive $maximum 'enemyAssistHits'
+        enemy_candidate = Test-Positive $maximum 'enemyCandidates'
+        enemy_geometry = Test-Positive $maximum 'enemyGeometry'
+        enemy_exact_or_assist_contact =
+            (Test-Positive $maximum 'enemyExactHits') -or
+            (Test-Positive $maximum 'enemyAssistHits')
+        enemy_melee_requested =
+            Test-Positive $maximum 'enemyMeleeRequests'
+        enemy_melee_applied = Test-Positive $maximum 'enemyMeleeApplied'
         native_melee = Test-Positive $maximum 'melees'
         render_collision_guard = Test-Positive $maximum 'bodyRenderSamples'
         render_guard_no_recorded_failure =
@@ -270,7 +282,7 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
     }
 
     return [pscustomobject]@{
-        schema_version = 2
+        schema_version = 3
         log_path = $SourcePath
         source_commit = $sourceCommit
         mcc_edition = $edition
@@ -342,7 +354,7 @@ if ($SelfTest) {
 [10:00:00.005] H3 physical contact: optional native bindings installed
 [10:00:00.006] H3 direct weapon aim: installed ray=+0x3524B0 targeting=+0x13BAD0/+0x5B15A4 [unique]
 [10:00:00.007] H3 direct weapon aim: first local on-foot shot used fresh visible origin+direction after native targeting, before authored spread (stock origin shift=0.423m direction change=37.5deg visible-root gap=0.233m native targeting rewrite=4.5deg branch=2 result=1 telemetry=1)
-[10:00:01.000] H3 physical contact status: sweeps=2 hits=1 impulses=1 releases=0 melees=1 commandStatus=2 meleeStatus=2 target=0x12340001 candidate=0x12340001 kind=0 weaponMass=2.764 targetMass=0.382 contactHaptic=0.250 authoredShapeHits=1 animatedBodyHits=1 enemyAssistHits=1 weaponTriangles=36 targetShapeSource=3 targetTriangles=8 targetDetailed=1 targetFallback=0 wallBlocks=1 bodyConstraints=1 bodyFallbackNormalConstraints=1 bodyUncertainHolds=1 bodyRenderSeparations=1 bodyRenderSeparationFailures=0 bodyRenderSamples=12 bodyRenderOver250us=0 bodyRenderConvexFallbacks=0 bodyRenderExactTargets=12 bodyRenderExactClears=12 wallRays=4 wallObjectPlanes=2 wallPlanes=3 decoratorPlanes=5 decoratorSelfTest=0
+[10:00:01.000] H3 physical contact status: sweeps=2 hits=1 impulses=1 releases=0 melees=1 commandStatus=2 meleeStatus=2 target=0x12340001 candidate=0x12340001 kind=0 weaponMass=2.764 targetMass=0.382 contactHaptic=0.250 authoredShapeHits=1 animatedBodyHits=1 enemyAssistHits=1 enemyCandidates=3 enemyGeometry=2 enemyExactHits=1 enemyMeleeRequests=1 enemyMeleeApplied=1 enemyMeleeRejected=0 enemyMeleeFaulted=0 enemyMeleeNoDamage=0 weaponTriangles=36 targetShapeSource=3 targetTriangles=8 targetDetailed=1 targetFallback=0 wallBlocks=1 bodyConstraints=1 bodyFallbackNormalConstraints=1 bodyUncertainHolds=1 bodyRenderSeparations=1 bodyRenderSeparationFailures=0 bodyRenderSamples=12 bodyRenderOver250us=0 bodyRenderConvexFallbacks=0 bodyRenderExactTargets=12 bodyRenderExactClears=12 wallRays=4 wallObjectPlanes=2 wallPlanes=3 decoratorPlanes=5 decoratorSelfTest=0
 [10:00:01.001] H3 left grab status: bindings=1 acquisitions=1 commands=2 applied=2 releases=1 mass=0.382
 [10:00:01.002] H3 physical contact visible IDs: slotMatches=3 slotMisses=0 submissions=3
 '@
@@ -356,6 +368,11 @@ if ($SelfTest) {
         -not $report.observed.placed_object_wall -or
         -not $report.observed.decorator_wall -or
         -not $report.observed.enemy_contact_catch -or
+        -not $report.observed.enemy_candidate -or
+        -not $report.observed.enemy_geometry -or
+        -not $report.observed.enemy_exact_or_assist_contact -or
+        -not $report.observed.enemy_melee_requested -or
+        -not $report.observed.enemy_melee_applied -or
         -not $report.observed.native_melee -or
         -not $report.observed.render_collision_guard -or
         -not $report.observed.render_guard_no_recorded_failure -or

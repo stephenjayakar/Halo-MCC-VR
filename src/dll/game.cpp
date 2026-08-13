@@ -7143,6 +7143,14 @@ namespace
     std::atomic<uint64_t> g_halo3ContactEnemySustainedMelees{0};
     std::atomic<uint64_t> g_halo3ContactEnemyFallbackNormalMelees{0};
     std::atomic<uint64_t> g_halo3ContactEnemyAssistHits{0};
+    std::atomic<uint64_t> g_halo3ContactEnemyCandidates{0};
+    std::atomic<uint64_t> g_halo3ContactEnemyGeometryResolved{0};
+    std::atomic<uint64_t> g_halo3ContactEnemyExactHits{0};
+    std::atomic<uint64_t> g_halo3ContactEnemyMeleeRequests{0};
+    std::atomic<uint64_t> g_halo3ContactEnemyMeleeApplied{0};
+    std::atomic<uint64_t> g_halo3ContactEnemyMeleeRejected{0};
+    std::atomic<uint64_t> g_halo3ContactEnemyMeleeFaulted{0};
+    std::atomic<uint64_t> g_halo3ContactEnemyMeleeNoDamage{0};
     std::atomic<uint64_t> g_halo3ContactPoseDeltaRejects{0};
     std::atomic<uint64_t> g_halo3ContactPointVelocityRejects{0};
     std::atomic<uint64_t> g_halo3ContactMeleeSpikeRejects{0};
@@ -7201,6 +7209,7 @@ namespace
     std::atomic<float> g_halo3ContactCommandPoint[3]{};
     std::atomic<float> g_halo3ContactCommandNormal[3]{};
     std::atomic<uint16_t> g_halo3ContactCommandMaterial{0};
+    std::atomic<uint32_t> g_halo3ContactCommandTargetKind{0xFFFFFFFFu};
     std::atomic<float> g_halo3ContactCommandHaptic{0.0f};
     struct Halo3LeftGrabCameraState
     {
@@ -12854,6 +12863,9 @@ namespace
                 g_halo3ContactCommandFlags.load(std::memory_order_relaxed);
             const uint16_t rawMaterial =
                 g_halo3ContactCommandMaterial.load(std::memory_order_relaxed);
+            const uint32_t commandTargetKind =
+                g_halo3ContactCommandTargetKind.load(
+                    std::memory_order_relaxed);
             const float contactHaptic =
                 g_halo3ContactCommandHaptic.load(std::memory_order_relaxed);
             float velocity[3]{};
@@ -12876,6 +12888,9 @@ namespace
                 (commandFlags & kHalo3ContactCommandRelease) != 0;
             const bool wantsMelee =
                 (commandFlags & kHalo3ContactCommandMelee) != 0;
+            const bool enemyMeleeCommand =
+                PhysicalContactEnemyMeleeKind(
+                    static_cast<uint8_t>(commandTargetKind));
             const bool commonValid = generation && generation ==
                     g_halo3RuntimeGeneration.load(std::memory_order_acquire) &&
                 sampleMs && nowMs >= sampleMs && nowMs - sampleMs <= 500 &&
@@ -13035,6 +13050,9 @@ namespace
                             g_halo3MaterialGlobals;
                         if (!meleeValid)
                         {
+                            if (enemyMeleeCommand)
+                                g_halo3ContactEnemyMeleeRejected.fetch_add(
+                                    1, std::memory_order_relaxed);
                             g_halo3ContactMeleeStatus.store(
                                 4, std::memory_order_relaxed);
                             if (!wantsImpulse && !wantsPointImpulse &&
@@ -13211,6 +13229,9 @@ namespace
                             }
                             if (meleeFaulted)
                             {
+                                if (enemyMeleeCommand)
+                                    g_halo3ContactEnemyMeleeFaulted.fetch_add(
+                                        1, std::memory_order_relaxed);
                                 g_halo3ContactMeleeStatus.store(
                                     meleeFaultStatus,
                                     std::memory_order_relaxed);
@@ -13227,6 +13248,9 @@ namespace
                             }
                             else if (meleeRejected)
                             {
+                                if (enemyMeleeCommand)
+                                    g_halo3ContactEnemyMeleeRejected.fetch_add(
+                                        1, std::memory_order_relaxed);
                                 g_halo3ContactMeleeStatus.store(
                                     4, std::memory_order_relaxed);
                                 if (!wantsImpulse && !wantsPointImpulse &&
@@ -13236,6 +13260,9 @@ namespace
                             }
                             else if (!damageApplied)
                             {
+                                if (enemyMeleeCommand)
+                                    g_halo3ContactEnemyMeleeNoDamage.fetch_add(
+                                        1, std::memory_order_relaxed);
                                 g_halo3ContactMeleeStatus.store(
                                     5, std::memory_order_relaxed);
                                 if (!wantsImpulse && !wantsPointImpulse &&
@@ -13245,6 +13272,9 @@ namespace
                             }
                             else
                             {
+                                if (enemyMeleeCommand)
+                                    g_halo3ContactEnemyMeleeApplied.fetch_add(
+                                        1, std::memory_order_relaxed);
                                 g_halo3ContactMeleeStatus.store(
                                     2, std::memory_order_relaxed);
                                 g_halo3ContactCommandStatus.store(
@@ -16161,6 +16191,9 @@ namespace
                 bool targetGeometryResolved = false;
                 const bool enemyMeleeTarget =
                     PhysicalContactEnemyMeleeKind(kind);
+                if (enemyMeleeTarget)
+                    g_halo3ContactEnemyCandidates.fetch_add(
+                        1, std::memory_order_relaxed);
                 // Living and ragdoll enemies must use the official animated
                 // multi-body collision bank. Their object-level collision
                 // model is a root-space proxy and can exist even while the
@@ -16351,6 +16384,8 @@ namespace
                             meleeAssistRadius,
                             animated))
                         continue;
+                    g_halo3ContactEnemyGeometryResolved.fetch_add(
+                        1, std::memory_order_relaxed);
                     targetGeometryResolved = true;
                     ++fallbackTargetCandidates;
                     authored = animated.hit;
@@ -16411,6 +16446,9 @@ namespace
                         1, std::memory_order_relaxed);
                 if (enemyMeleeAssist)
                     g_halo3ContactEnemyAssistHits.fetch_add(
+                        1, std::memory_order_relaxed);
+                else if (enemyMeleeTarget)
+                    g_halo3ContactEnemyExactHits.fetch_add(
                         1, std::memory_order_relaxed);
                 // Convex Havok shapes carry the material on their primitive,
                 // not per face. Zero selects the authored default material.
@@ -17267,6 +17305,9 @@ namespace
             if (requestMelee)
             {
                 commandFlags |= kHalo3ContactCommandMelee;
+                if (PhysicalContactEnemyMeleeKind(targetKind))
+                    g_halo3ContactEnemyMeleeRequests.fetch_add(
+                        1, std::memory_order_relaxed);
                 contact->meleeArmed = false;
                 g_halo3ContactLastMeleeMs = nowMs;
                 if (!firstContact)
@@ -17296,6 +17337,8 @@ namespace
                     weaponHandle, std::memory_order_relaxed);
                 g_halo3ContactCommandMaterial.store(
                     closestMaterial, std::memory_order_relaxed);
+                g_halo3ContactCommandTargetKind.store(
+                    targetKind, std::memory_order_relaxed);
                 g_halo3ContactCommandHaptic.store(
                     commandHaptic, std::memory_order_relaxed);
                 for (int axis = 0; axis < 3; ++axis)
@@ -17914,7 +17957,11 @@ namespace
             "authoredShapeHits=%llu animatedBodyHits=%llu "
             "unsupportedShapes=%llu rejectNormal=%llu "
             "enemySustainedMelees=%llu enemyFallbackNormalMelees=%llu "
-            "enemyAssistHits=%llu "
+            "enemyAssistHits=%llu enemyCandidates=%llu "
+            "enemyGeometry=%llu enemyExactHits=%llu "
+            "enemyMeleeRequests=%llu enemyMeleeApplied=%llu "
+            "enemyMeleeRejected=%llu enemyMeleeFaulted=%llu "
+            "enemyMeleeNoDamage=%llu "
             "rejectPose=%llu "
             "rejectVelocity=%llu rejectMeleeSpike=%llu "
             "candidate=0x%08X candidateNormal=%u "
@@ -18010,6 +18057,22 @@ namespace
             (unsigned long long)g_halo3ContactEnemyFallbackNormalMelees.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactEnemyAssistHits.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactEnemyCandidates.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactEnemyGeometryResolved.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactEnemyExactHits.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactEnemyMeleeRequests.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactEnemyMeleeApplied.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactEnemyMeleeRejected.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactEnemyMeleeFaulted.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactEnemyMeleeNoDamage.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactPoseDeltaRejects.load(
                 std::memory_order_relaxed),
@@ -23316,6 +23379,22 @@ namespace
         g_halo3ContactCommandUnitHandle.store(-1, std::memory_order_relaxed);
         g_halo3ContactCommandWeaponHandle.store(-1, std::memory_order_relaxed);
         g_halo3ContactCommandMaterial.store(0, std::memory_order_relaxed);
+        g_halo3ContactCommandTargetKind.store(
+            0xFFFFFFFFu, std::memory_order_relaxed);
+        g_halo3ContactEnemyCandidates.store(0, std::memory_order_relaxed);
+        g_halo3ContactEnemyGeometryResolved.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactEnemyExactHits.store(0, std::memory_order_relaxed);
+        g_halo3ContactEnemyMeleeRequests.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactEnemyMeleeApplied.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactEnemyMeleeRejected.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactEnemyMeleeFaulted.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactEnemyMeleeNoDamage.store(
+            0, std::memory_order_relaxed);
         g_halo3ContactMeleeStatus.store(0, std::memory_order_relaxed);
         g_halo3ContactMeleeDamageTag.store(-1, std::memory_order_relaxed);
         g_halo3ContactMeleeResponseTag.store(-1, std::memory_order_relaxed);

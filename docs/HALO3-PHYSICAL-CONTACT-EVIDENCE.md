@@ -3071,3 +3071,18 @@ cannot turn a fast Mongoose or prop contact into melee. Pure tests cover a
 `13.75 m/s` enemy hit becoming melee at the capped signal and the identical
 vehicle hit remaining physics-only. Headset Campaign acceptance remains
 pending.
+
+### 2026-08-13 Campaign enemy melee stage telemetry
+
+The existing two-second status line could show a final melee count, but it
+could not identify where a failed Campaign swing stopped. The isolated
+diagnostic candidate adds cumulative counters for enemy broad-phase admission,
+animated-body geometry resolution, exact and assist-band contact, melee command
+publication, and the native consumer's applied, rejected, faulted, or no-damage
+result. The command snapshot also carries the already-proven target kind so the
+consumer counters cannot mislabel a vehicle or prop result as an enemy result.
+
+These counters do not change collision, target selection, speed admission,
+damage, effects, or cooldowns. The session analyzer reports each stage
+separately, so the next headset Campaign run can distinguish a geometry miss
+from a command or native-damage failure. Headset acceptance remains pending.
