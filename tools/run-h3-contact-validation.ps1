@@ -392,7 +392,7 @@ function Test-RotatingBodyGapResult([string]$Text) {
         $rotatingCommands -ge 100 -and
         $renderSamples -ge 8000 -and
         ($renderOverBudget * 20) -le $renderSamples -and
-        $convexFallbacks -gt 0 -and
+        $convexFallbacks -ge 2500 -and
         $Text -match 'bodyExactFollows=([1-9][0-9]*)' -and
         $Text -notmatch 'bodyRenderSeparationFailures=([1-9][0-9]*)'
 }

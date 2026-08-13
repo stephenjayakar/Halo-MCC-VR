@@ -2487,7 +2487,7 @@ final check. Targets reporting more than 48 authored triangles skip target
 triangle decoding in the hot callback and use the conservative authored convex
 compound already built from the same collision BSP. Simple targets remain
 triangle-versus-triangle. Both paths sample three target roots and retain the
-multi-direction verified-clear search. The rotating validator now requires the
-fallback to execute, at least 8,000 timed final samples, and no more than 5% of
+multi-direction verified-clear search. The rotating validator now requires at
+least 2,500 fallback samples, at least 8,000 timed final samples, and no more than 5% of
 those samples above 0.25 ms, in addition to its existing 8,000 independent
 same-frame exact-triangle comparisons and zero-penetration requirement.
