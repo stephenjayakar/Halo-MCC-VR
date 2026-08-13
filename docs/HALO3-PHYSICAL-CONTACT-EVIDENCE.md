@@ -2384,3 +2384,14 @@ move it to the smallest directly verified clear position. This targets the
 observed target-bank transition without hardcoding a shape or wall and without
 adding allocation, logging, locks, file I/O, or scanning to the hook. Runtime
 cost and the 8,000-sample same-frame replay remain pending.
+
+Candidate `41eba17` failed after 2,010 valid same-frame comparisons, recording
+three confirmed penetrations. It exceeded 0.25 ms on 145 of 4,284 samples
+(3.38%, still below the 5% p95 limit), with an 844.4 microsecond peak. The
+important state correlation is that 4,425 visible palettes were submitted but
+only 4,299 were corrected: the exact guard was nested inside the approved-body-
+follow branch, so a final unapproved palette could bypass every repeated check
+during a contact-state transition. The preserved failure log is
+`out/debug-openxr/20260813-002907551Z-rotating-body-gap.log`, SHA-256
+`925235985F7CE16ACD12D8B04C882B5FDAC26DB42B024C966197E1A348594B03`.
+The failed repeated-read behavior is disabled. Its code remains dormant.

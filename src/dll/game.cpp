@@ -7015,11 +7015,10 @@ namespace
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // A loose target can publish a different interpolated node bank while the
-    // weapon palette is being prepared. Re-read it three bounded times in the
-    // final callback; every pass uses exact authored triangles and repairs the
-    // candidate palette before submission.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    // Three repeated reads still missed final unapproved palettes during a
+    // contact-state transition. Keep this failed placement dormant; the next
+    // candidate moves one exact check after final palette selection.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
