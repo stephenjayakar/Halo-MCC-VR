@@ -2939,12 +2939,12 @@ inline float PhysicalContactTargetMeleeThreshold(
 
     // Animated targets are harder to meet with exact controller samples than
     // rigid props. Preserve the player's configured threshold for props and
-    // vehicles, but reduce it to one third for bipeds/creatures/giants. At
-    // the default 1.50 m/s this reaches the existing 0.50 m/s safe floor. It
-    // remains ten times the 0.05 m/s nudge floor, and the armed latch/cooldown
+    // vehicles, but reduce it to one sixth for bipeds/creatures/giants. At
+    // the default 1.50 m/s this reaches a 0.25 m/s enemy-only floor. It remains
+    // five times the 0.05 m/s tracking-noise floor, and the armed latch/cooldown
     // still prevent rubbing a weapon against an enemy from repeating damage.
     return std::clamp(
-        configuredThresholdMetersPerSecond / 3.0f, 0.50f, 4.00f);
+        configuredThresholdMetersPerSecond / 6.0f, 0.25f, 4.00f);
 }
 
 inline float PhysicalContactTargetMeleeImpactSpeed(

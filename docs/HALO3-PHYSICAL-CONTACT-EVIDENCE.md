@@ -2891,6 +2891,24 @@ dynamic nudging keep exact geometry and their existing thresholds. Pure tests
 cover the convex fallback gap, exact child selection, enemy-kind radius, and
 unchanged vehicle radius. Headset acceptance remains pending.
 
+### 2026-08-13 forgiving enemy swing floor
+
+The pending enemy path already had an 18 cm sampled-contact catch zone and
+allowed an armed deliberate swing later in the same continuous overlap, but
+the user's requested outcome remains that Campaign melee should be much easier.
+The remaining enemy-only speed floor was `0.50 m/s`.
+
+The next isolated candidate reduces only biped, creature, and giant melee to
+one sixth of the configured value, clamped to `0.25 m/s`. The default
+`1.50 m/s` configuration therefore admits a deliberate `0.25 m/s` enemy swing.
+Vehicles, props, and loose objects still use the full configured threshold and
+the strict first-contact surface-normal test, so this does not restore the
+reported Mongoose shove damage. The enemy floor remains five times the
+`0.05 m/s` tracking-noise floor; the exact target, armed latch, one-event per
+continuous contact rule, 250 ms global cooldown, and 8 m/s spike rejection are
+unchanged. Pure coverage proves the new floor for all three enemy kinds and the
+unchanged vehicle threshold. Headset acceptance remains pending.
+
 ### 2026-08-13 fixed-object exact wall sweep
 
 The next campaign report still identified a rock that the weapon could cross.
