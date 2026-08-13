@@ -2302,3 +2302,25 @@ The ordinary non-rotating gap validator remains unchanged and continues to
 judge the live transform directly. This changes no production pose, geometry,
 impulse, melee, input, or render behavior. Exact packaging and a full replay
 under the same-frame validator remain pending.
+
+Candidate `7f16699` proved that the remaining gap was real. The same-frame
+checker recorded six exact confirmed penetrations within its first 263 valid
+render comparisons. At that point the worker had already issued 451 dynamic
+body constraints, but the final palette still advanced the held weapon from a
+linear/angular velocity prediction. Halo renders the loose target from an
+interpolated node bank; that visible transform can diverge from a physics
+velocity prediction after collision impulses or interpolation changes. The
+preserved failure log is
+`out/debug-openxr/20260812-235409406Z-rotating-body-gap.log`, SHA-256
+`C65C0F679657FF555FCD5417FF98798DED59E45C667A4398CA5F3D31B291A93F`.
+
+The replacement body follow publishes the exact target root used when the
+safe weapon palette is approved. When that palette is consumed, the render
+callback reads the target's current interpolated root and applies the exact
+root-to-root rigid delta to every held-weapon node. This preserves the proven
+weapon/target separation through translation, rotation, collisions, and render
+interpolation. The older velocity follow remains a feature-local fallback if
+the optional visible target root cannot be read. Both exact follows and
+fallbacks are counted in the normal status log. The render callback adds no
+allocation, logging, lock, file I/O, or scan. Packaging and the 8,000-sample
+same-frame replay remain pending.

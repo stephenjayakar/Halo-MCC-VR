@@ -1001,6 +1001,8 @@ namespace
     std::atomic<uint64_t> g_halo3ContactDebugSameFrameSamples{0};
     std::atomic<uint64_t> g_halo3ContactDebugSameFrameGeometryOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactDebugSameFrameConfirmedOverlaps{0};
+    std::atomic<uint64_t> g_halo3ContactExactVisibleBodyFollows{0};
+    std::atomic<uint64_t> g_halo3ContactVelocityBodyFollowFallbacks{0};
     std::atomic<uint32_t> g_halo3ContactDebugLastResetReason{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
     std::atomic<float> g_halo3ContactDebugVisibleMaximumGap{-FLT_MAX};
@@ -1072,21 +1074,37 @@ namespace
         std::atomic<uint32_t> sequence{0};
         std::atomic<uint64_t> sampleMs{0};
         std::atomic<uint64_t> poseSerial{0};
+        std::atomic<int32_t> targetHandle{-1};
+        std::atomic<uint32_t> targetRootValid{0};
         std::atomic<float> linearVelocity[3]{};
         std::atomic<float> angularVelocity[3]{};
         std::atomic<float> pivot[3]{};
+        std::atomic<float> targetRoot[13]{};
     };
     Halo3WeaponBodyFollowPublication g_halo3WeaponBodyFollow;
 
     void Halo3PublishWeaponBodyFollow(
         PhysicalContactVec3 linearVelocity,
         PhysicalContactVec3 angularVelocity, PhysicalContactVec3 pivot,
-        uint64_t sampleMs, uint64_t poseSerial)
+        uint64_t sampleMs, uint64_t poseSerial,
+        int32_t targetHandle = -1,
+        const BoneMatrix* targetRoot = nullptr)
     {
         auto& published = g_halo3WeaponBodyFollow;
         published.sequence.fetch_add(1, std::memory_order_acq_rel);
         published.sampleMs.store(sampleMs, std::memory_order_relaxed);
         published.poseSerial.store(poseSerial, std::memory_order_relaxed);
+        published.targetHandle.store(targetHandle, std::memory_order_relaxed);
+        bool finiteTargetRoot = targetRoot != nullptr;
+        if (targetRoot)
+        {
+            const float* values = reinterpret_cast<const float*>(targetRoot);
+            for (int value = 0; value < 13; ++value)
+                finiteTargetRoot = finiteTargetRoot &&
+                    std::isfinite(values[value]);
+        }
+        published.targetRootValid.store(
+            finiteTargetRoot ? 1u : 0u, std::memory_order_relaxed);
         for (int axis = 0; axis < 3; ++axis)
         {
             published.linearVelocity[axis].store(
@@ -1101,13 +1119,21 @@ namespace
                 axis == 0 ? pivot.x : (axis == 1 ? pivot.y : pivot.z),
                 std::memory_order_relaxed);
         }
+        const float* targetValues = targetRoot
+            ? reinterpret_cast<const float*>(targetRoot) : nullptr;
+        for (int value = 0; value < 13; ++value)
+            published.targetRoot[value].store(
+                finiteTargetRoot ? targetValues[value] : 0.0f,
+                std::memory_order_relaxed);
         published.sequence.fetch_add(1, std::memory_order_release);
     }
 
     bool Halo3ReadWeaponBodyFollow(
         PhysicalContactVec3& linearVelocity,
         PhysicalContactVec3& angularVelocity, PhysicalContactVec3& pivot,
-        uint64_t& sampleMs, uint64_t& poseSerial)
+        uint64_t& sampleMs, uint64_t& poseSerial,
+        int32_t& targetHandle, BoneMatrix& targetRoot,
+        bool& targetRootValid)
     {
         auto& published = g_halo3WeaponBodyFollow;
         for (int attempt = 0; attempt < 2; ++attempt)
@@ -1118,6 +1144,10 @@ namespace
                 continue;
             sampleMs = published.sampleMs.load(std::memory_order_relaxed);
             poseSerial = published.poseSerial.load(std::memory_order_relaxed);
+            targetHandle = published.targetHandle.load(
+                std::memory_order_relaxed);
+            targetRootValid = published.targetRootValid.load(
+                std::memory_order_relaxed) != 0;
             linearVelocity = {
                 published.linearVelocity[0].load(std::memory_order_relaxed),
                 published.linearVelocity[1].load(std::memory_order_relaxed),
@@ -1130,11 +1160,16 @@ namespace
                 published.pivot[0].load(std::memory_order_relaxed),
                 published.pivot[1].load(std::memory_order_relaxed),
                 published.pivot[2].load(std::memory_order_relaxed)};
+            float* targetValues = reinterpret_cast<float*>(&targetRoot);
+            for (int value = 0; value < 13; ++value)
+                targetValues[value] = published.targetRoot[value].load(
+                    std::memory_order_relaxed);
             if (published.sequence.load(std::memory_order_acquire) == before)
                 return sampleMs != 0 && poseSerial != 0 &&
                     PhysicalContactFinite(linearVelocity) &&
                     PhysicalContactFinite(angularVelocity) &&
-                    PhysicalContactFinite(pivot);
+                    PhysicalContactFinite(pivot) &&
+                    (!targetRootValid || targetHandle != -1);
         }
         return false;
     }
@@ -5486,6 +5521,9 @@ namespace
     void Halo3MeasureSameFrameRotatingGap(
         int32_t weaponHandle, const BoneMatrix* visibleNodes,
         uint32_t visibleNodeCount, uint64_t sampleMs);
+    bool Halo3ApplyExactVisibleBodyFollow(
+        int32_t targetHandle, const BoneMatrix& referenceTargetRoot,
+        BoneMatrix* weaponNodes, uint32_t weaponNodeCount);
 
     void __fastcall FpVisiblePaletteHook(uint16_t tag, const BoneMatrix* root,
                                          BoneMatrix* destination, uintptr_t unused,
@@ -5771,6 +5809,9 @@ namespace
                     PhysicalContactVec3 bodyPivot{};
                     uint64_t bodyFollowMs = 0;
                     uint64_t bodyFollowSerial = 0;
+                    int32_t bodyTargetHandle = -1;
+                    BoneMatrix bodyTargetRoot{};
+                    bool bodyTargetRootValid = false;
                     const float worldScale =
                         g_worldScale.load(std::memory_order_relaxed);
                     if (approvedCorrected && std::isfinite(worldScale) &&
@@ -5778,36 +5819,47 @@ namespace
                         Halo3ReadWeaponBodyFollow(
                             bodyLinearVelocity, bodyAngularVelocity, bodyPivot,
                             bodyFollowMs,
-                            bodyFollowSerial) &&
+                            bodyFollowSerial, bodyTargetHandle,
+                            bodyTargetRoot, bodyTargetRootValid) &&
                         bodyFollowSerial == approvedSerial)
                     {
-                        const PhysicalContactRigidBodyFollow bodyFollow =
-                            PhysicalContactBuildRigidBodyFollow(
-                                bodyLinearVelocity, bodyAngularVelocity,
-                                bodyPivot, bodyFollowMs, nowMs, worldScale);
-                        for (int node = 0; node < renderNodeCount; ++node)
+                        const bool exactVisibleFollow =
+                            bodyTargetRootValid &&
+                            Halo3ApplyExactVisibleBodyFollow(
+                                bodyTargetHandle, bodyTargetRoot, destination,
+                                static_cast<uint32_t>(renderNodeCount));
+                        if (!exactVisibleFollow)
                         {
-                            PhysicalContactVec3 nodePosition =
-                                PhysicalContactApplyRigidBodyFollowPoint(
-                                    bodyFollow,
-                                    {destination[node].translation[0],
-                                     destination[node].translation[1],
-                                     destination[node].translation[2]});
-                            destination[node].translation[0] = nodePosition.x;
-                            destination[node].translation[1] = nodePosition.y;
-                            destination[node].translation[2] = nodePosition.z;
-                            for (int column = 0; column < 3; ++column)
+                            g_halo3ContactVelocityBodyFollowFallbacks.fetch_add(
+                                1, std::memory_order_relaxed);
+                            const PhysicalContactRigidBodyFollow bodyFollow =
+                                PhysicalContactBuildRigidBodyFollow(
+                                    bodyLinearVelocity, bodyAngularVelocity,
+                                    bodyPivot, bodyFollowMs, nowMs, worldScale);
+                            for (int node = 0; node < renderNodeCount; ++node)
                             {
-                                const int index = column * 3;
-                                const PhysicalContactVec3 rotated =
-                                    PhysicalContactApplyRigidBodyFollowVector(
+                                PhysicalContactVec3 nodePosition =
+                                    PhysicalContactApplyRigidBodyFollowPoint(
                                         bodyFollow,
-                                        {destination[node].rotation[index],
-                                         destination[node].rotation[index + 1],
-                                         destination[node].rotation[index + 2]});
-                                destination[node].rotation[index] = rotated.x;
-                                destination[node].rotation[index + 1] = rotated.y;
-                                destination[node].rotation[index + 2] = rotated.z;
+                                        {destination[node].translation[0],
+                                         destination[node].translation[1],
+                                         destination[node].translation[2]});
+                                destination[node].translation[0] = nodePosition.x;
+                                destination[node].translation[1] = nodePosition.y;
+                                destination[node].translation[2] = nodePosition.z;
+                                for (int column = 0; column < 3; ++column)
+                                {
+                                    const int index = column * 3;
+                                    const PhysicalContactVec3 rotated =
+                                        PhysicalContactApplyRigidBodyFollowVector(
+                                            bodyFollow,
+                                            {destination[node].rotation[index],
+                                             destination[node].rotation[index + 1],
+                                             destination[node].rotation[index + 2]});
+                                    destination[node].rotation[index] = rotated.x;
+                                    destination[node].rotation[index + 1] = rotated.y;
+                                    destination[node].rotation[index + 2] = rotated.z;
+                                }
                             }
                         }
                     }
@@ -8453,6 +8505,51 @@ namespace
             returned = false;
         }
         return returned;
+    }
+
+    bool Halo3ApplyExactVisibleBodyFollow(
+        int32_t targetHandle, const BoneMatrix& referenceTargetRoot,
+        BoneMatrix* weaponNodes, uint32_t weaponNodeCount)
+    {
+        if (targetHandle == -1 || !weaponNodes || !weaponNodeCount ||
+            weaponNodeCount >
+                Halo3VisibleWeaponPosePublication::kMaximumNodes ||
+            !PhysicalContactTransformFinite(
+                Halo3ContactTransformFromBone(referenceTargetRoot)))
+        {
+            return false;
+        }
+        Halo3Matrix4x3* targetNodes = nullptr;
+        int targetNodeCount = 0;
+        if (!Halo3ContactReadInterpolatedNodes(
+                targetHandle, &targetNodes, &targetNodeCount) ||
+            !targetNodes || targetNodeCount <= 0 ||
+            !Halo3MatrixValid(targetNodes[0]))
+        {
+            return false;
+        }
+
+        BoneMatrix currentTargetRoot{};
+        std::memcpy(
+            &currentTargetRoot, &targetNodes[0], sizeof(currentTargetRoot));
+        BoneMatrix inverseReference{}, delta{};
+        if (!InvertBoneMatrix(referenceTargetRoot, inverseReference) ||
+            !ComposeBoneMatrices(
+                currentTargetRoot, inverseReference, delta))
+        {
+            return false;
+        }
+        std::array<BoneMatrix,
+                   Halo3VisibleWeaponPosePublication::kMaximumNodes> moved{};
+        for (uint32_t node = 0; node < weaponNodeCount; ++node)
+            if (!ComposeBoneMatrices(delta, weaponNodes[node], moved[node]))
+                return false;
+        std::memcpy(
+            weaponNodes, moved.data(),
+            static_cast<size_t>(weaponNodeCount) * sizeof(BoneMatrix));
+        g_halo3ContactExactVisibleBodyFollows.fetch_add(
+            1, std::memory_order_relaxed);
+        return true;
     }
 
     // Copy the same visible-node bank used by Halo's object renderer. The
@@ -11345,6 +11442,10 @@ namespace
         g_halo3ContactBodySetbackMeters.store(0.0f,
                                                std::memory_order_relaxed);
         g_halo3ContactBodyConstraints.store(0, std::memory_order_relaxed);
+        g_halo3ContactExactVisibleBodyFollows.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactVelocityBodyFollowFallbacks.store(
+            0, std::memory_order_relaxed);
         g_halo3ContactBodyFallbackNormalConstraints.store(
             0, std::memory_order_relaxed);
         g_halo3ContactBodyUncertainHolds.store(
@@ -14372,10 +14473,13 @@ namespace
                         g_halo3ContactBodyOffset) <= 1.0e-10f)
                     Halo3PublishWeaponBodyFollow({}, {}, {}, 0, 0);
             };
-            const auto publishBodyFollow = [&] (int32_t targetHandle)
+            const auto publishBodyFollow = [&] (
+                int32_t targetHandle,
+                const PhysicalContactTransform& targetTransform)
             {
                 if (targetHandle == -1 || !g_halo3ObjectGetVelocities ||
-                    !g_halo3ObjectGetCenter)
+                    !g_halo3ObjectGetCenter ||
+                    !PhysicalContactTransformFinite(targetTransform))
                     return;
                 float linear[3]{}, angular[3]{};
                 float center[3]{};
@@ -14387,12 +14491,27 @@ namespace
                     angular[0], angular[1], angular[2]};
                 const PhysicalContactVec3 bodyCenter{
                     center[0], center[1], center[2]};
+                BoneMatrix targetRoot{};
+                targetRoot.scale = targetTransform.scale;
+                targetRoot.rotation[0] = targetTransform.forward.x;
+                targetRoot.rotation[1] = targetTransform.forward.y;
+                targetRoot.rotation[2] = targetTransform.forward.z;
+                targetRoot.rotation[3] = targetTransform.left.x;
+                targetRoot.rotation[4] = targetTransform.left.y;
+                targetRoot.rotation[5] = targetTransform.left.z;
+                targetRoot.rotation[6] = targetTransform.up.x;
+                targetRoot.rotation[7] = targetTransform.up.y;
+                targetRoot.rotation[8] = targetTransform.up.z;
+                targetRoot.translation[0] = targetTransform.position.x;
+                targetRoot.translation[1] = targetTransform.position.y;
+                targetRoot.translation[2] = targetTransform.position.z;
                 if (PhysicalContactFinite(linearVelocity) &&
                     PhysicalContactFinite(angularVelocity) &&
                     PhysicalContactFinite(bodyCenter))
                     Halo3PublishWeaponBodyFollow(
                         linearVelocity, angularVelocity,
-                        bodyCenter, nowMs, proposalSerial);
+                        bodyCenter, nowMs, proposalSerial,
+                        targetHandle, &targetRoot);
             };
             if (weaponHandle != g_halo3ContactWeaponHandle)
             {
@@ -14935,7 +15054,8 @@ namespace
                         PhysicalContactDynamicBodyObservation::Blocked,
                         followedOffset, constrainedBodyTargetHandle);
                     publishBodyFollow(
-                        constrainedBodyTargetHandle);
+                        constrainedBodyTargetHandle,
+                        constrainedBodyTargetTransform);
                     publishApprovedVisiblePose();
                     g_halo3ContactDebounce.EndSample(nowMs);
                     return;
@@ -15043,7 +15163,8 @@ namespace
                                     verifiedGuard.offset,
                                     closestVisualGuardHandle);
                                 publishBodyFollow(
-                                    closestVisualGuardHandle);
+                                    closestVisualGuardHandle,
+                                    guardTargetTransform);
                                 publishApprovedVisiblePose();
                                 g_halo3ContactDebounce.EndSample(nowMs);
                                 return;
@@ -15385,7 +15506,8 @@ namespace
                 g_halo3ContactBodyAnchorHandle = closestHandle;
                 g_halo3ContactBodyAnchorValid = PhysicalContactFinite(
                     g_halo3ContactBodyLocalWeaponAnchor);
-                publishBodyFollow(closestHandle);
+                publishBodyFollow(
+                    closestHandle, closestTargetTransform);
             }
             if (bodyConstraint.constrained &&
                 !visualConstraintUsesFallbackNormal)
@@ -16361,6 +16483,7 @@ namespace
             "wallBlocks=%llu wallSetback=%.3fm bodySetback=%.3fm "
             "bodyReserve=%.3fm "
             "bodyConstraints=%llu bodyFallbackNormalConstraints=%llu "
+            "bodyExactFollows=%llu bodyVelocityFallbacks=%llu "
             "bodyUncertainHolds=%llu bodyPeak=%.3fm "
             "wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
@@ -16477,6 +16600,12 @@ namespace
                 std::memory_order_relaxed),
             (unsigned long long)
                 g_halo3ContactBodyFallbackNormalConstraints.load(
+                    std::memory_order_relaxed),
+            (unsigned long long)
+                g_halo3ContactExactVisibleBodyFollows.load(
+                    std::memory_order_relaxed),
+            (unsigned long long)
+                g_halo3ContactVelocityBodyFollowFallbacks.load(
                     std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactBodyUncertainHolds.load(
                 std::memory_order_relaxed),

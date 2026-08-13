@@ -381,7 +381,8 @@ function Test-RotatingBodyGapResult([string]$Text) {
         $geometrySeparations -ge 2500 -and
         $sameFrameSamples -ge 8000 -and
         $sameFrameConfirmed -eq 0 -and
-        $rotatingCommands -ge 100
+        $rotatingCommands -ge 100 -and
+        $Text -match 'bodyExactFollows=([1-9][0-9]*)'
 }
 
 function Test-VisibleWeaponGapFailure(
