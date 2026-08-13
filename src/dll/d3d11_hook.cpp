@@ -404,7 +404,7 @@ static void H3ProbeRegisterBuffer(
                 decoratorPlacement && desc->ByteWidth <= 256u * 1024u;
             const bool retainPotentialGeometry = halo3VertexBuffer &&
                 !decoratorPlacement && desc->ByteWidth >= 3u * 20u &&
-                desc->ByteWidth <= 16u * 1024u &&
+                desc->ByteWidth <= 256u * 1024u &&
                 (desc->ByteWidth % 20u) == 0u;
             const bool retainPotentialIndices = halo3IndexBuffer &&
                 desc->ByteWidth >= 3u * sizeof(uint16_t) &&
@@ -1192,21 +1192,6 @@ size_t D3D_Halo3DecoratorWallPlanes(
             g_h3DecoratorSelfTestState.store(
                 std::max(selfTestStage, kH3DecoratorSelfTestSelectedBlock),
                 std::memory_order_release);
-        const size_t geometryOffset =
-            static_cast<size_t>(draw.startVertex) * 20u;
-        const size_t geometrySize =
-            static_cast<size_t>(draw.vertexCount) * 20u;
-        if (!draw.geometrySource || geometrySize > geometryBytes.size() ||
-            geometryOffset > draw.geometryBytes ||
-            geometrySize > draw.geometryBytes - geometryOffset ||
-            !H3DecoratorSafeCopy(
-                geometryBytes.data(), draw.geometrySource + geometryOffset,
-                geometrySize))
-            continue;
-        if (selfTestPending)
-            g_h3DecoratorSelfTestState.store(
-                std::max(selfTestStage, kH3DecoratorSelfTestCopiedGeometry),
-                std::memory_order_release);
         PhysicalContactTriangleMesh target{};
         bool decoded = false;
         if (draw.indexed)
@@ -1220,19 +1205,69 @@ size_t D3D_Halo3DecoratorWallPlanes(
                     indexBytes.data(),
                     draw.indexSource + draw.indexOffset, indexSize))
             {
-                decoded =
-                    PhysicalContactDecodeH3DecoratorIndexedTriangles(
-                        geometryBytes.data(), geometrySize,
+                uint32_t firstVertex = 0u;
+                uint32_t vertexCount = 0u;
+                int32_t rebasedBaseVertex = 0;
+                if (PhysicalContactH3DecoratorIndexedVertexWindow(
                         indexBytes.data(), indexSize, 0u, draw.indexCount,
-                        draw.baseVertex, draw.indexStride,
-                        draw.triangleStrip, draw.positionMinimum,
-                        draw.positionSize, target);
+                        draw.baseVertex, draw.indexStride, draw.vertexCount,
+                        firstVertex, vertexCount, rebasedBaseVertex))
+                {
+                    const size_t geometryOffset =
+                        static_cast<size_t>(firstVertex) * 20u;
+                    const size_t geometrySize =
+                        static_cast<size_t>(vertexCount) * 20u;
+                    if (draw.geometrySource &&
+                        geometrySize <= geometryBytes.size() &&
+                        geometryOffset <= draw.geometryBytes &&
+                        geometrySize <= draw.geometryBytes - geometryOffset &&
+                        H3DecoratorSafeCopy(
+                            geometryBytes.data(),
+                            draw.geometrySource + geometryOffset,
+                            geometrySize))
+                    {
+                        if (selfTestPending)
+                            g_h3DecoratorSelfTestState.store(
+                                std::max(
+                                    selfTestStage,
+                                    kH3DecoratorSelfTestCopiedGeometry),
+                                std::memory_order_release);
+                        decoded =
+                            PhysicalContactDecodeH3DecoratorIndexedTriangles(
+                                geometryBytes.data(), geometrySize,
+                                indexBytes.data(), indexSize, 0u,
+                                draw.indexCount, rebasedBaseVertex,
+                                draw.indexStride, draw.triangleStrip,
+                                draw.positionMinimum, draw.positionSize,
+                                target);
+                    }
+                }
             }
         }
         else
-            decoded = PhysicalContactDecodeH3DecoratorTriangleStrip(
-                geometryBytes.data(), geometrySize, 0u, draw.vertexCount,
-                draw.positionMinimum, draw.positionSize, target);
+        {
+            const size_t geometryOffset =
+                static_cast<size_t>(draw.startVertex) * 20u;
+            const size_t geometrySize =
+                static_cast<size_t>(draw.vertexCount) * 20u;
+            if (draw.geometrySource && geometrySize <= geometryBytes.size() &&
+                geometryOffset <= draw.geometryBytes &&
+                geometrySize <= draw.geometryBytes - geometryOffset &&
+                H3DecoratorSafeCopy(
+                    geometryBytes.data(), draw.geometrySource + geometryOffset,
+                    geometrySize))
+            {
+                if (selfTestPending)
+                    g_h3DecoratorSelfTestState.store(
+                        std::max(
+                            selfTestStage,
+                            kH3DecoratorSelfTestCopiedGeometry),
+                        std::memory_order_release);
+                decoded = PhysicalContactDecodeH3DecoratorTriangleStrip(
+                    geometryBytes.data(), geometrySize, 0u, draw.vertexCount,
+                    draw.positionMinimum, draw.positionSize, target);
+            }
+        }
         if (!decoded ||
             !PhysicalContactH3DecoratorMeshIsSolid(target))
             continue;

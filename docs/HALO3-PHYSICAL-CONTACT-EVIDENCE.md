@@ -2856,6 +2856,30 @@ weapon or create a vehicle/prop melee. The existing armed latch, 250 ms global
 cooldown, tracked-weapon speed, and native exact-target melee call remain.
 Headset acceptance is pending.
 
+### 2026-08-13 large shared decorator geometry buffers
+
+The campaign rock report also exposed an independent production filter. The
+preserved real Valhalla renderer capture
+`out/debug-openxr/20260811-080251994Z-wall.log` (SHA-256
+`7B73E0E0E450ECEE3BDB2200B0545A5C52424DBC3A8D46A94CFFCC335A5B72CC`)
+contains valid 20-byte decorator vertex buffers of 2,640, 3,360, and 29,040
+bytes. Production retained only buffers no larger than 16 KiB. Diagnostics
+retained the 29,040-byte source, but normal play discarded it before the draw
+could reach collision. Any rock mesh stored in that shared buffer was therefore
+invisible regardless of the later draw and collision logic.
+
+Production now retains bounded potential decorator geometry buffers up to 256
+KiB in the existing fixed 64 MiB owned pool. This does not increase hot-path
+work or the worker's 16 KiB geometry workspace. For indexed draws, the worker
+first scans the already bounded owned index slice, validates every signed
+base-vertex result, finds the minimum and maximum referenced vertices, copies
+only that exact vertex window, and rebases the decoder. Non-indexed draws
+already copy only their submitted vertex range. A referenced window larger than
+the fixed workspace still fails closed. Pure coverage reconstructs an indexed
+solid mesh from a small window inside a larger backing buffer. The cumulative
+Release test remains required, and the reported campaign rock remains pending
+headset acceptance.
+
 ### 2026-08-13 indirect instanced decorator draws
 
 The indexed-instanced candidate still missed the reported campaign rock. The

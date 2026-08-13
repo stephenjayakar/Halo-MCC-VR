@@ -9541,6 +9541,31 @@ int main()
                 packedIndexedTriangles.data(), packedIndexedTriangles.size(),
                 0, 6, 0, 2, false, {}, {1.0f, 1.0f, 1.0f},
                 decodedIndexedList);
+        static std::array<uint8_t, 32u * 20u> largeBackingGeometry{};
+        std::copy(
+            packedSolidStrip.begin(), packedSolidStrip.end(),
+            largeBackingGeometry.begin() + 20u * 20u);
+        const std::array<uint8_t, 12u> offsetIndexedTriangles = {
+            0, 0, 1, 0, 2, 0,
+            0, 0, 2, 0, 3, 0};
+        uint32_t indexedFirstVertex = 0u;
+        uint32_t indexedVertexCount = 0u;
+        int32_t indexedRebasedBaseVertex = 0;
+        const bool foundIndexedWindow =
+            PhysicalContactH3DecoratorIndexedVertexWindow(
+                offsetIndexedTriangles.data(), offsetIndexedTriangles.size(),
+                0u, 6u, 20, 2u,
+                static_cast<uint32_t>(largeBackingGeometry.size() / 20u),
+                indexedFirstVertex, indexedVertexCount,
+                indexedRebasedBaseVertex);
+        static PhysicalContactTriangleMesh decodedWindowedIndexedList{};
+        const bool decodedWindowedIndexed = foundIndexedWindow &&
+            PhysicalContactDecodeH3DecoratorIndexedTriangles(
+                largeBackingGeometry.data() + indexedFirstVertex * 20u,
+                indexedVertexCount * 20u,
+                offsetIndexedTriangles.data(), offsetIndexedTriangles.size(),
+                0u, 6u, indexedRebasedBaseVertex, 2u, false,
+                {}, {1.0f, 1.0f, 1.0f}, decodedWindowedIndexedList);
         const std::array<uint8_t, 12u> packedOutOfRangeIndices = {
             0, 0, 1, 0, 9, 0,
             0, 0, 2, 0, 3, 0};
@@ -9590,6 +9615,12 @@ int main()
               PhysicalContactH3DecoratorMeshIsSolid(decodedSolidStrip) &&
               decodedIndexed && decodedIndexedList.triangleCount == 2 &&
               PhysicalContactH3DecoratorMeshIsSolid(decodedIndexedList) &&
+              foundIndexedWindow && indexedFirstVertex == 20u &&
+              indexedVertexCount == 4u &&
+              indexedRebasedBaseVertex == 0 && decodedWindowedIndexed &&
+              decodedWindowedIndexedList.triangleCount == 2u &&
+              PhysicalContactH3DecoratorMeshIsSolid(
+                  decodedWindowedIndexedList) &&
               !PhysicalContactDecodeH3DecoratorIndexedTriangles(
                   packedSolidStrip.data(), packedSolidStrip.size(),
                   packedOutOfRangeIndices.data(),
@@ -9612,7 +9643,8 @@ int main()
                   packedRockPlacement.data(), {}, {},
                   decodedRockPlacement),
             "Halo 3 decorator decoding reconstructs Valhalla position, "
-            "rotation, and scale, expands exact strips, indexed lists, and "
+            "rotation, and scale, expands exact strips, indexed lists, "
+            "bounded windows from large indexed geometry buffers, and "
             "bounded indirect draw arguments, "
             "rejects invalid indices and planar foliage as a rigid wall, "
             "rejects distant blocks before decoding, and "

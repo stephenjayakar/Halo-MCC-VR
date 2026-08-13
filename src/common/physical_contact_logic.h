@@ -948,6 +948,62 @@ inline bool PhysicalContactDecodeH3DecoratorIndexedTriangles(
     return PhysicalContactTriangleMeshValid(output);
 }
 
+inline bool PhysicalContactH3DecoratorIndexedVertexWindow(
+    const uint8_t* indexBytes, size_t indexByteCount,
+    uint32_t startIndex, uint32_t indexCount, int32_t baseVertex,
+    uint32_t indexStride, uint32_t availableVertexCount,
+    uint32_t& firstVertex, uint32_t& vertexCount,
+    int32_t& rebasedBaseVertex)
+{
+    firstVertex = 0u;
+    vertexCount = 0u;
+    rebasedBaseVertex = 0;
+    constexpr uint32_t kMaximumIndices =
+        PhysicalContactTriangleMesh::kMaximumTriangles * 3u;
+    if (!indexBytes || indexCount < 3u || indexCount > kMaximumIndices ||
+        (indexStride != 2u && indexStride != 4u) ||
+        availableVertexCount < 3u || startIndex > SIZE_MAX / indexStride ||
+        indexCount > (SIZE_MAX / indexStride) - startIndex ||
+        (static_cast<size_t>(startIndex) + indexCount) * indexStride >
+            indexByteCount)
+        return false;
+
+    uint32_t minimumVertex = UINT32_MAX;
+    uint32_t maximumVertex = 0u;
+    for (uint32_t index = 0; index < indexCount; ++index)
+    {
+        const uint8_t* packed = indexBytes +
+            (static_cast<size_t>(startIndex) + index) * indexStride;
+        uint32_t relativeVertex = static_cast<uint32_t>(packed[0]) |
+            (static_cast<uint32_t>(packed[1]) << 8u);
+        if (indexStride == 4u)
+            relativeVertex |= (static_cast<uint32_t>(packed[2]) << 16u) |
+                (static_cast<uint32_t>(packed[3]) << 24u);
+        const int64_t absoluteVertex =
+            static_cast<int64_t>(baseVertex) + relativeVertex;
+        if (absoluteVertex < 0 ||
+            static_cast<uint64_t>(absoluteVertex) >= availableVertexCount)
+            return false;
+        const uint32_t boundedVertex = static_cast<uint32_t>(absoluteVertex);
+        minimumVertex = std::min(minimumVertex, boundedVertex);
+        maximumVertex = std::max(maximumVertex, boundedVertex);
+    }
+    if (minimumVertex == UINT32_MAX || maximumVertex < minimumVertex)
+        return false;
+    const uint64_t span =
+        static_cast<uint64_t>(maximumVertex) - minimumVertex + 1u;
+    if (span > UINT32_MAX)
+        return false;
+    const int64_t rebased =
+        static_cast<int64_t>(baseVertex) - minimumVertex;
+    if (rebased < INT32_MIN || rebased > INT32_MAX)
+        return false;
+    firstVertex = minimumVertex;
+    vertexCount = static_cast<uint32_t>(span);
+    rebasedBaseVertex = static_cast<int32_t>(rebased);
+    return true;
+}
+
 inline bool PhysicalContactH3DecoratorMeshIsSolid(
     const PhysicalContactTriangleMesh& mesh, float minimumAxisRatio = 0.08f)
 {
