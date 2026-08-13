@@ -2666,3 +2666,12 @@ is a fail-closed upper bound, not an ordinary setback: every step requires a
 current expanded-geometry intersection, and the result is published only after
 all three observed poses are proven clear. Headset testing must still reject
 any visible jump in ordinary push/lift use even if the stress test passes.
+
+Candidate `f358e89` did not record a confirmed same-frame penetration, but it
+still accumulated 388 render separation failures in 26,796 checks and could
+not reach the strict pass condition. The 16 m ceiling was therefore not the
+limiting factor; a fixed outward support direction is not sufficient for every
+rotating compound pose. Preserved log:
+`out/debug-openxr/20260813-030435875Z-rotating-body-gap.log`, SHA-256
+`C2296390F4B084B3CFA5D3AC152C3AC1E38416331D2F3BFE886D0227BE5D257D`.
+The behavior is rejected and disabled before the next candidate.

@@ -7051,7 +7051,7 @@ namespace
     // The target shape has at most 16 children and the render guard retains at
     // most three target poses. Forward-only clearing therefore needs no more
     // than 48 distinct child/pose steps.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     constexpr int kHalo3ExactRenderChildSeparationSteps =
         static_cast<int>(PhysicalContactCompoundShape::kMaximumChildren) *
