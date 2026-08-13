@@ -2365,3 +2365,14 @@ visual reserve around the same exact authored triangles. The 1 mm verified-
 clear padding remains unchanged. This covers one concurrent interpolation
 update without switching to a bounds proxy. Packaging and replay remain
 pending.
+
+Candidate `5df1f1c` also failed. It corrected 64 exact render-time overlaps,
+but the same-frame validator still recorded one confirmed authored-triangle
+penetration after 2,056 valid comparisons. The status line changed the target
+from a 12-triangle authored shape to no published target triangles near the
+failure, so a fixed spatial reserve cannot make separately read target banks
+transactional. Its measured cost stayed within budget: 46 of 4,061 samples
+exceeded 0.25 ms (1.13%), with a 782.7 microsecond peak. The preserved failure
+log is `out/debug-openxr/20260813-002019939Z-rotating-body-gap.log`, SHA-256
+`F841BA5EF9301CA974E32873766700DBDB06E6B0663CEFA6B3BD3E2D36BE95FC`.
+The failed 8 mm guard is disabled; its implementation remains dormant.
