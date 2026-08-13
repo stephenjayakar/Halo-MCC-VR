@@ -3106,3 +3106,22 @@ wall that the same sweep already found. `enemyNativeFallbackHits` records the
 path separately from authored animated-body contact. Pure tests cover valid
 enemy kinds and reject structure, vehicles, invalid roots, and excluded
 objects. Headset Campaign acceptance remains pending.
+
+### 2026-08-13 living-enemy wall-routing correction
+
+Inspection after the next Campaign failure found that the exact wall pass and
+the animated-enemy pass disagreed about living objects. Official H3EK evidence
+already proves living bipeds and creatures are normally keyframed. The generic
+fixed-object predicate therefore classified them as scenery and could move the
+visible weapon back to the camera side before the later animated-body melee
+sweep ran. The same conflict existed in both native type-4 wall rays and the
+direct fixed-object geometry sweep.
+
+The wall providers now exclude only biped, creature, and giant root objects.
+Those three kinds continue through the exact animated-body/native-enemy melee
+transaction. Fixed and keyframed scenery, machines, crates, and other props
+remain wall blockers, so this does not weaken the reported Campaign-rock path.
+The player, held weapon, attachments, dynamic bodies, invalid handles, and
+non-finite data retain their existing guards. Pure coverage proves all three
+enemy kinds bypass the wall predicate while unresolved scenery and fixed props
+still block. Headset Campaign acceptance remains pending.

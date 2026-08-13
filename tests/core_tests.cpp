@@ -10472,6 +10472,19 @@ int main()
             "fixed root objects while dynamic, invalid, and excluded objects "
             "remain outside the wall solver");
 
+        Check(!PhysicalContactObjectBlocksWeaponAsWall(
+                  true, false, false, 0, 0) &&
+              !PhysicalContactObjectBlocksWeaponAsWall(
+                  true, false, true, 7, 12) &&
+              !PhysicalContactObjectBlocksWeaponAsWall(
+                  true, false, true, 6, 13) &&
+              PhysicalContactObjectBlocksWeaponAsWall(
+                  true, false, false, 0, 6) &&
+              PhysicalContactObjectBlocksWeaponAsWall(
+                  true, false, true, 7, 10),
+            "Keyframed living enemies stay in animated melee contact while "
+            "unresolved scenery and fixed props remain exact wall blockers");
+
         Check(PhysicalContactObjectReceivesImpulse(
                   true, false, true, 4) &&
               PhysicalContactObjectReceivesImpulse(

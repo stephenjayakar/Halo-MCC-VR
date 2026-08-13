@@ -3412,6 +3412,20 @@ inline bool PhysicalContactObjectBlocksAsStatic(
     return !bodyResolved || !PhysicalContactMotionTypeIsDynamic(motionType);
 }
 
+// Living animated targets are commonly keyframed in Halo 3. That makes them
+// immovable, but it does not make them scenery: the animated-body transaction
+// must be allowed to reach them so it can select the exact native melee
+// target. Keep fixed/keyframed props in the wall solver while routing bipeds,
+// creatures, and giants exclusively through enemy contact.
+inline bool PhysicalContactObjectBlocksWeaponAsWall(
+    bool validRootObject, bool excludedObject, bool bodyResolved,
+    uint8_t motionType, uint8_t objectKind)
+{
+    return !PhysicalContactEnemyMeleeKind(objectKind) &&
+        PhysicalContactObjectBlocksAsStatic(
+            validRootObject, excludedObject, bodyResolved, motionType);
+}
+
 inline bool PhysicalContactObjectReceivesImpulse(
     bool validRootObject, bool excludedObject, bool bodyResolved,
     uint8_t motionType)

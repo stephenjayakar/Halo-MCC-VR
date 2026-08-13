@@ -15159,9 +15159,12 @@ namespace
                     Halo3ContactMassForObjectData(
                         objectData, component, bodyIndex, massKilograms,
                         &motionType);
+                const uint8_t objectKind =
+                    *(objectEntry + kHalo3ObjectEntryKindOffset);
                 cachedWallObjectBlocks =
-                    PhysicalContactObjectBlocksAsStatic(
-                        validRoot, excluded, bodyResolved, motionType);
+                    PhysicalContactObjectBlocksWeaponAsWall(
+                        validRoot, excluded, bodyResolved, motionType,
+                        objectKind);
                 return cachedWallObjectBlocks;
             };
 
@@ -15277,8 +15280,11 @@ namespace
                         const bool bodyResolved = Halo3ContactMassForObjectData(
                             data, component, bodyIndex, massKilograms,
                             &motionType);
-                        if (!PhysicalContactObjectBlocksAsStatic(
-                                true, false, bodyResolved, motionType))
+                        const uint8_t objectKind =
+                            *(entry + kHalo3ObjectEntryKindOffset);
+                        if (!PhysicalContactObjectBlocksWeaponAsWall(
+                                true, false, bodyResolved, motionType,
+                                objectKind))
                             continue;
                         const auto* center = reinterpret_cast<const float*>(
                             data + kHalo3ObjectBoundingCenterOffset);
@@ -15621,8 +15627,11 @@ namespace
                             Halo3ContactMassForObjectData(
                                 data, component, bodyIndex, massKilograms,
                                 &motionType);
-                        if (!PhysicalContactObjectBlocksAsStatic(
-                                true, false, bodyResolved, motionType))
+                        const uint8_t objectKind =
+                            *(entry + kHalo3ObjectEntryKindOffset);
+                        if (!PhysicalContactObjectBlocksWeaponAsWall(
+                                true, false, bodyResolved, motionType,
+                                objectKind))
                             continue;
                         const auto* center = reinterpret_cast<const float*>(
                             data + kHalo3ObjectBoundingCenterOffset);
