@@ -226,6 +226,23 @@ generation, stale sample, invalid position, invalid direction, or lifecycle
 doubt leaves both stock values untouched. Pure tests cover the finite origin
 copy and reject. Headset acceptance is pending.
 
+### 2026-08-13 final visible shot origin
+
+The first visible-origin candidate replaced the mutable origin immediately
+after `unit_adjust_projectile_ray`, but both verified downstream targeting
+branches also receive that same mutable origin. It therefore did not guarantee
+that the origin reaching the joined pre-spread firing transaction was still the
+visible-weapon origin. This is the same ordering defect already proven for the
+direction.
+
+The thread-local local-shot context now carries the validated finite origin as
+well as the unit direction. After either native targeting branch completes, its
+detour restores both fields together at the last verified boundary before
+authored spread. The targeting helpers still run normally, so their target
+selection and bookkeeping remain native. Pure coverage requires a complete
+finite origin and unit direction before changing either output and rejects
+invalid, missing, or non-local rays. Headset acceptance remains pending.
+
 ## Always-scoped VR auto-aim
 
 ### Pinned evidence

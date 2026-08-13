@@ -6913,6 +6913,7 @@ namespace
     struct Halo3DirectWeaponAimTargetingContext
     {
         bool active = false;
+        float origin[3]{};
         float direction[3]{};
     };
     thread_local Halo3DirectWeaponAimTargetingContext
@@ -8564,6 +8565,8 @@ namespace
         memcpy(origin, visibleOrigin, sizeof(visibleOrigin));
         memcpy(forward, direction, sizeof(direction));
         g_halo3DirectWeaponAimTargetingContext.active = true;
+        memcpy(g_halo3DirectWeaponAimTargetingContext.origin,
+               visibleOrigin, sizeof(visibleOrigin));
         memcpy(g_halo3DirectWeaponAimTargetingContext.direction,
                direction, sizeof(direction));
         g_halo3DirectWeaponAimOverrides.fetch_add(
@@ -8591,7 +8594,8 @@ namespace
         __try
         {
             if (Halo3DirectWeaponAimRestoreAfterTargeting(
-                    true, context.direction, forward))
+                    true, context.origin, context.direction, origin,
+                    forward))
             {
                 g_halo3DirectWeaponAimFinalOverrides.fetch_add(
                     1, std::memory_order_relaxed);
@@ -8628,7 +8632,8 @@ namespace
         __try
         {
             if (Halo3DirectWeaponAimRestoreAfterTargeting(
-                    true, context.direction, forward))
+                    true, context.origin, context.direction, origin,
+                    forward))
             {
                 g_halo3DirectWeaponAimFinalOverrides.fetch_add(
                     1, std::memory_order_relaxed);
@@ -11861,7 +11866,8 @@ namespace
         if (!directAimFirstShotLogged && directAimFinalOverrides != 0)
         {
             LOG("H3 direct weapon aim: first local on-foot shot used the "
-                "fresh visible-weapon direction after native targeting and "
+                "fresh visible-weapon origin and direction after native "
+                "targeting and "
                 "before authored spread");
             directAimFirstShotLogged = true;
         }
