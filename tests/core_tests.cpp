@@ -1525,7 +1525,7 @@ int main()
                   !Halo3DirectWeaponAimDirectionForShot(
                       true, false, true, true, 1, 1, 7, 1001,
                       sample, accepted) &&
-                  !Halo3DirectWeaponAimDirectionForShot(
+                  Halo3DirectWeaponAimDirectionForShot(
                       true, true, false, true, 1, 1, 7, 1001,
                       sample, accepted) &&
                   !Halo3DirectWeaponAimDirectionForShot(
@@ -1546,7 +1546,8 @@ int main()
                   !Halo3DirectWeaponAimDirectionForShot(
                       true, true, true, true, 1, 1, 7, 1101,
                       sample, accepted),
-                "Halo 3 direct weapon aim rejects disabled, non-aim, vehicle, "
+                "Halo 3 direct weapon aim covers both native aim-offset modes "
+                "and rejects disabled, vehicle, "
                 "non-local, invalid-generation, future, and stale shots");
 
             sample.direction[0] =

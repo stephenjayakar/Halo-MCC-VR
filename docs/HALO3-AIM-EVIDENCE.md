@@ -140,6 +140,22 @@ and aim-assist stages are unchanged. This candidate remains unaccepted until an
 exact-build headset test confirms that shots follow the visible barrel while
 aim assist remains present.
 
+### 2026-08-13 remaining stock-direction gate
+
+The next headset report still described aim as torso-relative. Inspection found
+one remaining deliberate fallback in the verified projectile hook: it required
+the native `offsetAim` boolean to be true. Official H3EK proves that boolean
+only tells `unit_adjust_projectile_ray` whether to copy the unit's integrated
+aim into the call's forward vector. It is not a projectile identity flag; the
+function's sole caller is already the weapon-barrel projectile creation path.
+
+The isolated follow-up therefore applies the fresh visible-barrel direction in
+both native `offsetAim` modes, while retaining every stronger gate: exact local
+unit, on foot, VR active, current Halo 3 generation, finite unit vector, and a
+sample no older than 100 ms. Halo still owns origin correction and verification,
+targeting, aim assist, spread, ballistics, and all non-local or vehicle shots.
+Pure coverage exercises both boolean modes. Headset acceptance remains pending.
+
 ## Always-scoped VR auto-aim
 
 ### Pinned evidence

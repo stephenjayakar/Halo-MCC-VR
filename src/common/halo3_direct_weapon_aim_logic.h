@@ -70,7 +70,14 @@ inline bool Halo3DirectWeaponAimDirectionForShot(
     const Halo3DirectWeaponAimSample& sample,
     float (&outDirection)[3]) noexcept
 {
-    if (!bindingActive || !vrActive || !offsetAim || !onFoot ||
+    // `offsetAim` controls whether Halo's helper copies the unit's integrated
+    // torso aim into this weapon-barrel call. It is not an identity or
+    // lifecycle gate. The uniquely verified caller is already the projectile
+    // creation path, so every local on-foot shot must use the visible barrel
+    // direction, including calls where Halo elected to keep its incoming
+    // stock direction.
+    (void)offsetAim;
+    if (!bindingActive || !vrActive || !onFoot ||
         firingUnitHandle == -1 || firingUnitHandle != localUnitHandle ||
         activeGeneration == 0 || sample.generation != activeGeneration ||
         sample.sampleMs == 0 || nowMs < sample.sampleMs ||
