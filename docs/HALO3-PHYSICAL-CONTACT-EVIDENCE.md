@@ -2404,3 +2404,14 @@ twice around that last check so a concurrent interpolation update is carried
 into the final weapon palette. This adds no hardcoded geometry and retains the
 bounded, allocation-free render path. Packaging, runtime cost measurement, and
 the 8,000-sample same-frame replay remain pending.
+
+Candidate `0838dce` checked every final contact palette and kept render cost
+safe (32 of 3,671 samples over 0.25 ms, 0.87%; 529.4 microsecond peak), but one
+confirmed penetration still appeared after 1,766 same-frame comparisons. There
+were 3,670 submitted palettes and 3,671 final guard samples, so no palette
+bypassed this placement. Halo's target provider can therefore expose a
+different interpolation bank between consecutive bounded reads. Sequentially
+clearing only the latest bank can re-enter an earlier bank. The preserved log
+is `out/debug-openxr/20260813-003607504Z-rotating-body-gap.log`, SHA-256
+`04201CEADC324B93D85563529DC42F72A6804B230E99476AE4F7FE556A3981A1`.
+The failed single-bank final guard is disabled; its code remains dormant.

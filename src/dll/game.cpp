@@ -7046,10 +7046,10 @@ namespace
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Run one bounded authored-triangle check after final palette selection.
-    // This covers approved body-follow palettes and transient unapproved
-    // palettes without multiplying the render cost.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    // A final check against one target bank still failed when Halo alternated
+    // visible interpolation banks. Keep it dormant until the guard clears all
+    // bounded observations as one constraint.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr int kHalo3ExactRenderSeparationPasses = 1;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
