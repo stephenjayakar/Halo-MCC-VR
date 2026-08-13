@@ -415,3 +415,18 @@ cover a five-degree native correction being preserved inside a ten-degree cone,
 a thirty-degree torso rewrite being restored, and a no-target rewrite being
 restored. First-shot telemetry names the selected disposition. Headset
 acceptance remains pending.
+
+### 2026-08-13 rejection of cone-only targeting preservation
+
+The user rejected source `dc1c698` in Campaign: shooting still behaved as if
+it were relative to the torso. That result disproves the assumption above that
+an in-cone native rewrite is necessarily authored aim assist. A torso-owned ray
+can also be close enough to the visible barrel to fit inside the same cone.
+
+The rejected exception is now removed. Halo still runs its native targeting
+helper and authored spread, but both verified downstream targeting branches
+restore the exact visible `primary_trigger` direction before returning. This
+deliberately gives up unproven directional aim-assist correction rather than
+allowing any native torso-owned rewrite to move the final shot. Target
+selection and non-direction outputs remain native. Headset acceptance is still
+required.

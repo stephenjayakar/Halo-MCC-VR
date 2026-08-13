@@ -6939,13 +6939,11 @@ namespace
         g_halo3DirectWeaponAimNativeTargetingDeltaDegrees{-1.0f};
     std::atomic<uint32_t> g_halo3DirectWeaponAimNativeTargetingBranch{0};
     std::atomic<uint32_t> g_halo3DirectWeaponAimNativeTargetingResult{0};
-    std::atomic<uint32_t> g_halo3DirectWeaponAimTargetingDisposition{0};
     std::atomic<uint64_t> g_halo3DirectWeaponAimTelemetrySerial{0};
     struct Halo3DirectWeaponAimTargetingContext
     {
         bool active = false;
         float direction[3]{};
-        float maximumAuthoredCorrectionRadians = 0.0f;
     };
     thread_local Halo3DirectWeaponAimTargetingContext
         g_halo3DirectWeaponAimTargetingContext;
@@ -8497,63 +8495,6 @@ namespace
             Halo3PublishDirectWeaponAim(generation, origin, direction);
     }
 
-    float Halo3AimAssistMaximumAngleForUnit(int32_t unitHandle)
-    {
-        if (!g_halo3AimAssistBinding.load(std::memory_order_acquire) ||
-            !g_enabled.load(std::memory_order_relaxed) ||
-            !VR_IsStereoEnabled())
-            return 0.0f;
-        __try
-        {
-            unsigned char* unitData = nullptr;
-            if (!Halo3ContactObjectDataForHandle(unitHandle, unitData))
-                return 0.0f;
-            const int weaponSlot =
-                *reinterpret_cast<const int8_t*>(unitData + 0x262);
-            if (weaponSlot < 0 || weaponSlot >= 4)
-                return 0.0f;
-            const int32_t weaponHandle =
-                *reinterpret_cast<const int32_t*>(
-                    unitData + 0x268 + weaponSlot * 4);
-            unsigned char* weaponData = nullptr;
-            uint8_t weaponKind = 0xFF;
-            if (!Halo3ContactObjectDataForHandle(
-                    weaponHandle, weaponData, &weaponKind) ||
-                weaponKind != 2)
-                return 0.0f;
-            const uint16_t definitionIndex =
-                *reinterpret_cast<const uint16_t*>(weaponData);
-            auto* instances = g_halo3AimAssistTagInstanceTable
-                ? static_cast<unsigned char*>(
-                      *g_halo3AimAssistTagInstanceTable)
-                : nullptr;
-            auto* tagBase = g_halo3AimAssistTagDataBase
-                ? static_cast<unsigned char*>(*g_halo3AimAssistTagDataBase)
-                : nullptr;
-            if (!instances || !tagBase || definitionIndex == 0xFFFFu)
-                return 0.0f;
-            const uint32_t definitionAddress =
-                *reinterpret_cast<const uint32_t*>(
-                    instances + static_cast<size_t>(definitionIndex) * 8 + 4);
-            if (!definitionAddress)
-                return 0.0f;
-            const auto* weaponDefinition =
-                tagBase + static_cast<size_t>(definitionAddress) * 4;
-            const float autoAimRadians =
-                *reinterpret_cast<const float*>(weaponDefinition + 0x328);
-            const float magnetismRadians =
-                *reinterpret_cast<const float*>(weaponDefinition + 0x334);
-            const float maximum = std::max(autoAimRadians, magnetismRadians);
-            return std::isfinite(maximum) && maximum > 0.0f &&
-                    maximum <= 1.5707964f
-                ? maximum : 0.0f;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return 0.0f;
-        }
-    }
-
     // Official H3EK render_model_get_markers (+0x735930) proves this loaded
     // layout: marker groups block +0x3C, group stride 0x10, marker block at
     // group +0x04, marker stride 0x24, node byte +0x02, translation +0x04,
@@ -8863,9 +8804,6 @@ namespace
         g_halo3DirectWeaponAimTargetingContext.active = true;
         memcpy(g_halo3DirectWeaponAimTargetingContext.direction,
                direction, sizeof(direction));
-        g_halo3DirectWeaponAimTargetingContext.
-            maximumAuthoredCorrectionRadians =
-                Halo3AimAssistMaximumAngleForUnit(unitHandle);
         g_halo3DirectWeaponAimOverrides.fetch_add(
             1, std::memory_order_relaxed);
         g_halo3DirectWeaponAimOriginDeltaMeters.store(
@@ -8919,16 +8857,8 @@ namespace
         {
             Halo3RecordDirectWeaponAimTargetingRewrite(
                 context.direction, forward, 1, result);
-            const Halo3DirectWeaponAimTargetingDisposition disposition =
-                Halo3DirectWeaponAimApplyAuthoredTargeting(
-                    true, result,
-                    context.maximumAuthoredCorrectionRadians,
-                    context.direction, forward);
-            g_halo3DirectWeaponAimTargetingDisposition.store(
-                static_cast<uint32_t>(disposition),
-                std::memory_order_relaxed);
-            if (disposition !=
-                Halo3DirectWeaponAimTargetingDisposition::Rejected)
+            if (Halo3DirectWeaponAimRestoreAfterTargeting(
+                    true, context.direction, forward))
             {
                 g_halo3DirectWeaponAimFinalOverrides.fetch_add(
                     1, std::memory_order_relaxed);
@@ -8966,16 +8896,8 @@ namespace
         {
             Halo3RecordDirectWeaponAimTargetingRewrite(
                 context.direction, forward, 2, result);
-            const Halo3DirectWeaponAimTargetingDisposition disposition =
-                Halo3DirectWeaponAimApplyAuthoredTargeting(
-                    true, result,
-                    context.maximumAuthoredCorrectionRadians,
-                    context.direction, forward);
-            g_halo3DirectWeaponAimTargetingDisposition.store(
-                static_cast<uint32_t>(disposition),
-                std::memory_order_relaxed);
-            if (disposition !=
-                Halo3DirectWeaponAimTargetingDisposition::Rejected)
+            if (Halo3DirectWeaponAimRestoreAfterTargeting(
+                    true, context.direction, forward))
             {
                 g_halo3DirectWeaponAimFinalOverrides.fetch_add(
                     1, std::memory_order_relaxed);
@@ -12238,24 +12160,15 @@ namespace
             const uint32_t nativeTargetingResult =
                 g_halo3DirectWeaponAimNativeTargetingResult.load(
                     std::memory_order_relaxed);
-            const uint32_t targetingDisposition =
-                g_halo3DirectWeaponAimTargetingDisposition.load(
-                    std::memory_order_relaxed);
-            const char* targetingDispositionName = targetingDisposition ==
-                    static_cast<uint32_t>(
-                        Halo3DirectWeaponAimTargetingDisposition::
-                            AuthoredCorrectionPreserved)
-                ? "authored-preserved"
-                : "visible-restored";
             LOG("H3 direct weapon aim: first local on-foot shot used fresh "
                 "visible origin+direction after native targeting, before "
                 "authored spread (stock origin shift=%.3fm direction "
                 "change=%.1fdeg visible-root gap=%.3fm native targeting "
-                "rewrite=%.1fdeg branch=%u result=%u targeting=%s "
+                "rewrite=%.1fdeg branch=%u result=%u targeting=visible-restored "
                 "telemetry=%llu)",
                 originDelta, directionDelta, visibleRootDelta,
                 nativeTargetingDelta, nativeTargetingBranch,
-                nativeTargetingResult, targetingDispositionName,
+                nativeTargetingResult,
                 (unsigned long long)directAimTelemetrySerial);
             directAimFirstShotLogged = true;
         }
@@ -24014,8 +23927,6 @@ namespace
             g_halo3DirectWeaponAimNativeTargetingBranch.store(
                 0, std::memory_order_relaxed);
             g_halo3DirectWeaponAimNativeTargetingResult.store(
-                0, std::memory_order_relaxed);
-            g_halo3DirectWeaponAimTargetingDisposition.store(
                 0, std::memory_order_relaxed);
             g_halo3DirectWeaponAimTelemetrySerial.store(
                 0, std::memory_order_relaxed);

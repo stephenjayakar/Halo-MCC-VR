@@ -1580,52 +1580,6 @@ int main()
                 "Halo 3 direct weapon aim restores the exact visible-barrel "
                 "ray after native targeting only for a validated local shot");
 
-            const float tenDegrees = 10.0f / 57.2957795f;
-            const float correctionFiveDegrees[3] = {
-                std::cos(5.0f / 57.2957795f),
-                std::sin(5.0f / 57.2957795f), 0.0f};
-            const float correctionThirtyDegrees[3] = {
-                std::cos(30.0f / 57.2957795f),
-                std::sin(30.0f / 57.2957795f), 0.0f};
-            const float barrelForward[3] = {1.0f, 0.0f, 0.0f};
-            float authoredCorrection[3] = {
-                correctionFiveDegrees[0], correctionFiveDegrees[1], 0.0f};
-            float torsoRewrite[3] = {
-                correctionThirtyDegrees[0], correctionThirtyDegrees[1], 0.0f};
-            float noTargetRewrite[3] = {
-                correctionFiveDegrees[0], correctionFiveDegrees[1], 0.0f};
-            const auto preservedTargeting =
-                Halo3DirectWeaponAimApplyAuthoredTargeting(
-                    true, true, tenDegrees, barrelForward,
-                    authoredCorrection);
-            const auto restoredTorso =
-                Halo3DirectWeaponAimApplyAuthoredTargeting(
-                    true, true, tenDegrees, barrelForward, torsoRewrite);
-            const auto restoredNoTarget =
-                Halo3DirectWeaponAimApplyAuthoredTargeting(
-                    true, false, tenDegrees, barrelForward,
-                    noTargetRewrite);
-            Check(preservedTargeting ==
-                      Halo3DirectWeaponAimTargetingDisposition::
-                          AuthoredCorrectionPreserved &&
-                  restoredTorso ==
-                      Halo3DirectWeaponAimTargetingDisposition::
-                          VisibleDirectionRestored &&
-                  restoredNoTarget ==
-                      Halo3DirectWeaponAimTargetingDisposition::
-                          VisibleDirectionRestored &&
-                  std::fabs(authoredCorrection[0] -
-                            correctionFiveDegrees[0]) < 1.0e-6f &&
-                  std::fabs(authoredCorrection[1] -
-                            correctionFiveDegrees[1]) < 1.0e-6f &&
-                  std::fabs(torsoRewrite[0] - 1.0f) < 1.0e-6f &&
-                  std::fabs(torsoRewrite[1]) < 1.0e-6f &&
-                  std::fabs(noTargetRewrite[0] - 1.0f) < 1.0e-6f &&
-                  std::fabs(noTargetRewrite[1]) < 1.0e-6f,
-                "Halo 3 direct weapon aim preserves only a successful native "
-                "correction inside the weapon's authored aim-assist cone and "
-                "restores larger torso-owned or no-target rewrites");
-
             Halo3DirectWeaponAimSample sample{};
             sample.generation = 7;
             sample.sampleMs = 1000;
