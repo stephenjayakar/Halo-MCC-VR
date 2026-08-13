@@ -186,6 +186,31 @@ entire optional direct-ray transaction on stock fallback. Pure tests cover the
 final normalized restore and its local-shot, pointer, finite-value, and
 unit-length rejects. Headset acceptance remains pending.
 
+### 2026-08-13 alternate campaign targeting branch
+
+The next campaign headset result still described shots as torso-relative.
+Reviewing the complete official H3EK weapon-barrel function found that the
+previous repair covered only one of two mutually exclusive targeting branches.
+The first calls official RVA `0x411F60`. The other calls official RVA
+`0xD8E920` with the same mutable forward vector as argument 3, then both paths
+join before authored spread. A restore attached only to the first helper could
+therefore never cover a shot that selected the second branch.
+
+Pinned retail has the exact alternate helper at RVA `0x5B15A4` and one direct
+caller, at `0x368E55` inside the same verified weapon-barrel function. Its
+48-byte entry signature is unique in the complete pinned module. A separate
+53-byte caller signature is unique at `0x368E25`; install-time validation
+decodes its `E8 rel32` at `+0x30` and requires it to target the matched helper.
+
+The direct-ray transaction now hooks both native targeting helpers. Each calls
+Halo first, consumes the same thread-local local-shot context, and restores only
+the validated visible-barrel direction. The branches are mutually exclusive,
+and the context is still reset at every new projectile-ray call, so no later or
+non-player shot can inherit it. All three hooks install as one optional
+transaction; any missing signature, bad call edge, or hook failure leaves
+firing stock without affecting the camera or VR session. Authored spread and
+ballistics remain after the restored direction. Headset acceptance is pending.
+
 ## Always-scoped VR auto-aim
 
 ### Pinned evidence
