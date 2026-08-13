@@ -75,22 +75,15 @@ inline bool Halo3DirectWeaponAimFromVisibleBasis(
 }
 
 // Halo's projectile-targeting helper is downstream of
-// unit_adjust_projectile_ray and receives both mutable parts of that helper's
-// ray. Restore the already validated visible-weapon ray at this last targeting
-// boundary; the caller applies authored weapon spread afterward.
+// unit_adjust_projectile_ray and may replace that helper's direction. Restore
+// the already validated visible-barrel ray at this last targeting boundary;
+// the caller applies authored weapon spread afterward.
 inline bool Halo3DirectWeaponAimRestoreAfterTargeting(
-    bool localVrShot, const float* visibleOrigin,
-    const float* visibleDirection, float* targetedOrigin,
+    bool localVrShot, const float* visibleDirection,
     float* targetedDirection) noexcept
 {
-    if (!localVrShot || !visibleOrigin || !visibleDirection ||
-        !targetedOrigin || !targetedDirection)
+    if (!localVrShot || !visibleDirection || !targetedDirection)
         return false;
-    for (int axis = 0; axis < 3; ++axis)
-    {
-        if (!std::isfinite(visibleOrigin[axis]))
-            return false;
-    }
     const float lengthSquared =
         visibleDirection[0] * visibleDirection[0] +
         visibleDirection[1] * visibleDirection[1] +
@@ -105,10 +98,7 @@ inline bool Halo3DirectWeaponAimRestoreAfterTargeting(
     if (!std::isfinite(inverseLength))
         return false;
     for (int axis = 0; axis < 3; ++axis)
-    {
-        targetedOrigin[axis] = visibleOrigin[axis];
         targetedDirection[axis] = visibleDirection[axis] * inverseLength;
-    }
     return true;
 }
 

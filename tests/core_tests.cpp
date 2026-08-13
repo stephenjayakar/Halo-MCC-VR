@@ -1505,34 +1505,20 @@ int main()
                 "column of the final visible right-hand pose");
 
             float targetedDirection[3] = {0.0f, 1.0f, 0.0f};
-            float targetedOrigin[3] = {8.0f, 9.0f, 10.0f};
-            const float finalVisibleOrigin[3] = {1.0f, -2.0f, 3.5f};
             const float finalVisibleDirection[3] = {0.6f, 0.8f, 0.0f};
             const float invalidFinalDirection[3] = {
                 std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f};
-            const float invalidFinalOrigin[3] = {
-                1.0f, std::numeric_limits<float>::infinity(), 3.0f};
             Check(Halo3DirectWeaponAimRestoreAfterTargeting(
-                      true, finalVisibleOrigin, finalVisibleDirection,
-                      targetedOrigin, targetedDirection) &&
-                  std::fabs(targetedOrigin[0] - 1.0f) < 1.0e-6f &&
-                  std::fabs(targetedOrigin[1] + 2.0f) < 1.0e-6f &&
-                  std::fabs(targetedOrigin[2] - 3.5f) < 1.0e-6f &&
+                      true, finalVisibleDirection, targetedDirection) &&
                   std::fabs(targetedDirection[0] - 0.6f) < 1.0e-6f &&
                   std::fabs(targetedDirection[1] - 0.8f) < 1.0e-6f &&
                   std::fabs(targetedDirection[2]) < 1.0e-6f &&
                   !Halo3DirectWeaponAimRestoreAfterTargeting(
-                      false, finalVisibleOrigin, finalVisibleDirection,
-                      targetedOrigin, targetedDirection) &&
+                      false, finalVisibleDirection, targetedDirection) &&
                   !Halo3DirectWeaponAimRestoreAfterTargeting(
-                      true, finalVisibleOrigin, invalidFinalDirection,
-                      targetedOrigin, targetedDirection) &&
-                  !Halo3DirectWeaponAimRestoreAfterTargeting(
-                      true, invalidFinalOrigin, finalVisibleDirection,
-                      targetedOrigin, targetedDirection),
-                "Halo 3 direct weapon aim restores the complete exact "
-                "visible-weapon ray after native targeting only for a "
-                "validated local shot");
+                      true, invalidFinalDirection, targetedDirection),
+                "Halo 3 direct weapon aim restores the exact visible-barrel "
+                "ray after native targeting only for a validated local shot");
 
             Halo3DirectWeaponAimSample sample{};
             sample.generation = 7;
