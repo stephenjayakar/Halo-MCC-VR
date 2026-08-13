@@ -10637,6 +10637,17 @@ int main()
             PhysicalContactVerifiedSeparationOffset(
                 verifiedIntended, {-1.0f, 0.0f, 0.0f},
                 0.02f, 0.005f, 0.50f, overlappingUntil);
+        PhysicalContactTransform previousClearPose = verifiedIntended;
+        previousClearPose.position = {0.40f, 0.0f, 0.0f};
+        const PhysicalContactWallConstraint previousPoseHold =
+            PhysicalContactPreviousPoseSeparationOffset(
+                verifiedIntended, previousClearPose, 1.0f,
+                overlappingUntil);
+        previousClearPose.position = {0.20f, 0.0f, 0.0f};
+        const PhysicalContactWallConstraint previousPoseStillBlocked =
+            PhysicalContactPreviousPoseSeparationOffset(
+                verifiedIntended, previousClearPose, 1.0f,
+                overlappingUntil);
         const float directSphereExit = PhysicalContactSphereRayExitDistance(
             {}, {1.0f, 0.0f, 0.0f}, {0.10f, 0.0f, 0.0f},
             0.35f, 0.01f, 1.0f);
@@ -10755,6 +10766,9 @@ int main()
               !overlappingUntil(verifiedClear) &&
               verifiedSeparation.setbackWorldUnits > 0.35f &&
               !verifiedWrongDirection.constrained &&
+              previousPoseHold.constrained &&
+              std::fabs(previousPoseHold.offset.x - 0.40f) < 1.0e-6f &&
+              !previousPoseStillBlocked.constrained &&
               std::fabs(directSphereExit - 0.46f) < 1.0e-6f &&
               directSphereMiss == 0.0f && directSphereClamped == 1.0f &&
               directSphereInvalid == 0.0f &&

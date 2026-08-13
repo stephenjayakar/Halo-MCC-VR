@@ -16577,7 +16577,17 @@ namespace
                         bodyConstraint = verifiedConstraint;
                     }
                     else
-                        bodyConstraint = {};
+                    {
+                        // A failed iterative solve must not release the
+                        // visible weapon through a body it just hit. Hold the
+                        // last visible position only when the current exact
+                        // target geometry proves that position clear.
+                        bodyConstraint =
+                            PhysicalContactPreviousPoseSeparationOffset(
+                                intendedWeaponTransform,
+                                previousWeaponTransform, worldScale,
+                                exactOverlap);
+                    }
                 }
                 else
                     bodyConstraint = {};

@@ -2662,6 +2662,41 @@ inline PhysicalContactWallConstraint PhysicalContactVerifiedSeparationOffset(
     return result;
 }
 
+// If a newly contacted moving body's iterative separation search cannot prove
+// a new pose, do not advance the visible weapon through it. Reuse the previous
+// visible position only when that position is directly proven clear against
+// the current exact body. Rotation remains current, so this is stricter than
+// blindly replaying an old palette and still fails open when evidence is bad.
+template <typename IntersectsAt>
+inline PhysicalContactWallConstraint
+PhysicalContactPreviousPoseSeparationOffset(
+    const PhysicalContactTransform& intendedWeaponTransform,
+    const PhysicalContactTransform& previousVisibleWeaponTransform,
+    float maximumOffsetWorldUnits, IntersectsAt intersectsAt)
+{
+    PhysicalContactWallConstraint result{};
+    if (!PhysicalContactTransformFinite(intendedWeaponTransform) ||
+        !PhysicalContactTransformFinite(previousVisibleWeaponTransform) ||
+        !std::isfinite(maximumOffsetWorldUnits) ||
+        maximumOffsetWorldUnits <= 0.0f)
+        return result;
+    const PhysicalContactVec3 offset =
+        previousVisibleWeaponTransform.position -
+        intendedWeaponTransform.position;
+    const float length = PhysicalContactLength(offset);
+    if (!PhysicalContactFinite(offset) || !std::isfinite(length) ||
+        length <= 1.0e-5f || length > maximumOffsetWorldUnits)
+        return result;
+    PhysicalContactTransform candidate = intendedWeaponTransform;
+    candidate.position = candidate.position + offset;
+    if (intersectsAt(candidate))
+        return result;
+    result.constrained = true;
+    result.offset = offset;
+    result.setbackWorldUnits = length;
+    return result;
+}
+
 // Compute velocity where contact actually occurred rather than classifying a
 // rotational strike from controller-origin speed. The same capsule fraction is
 // evaluated at the previous and current visible weapon poses. Target velocity

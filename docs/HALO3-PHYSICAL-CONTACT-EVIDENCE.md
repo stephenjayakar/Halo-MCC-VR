@@ -2914,3 +2914,21 @@ separate impulse path. The player, held weapon, attachments, invalid handles,
 and non-finite geometry are rejected. No map, scenario, tag, or rock identity
 is hardcoded. The cumulative Release build passes; the reported campaign rock
 remains pending headset acceptance.
+
+### 2026-08-13 fail-closed first dynamic-body contact
+
+The user's accepted nudge behavior still allowed the visible weapon to advance
+through a moving object when the new-frame iterative separation search found a
+hit but could not prove a clear offset. That branch discarded the provisional
+constraint and released the palette, which is the opposite of the required
+fail-closed visual behavior.
+
+After the normal exact separation and moving-body follow attempts fail, the
+worker now tests the last visible weapon position against the current exact
+target shape. It holds that position only when the current weapon orientation
+is directly proven clear there and the bounded offset is finite. This keeps the
+weapon at the last safe side of a newly contacted prop while the independent
+native impulse continues to move the prop. A moved target, changed rotation,
+stale pose, excessive offset, or still-overlapping previous position is not
+trusted. Pure tests cover the proven-clear hold and still-blocked reject.
+Headset lift, sustained push, and no-clipping acceptance remain pending.
