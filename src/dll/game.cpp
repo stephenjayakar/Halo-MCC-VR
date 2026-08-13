@@ -7048,10 +7048,10 @@ namespace
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactFinalRenderReserveMeters = 0.050f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // A whole-compound support plane can inherit a distant authored child and
-    // refuse the four-metre bound. Keep it dormant before selecting the exact
-    // overlapping child and triangle as the escape reference.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    // Separate from the exact overlapping target child along the centres of
+    // the actual intersecting primitives. Distant authored children cannot
+    // distort either the direction or projected distance.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
@@ -8792,29 +8792,44 @@ namespace
             {
                 const float renderGuardRadius =
                     kHalo3ContactFinalRenderReserveMeters * worldScale;
+                const auto targetHit = [&] (
+                    const PhysicalContactTransform& candidate,
+                    int observation) {
+                    PhysicalContactTriangleMeshHit result{};
+                    PhysicalContactTrianglePair pair{};
+                    if (exactTargetGeometry)
+                    {
+                        pair = PhysicalContactTriangleMeshesIntersect(
+                            weaponMesh, candidate, targetMesh,
+                            targetTransforms[observation], renderGuardRadius);
+                    }
+                    else
+                    {
+                        pair = PhysicalContactTriangleMeshCompoundIntersect(
+                            weaponMesh, candidate, targetShape,
+                            targetTransforms[observation], renderGuardRadius);
+                    }
+                    result.hit = pair.hit;
+                    result.weaponTriangle = pair.weaponTriangle;
+                    result.targetIndex = pair.targetIndex;
+                    return result;
+                };
                 const auto targetOverlaps = [&] (
                     const PhysicalContactTransform& candidate,
                     int observation) {
-                    if (exactTargetGeometry)
-                    {
-                        return PhysicalContactTriangleMeshesIntersect(
-                            weaponMesh, candidate, targetMesh,
-                            targetTransforms[observation],
-                            renderGuardRadius).hit;
-                    }
-                    return PhysicalContactSweepTriangleMeshCompound(
-                        weaponMesh, candidate, candidate, targetShape,
-                        targetTransforms[observation],
-                        kHalo3ContactTriangleStepMeters * worldScale,
-                        renderGuardRadius).hit;
+                    return targetHit(candidate, observation).hit;
                 };
                 int overlapObservation = -1;
                 std::array<bool, kHalo3ExactRenderSeparationPasses>
                     overlappingObservations{};
+                std::array<PhysicalContactTriangleMeshHit,
+                    kHalo3ExactRenderSeparationPasses> overlapHits{};
                 for (int observation = 0;
                      observation < observationCount; ++observation)
                 {
-                    if (targetOverlaps(weaponTransform, observation))
+                    overlapHits[observation] =
+                        targetHit(weaponTransform, observation);
+                    if (overlapHits[observation].hit)
                     {
                         overlappingObservations[observation] = true;
                         if (overlapObservation < 0)
@@ -8835,9 +8850,48 @@ namespace
                         }
                         return false;
                     };
-                    const PhysicalContactVec3 outward =
-                        weaponTransform.position -
-                        targetTransforms[overlapObservation].position;
+                    const PhysicalContactTriangleMeshHit& firstHit =
+                        overlapHits[overlapObservation];
+                    const PhysicalContactVec3 weaponHitCentre =
+                        PhysicalContactTransformPoint(
+                            weaponTransform,
+                            weaponMesh.triangles[
+                                firstHit.weaponTriangle].centre);
+                    const PhysicalContactConvexShape& firstTargetChild =
+                        targetShape.children[firstHit.targetIndex];
+                    PhysicalContactVec3 firstChildMinimum{
+                        FLT_MAX, FLT_MAX, FLT_MAX};
+                    PhysicalContactVec3 firstChildMaximum{
+                        -FLT_MAX, -FLT_MAX, -FLT_MAX};
+                    for (uint16_t vertex = 0;
+                         vertex < firstTargetChild.vertexCount; ++vertex)
+                    {
+                        const PhysicalContactVec3 point =
+                            firstTargetChild.vertices[vertex];
+                        firstChildMinimum.x = std::min(
+                            firstChildMinimum.x, point.x);
+                        firstChildMinimum.y = std::min(
+                            firstChildMinimum.y, point.y);
+                        firstChildMinimum.z = std::min(
+                            firstChildMinimum.z, point.z);
+                        firstChildMaximum.x = std::max(
+                            firstChildMaximum.x, point.x);
+                        firstChildMaximum.y = std::max(
+                            firstChildMaximum.y, point.y);
+                        firstChildMaximum.z = std::max(
+                            firstChildMaximum.z, point.z);
+                    }
+                    const PhysicalContactVec3 targetHitCentre =
+                        PhysicalContactTransformPoint(
+                            targetTransforms[overlapObservation],
+                            (firstChildMinimum + firstChildMaximum) * 0.5f);
+                    PhysicalContactVec3 outward =
+                        weaponHitCentre - targetHitCentre;
+                    if (PhysicalContactLengthSquared(outward) <= 1.0e-10f)
+                    {
+                        outward = weaponTransform.position -
+                            targetTransforms[overlapObservation].position;
+                    }
                     const PhysicalContactVec3 outwardUnit =
                         PhysicalContactNormalize(outward, {});
                     const PhysicalContactVec3 weaponMinimum =
@@ -8850,10 +8904,14 @@ namespace
                     {
                         if (!overlappingObservations[observation])
                             continue;
+                        const PhysicalContactTriangleMeshHit& hit =
+                            overlapHits[observation];
+                        if (hit.targetIndex >= targetShape.childCount)
+                            continue;
                         const PhysicalContactVec3 targetMaximum =
-                            PhysicalContactCompoundSupport(
-                                targetShape, targetTransforms[observation],
-                                outwardUnit);
+                            PhysicalContactConvexSupport(
+                                targetShape.children[hit.targetIndex],
+                                targetTransforms[observation], outwardUnit);
                         directDistance = std::max(
                             directDistance,
                             PhysicalContactSupportPlaneSeparationDistance(

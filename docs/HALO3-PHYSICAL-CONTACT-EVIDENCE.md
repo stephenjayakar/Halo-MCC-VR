@@ -2613,3 +2613,11 @@ correctly refused to move, but left the visible weapon intersecting. Preserved
 log: `out/debug-openxr/20260813-023617291Z-rotating-body-gap.log`, SHA-256
 `567D3A5F3B4DBFEE2ABE7C6C12BE661B5CCD874973A51FAC7C2C48C7CADA26E3`.
 The whole-compound behavior is rejected and disabled.
+
+The next candidate takes the triangle and target-child indices returned by the
+actual expanded intersection. Its direction runs from the overlapping target
+child's transformed bounds centre to the overlapping weapon triangle centre.
+Its support plane includes the complete held weapon but only target children
+that truly overlap in one of the three observed target poses. A final complete
+compound query still rejects any motion that would meet another child. This
+removes object-root and distant-child offsets from the correction calculation.
