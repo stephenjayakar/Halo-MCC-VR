@@ -2621,3 +2621,11 @@ Its support plane includes the complete held weapon but only target children
 that truly overlap in one of the three observed target poses. A final complete
 compound query still rejects any motion that would meet another child. This
 removes object-root and distant-child offsets from the correction calculation.
+
+Candidate `a43d7f2` still failed its first long run. The first selected child
+was cleared, but two render corrections later failed when the translated
+weapon met another child or another one of the three observed target poses;
+the independent checker then recorded one confirmed penetration. Preserved
+log: `out/debug-openxr/20260813-024350832Z-rotating-body-gap.log`, SHA-256
+`DECFD5B8F6CBA4F50194B5C1AC1479F151F212BDF3EBD22B2A8538B65417601E`.
+The one-step child behavior is rejected and disabled.

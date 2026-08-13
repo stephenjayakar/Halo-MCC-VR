@@ -7048,10 +7048,9 @@ namespace
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactFinalRenderReserveMeters = 0.050f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Separate from the exact overlapping target child along the centres of
-    // the actual intersecting primitives. Distant authored children cannot
-    // distort either the direction or projected distance.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    // One child-aware step can clear its first child and meet another observed
+    // child. Keep it dormant before adding bounded forward-only child steps.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
