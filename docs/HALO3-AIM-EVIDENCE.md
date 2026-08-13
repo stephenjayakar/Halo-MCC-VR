@@ -226,6 +226,17 @@ generation, stale sample, invalid position, invalid direction, or lifecycle
 doubt leaves both stock values untouched. Pure tests cover the finite origin
 copy and reject. Headset acceptance is pending.
 
+Pinned retail also proves that this is the final origin input to the projectile
+transaction. Immediately after the call at `halo3.dll+0x368B92`, the caller
+copies origin XY from `[rbp-0x30]` into nonvolatile `xmm15` at `+0x368C1F` and
+origin Z into its private `[rsp+0x70]` cache. The two targeting branches run
+later, but neither receives either cache. The joined firing path writes those
+cached components into the projectile record at `+0x36912D/+0x369136`.
+Direction remains mutable through targeting and is separately restored at the
+verified branch hooks before its joined copy at `+0x369118`. Therefore an
+additional post-targeting origin restore is unnecessary; candidate `2c9f099`
+was reverted by `527d8b8` rather than retaining that disproven mechanism.
+
 ## Always-scoped VR auto-aim
 
 ### Pinned evidence
