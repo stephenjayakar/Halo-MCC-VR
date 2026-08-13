@@ -2324,3 +2324,24 @@ the optional visible target root cannot be read. Both exact follows and
 fallbacks are counted in the normal status log. The render callback adds no
 allocation, logging, lock, file I/O, or scan. Packaging and the 8,000-sample
 same-frame replay remain pending.
+
+Candidate `a024e8e` proved root-only follow was necessary but insufficient. It
+applied 404 exact visible-root follows with zero velocity fallbacks, yet the
+same-frame checker found one confirmed triangle penetration in its first 125
+comparisons. The selected loose weapon exposed 12 authored triangles. This
+means at least one final target shape changed relative to its root, or its
+interpolated node bank advanced between the root read and final palette. The
+preserved failure log is
+`out/debug-openxr/20260813-000242194Z-rotating-body-gap.log`, SHA-256
+`2705489B8B75694A35F4068F88958435FE6D7B479FF7397E7D53BF872F456799`.
+
+The next candidate keeps exact root follow and adds a final exact-triangle
+guard in that same render callback. During an active dynamic-body constraint,
+it builds the already bounded authored weapon and target meshes and performs
+one zero-radius overlap test. Most palettes end there. Only an actual overlap
+starts the fixed-count verified-separation search; the weapon moves by the
+smallest directly proven clear offset plus 1 mm, capped at one metre. Exact
+render separations and failures are counted. A separation failure prevents the
+rotating validator from passing. This path still performs no allocation,
+logging, lock, file I/O, or scan. Packaging, runtime cost measurement, and the
+8,000-sample replay remain pending.

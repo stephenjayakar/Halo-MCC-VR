@@ -1003,6 +1003,11 @@ namespace
     std::atomic<uint64_t> g_halo3ContactDebugSameFrameConfirmedOverlaps{0};
     std::atomic<uint64_t> g_halo3ContactExactVisibleBodyFollows{0};
     std::atomic<uint64_t> g_halo3ContactVelocityBodyFollowFallbacks{0};
+    std::atomic<uint64_t> g_halo3ContactExactRenderSeparations{0};
+    std::atomic<uint64_t> g_halo3ContactExactRenderSeparationFailures{0};
+    std::atomic<uint64_t> g_halo3ContactExactRenderSamples{0};
+    std::atomic<uint64_t> g_halo3ContactExactRenderOver250Us{0};
+    std::atomic<float> g_halo3ContactExactRenderPeakUs{0.0f};
     std::atomic<uint32_t> g_halo3ContactDebugLastResetReason{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
     std::atomic<float> g_halo3ContactDebugVisibleMaximumGap{-FLT_MAX};
@@ -5522,7 +5527,8 @@ namespace
         int32_t weaponHandle, const BoneMatrix* visibleNodes,
         uint32_t visibleNodeCount, uint64_t sampleMs);
     bool Halo3ApplyExactVisibleBodyFollow(
-        int32_t targetHandle, const BoneMatrix& referenceTargetRoot,
+        int32_t weaponHandle, int32_t targetHandle,
+        const BoneMatrix& referenceTargetRoot,
         BoneMatrix* weaponNodes, uint32_t weaponNodeCount);
 
     void __fastcall FpVisiblePaletteHook(uint16_t tag, const BoneMatrix* root,
@@ -5826,7 +5832,8 @@ namespace
                         const bool exactVisibleFollow =
                             bodyTargetRootValid &&
                             Halo3ApplyExactVisibleBodyFollow(
-                                bodyTargetHandle, bodyTargetRoot, destination,
+                                activeWeaponHandle, bodyTargetHandle,
+                                bodyTargetRoot, destination,
                                 static_cast<uint32_t>(renderNodeCount));
                         if (!exactVisibleFollow)
                         {
@@ -8507,51 +8514,6 @@ namespace
         return returned;
     }
 
-    bool Halo3ApplyExactVisibleBodyFollow(
-        int32_t targetHandle, const BoneMatrix& referenceTargetRoot,
-        BoneMatrix* weaponNodes, uint32_t weaponNodeCount)
-    {
-        if (targetHandle == -1 || !weaponNodes || !weaponNodeCount ||
-            weaponNodeCount >
-                Halo3VisibleWeaponPosePublication::kMaximumNodes ||
-            !PhysicalContactTransformFinite(
-                Halo3ContactTransformFromBone(referenceTargetRoot)))
-        {
-            return false;
-        }
-        Halo3Matrix4x3* targetNodes = nullptr;
-        int targetNodeCount = 0;
-        if (!Halo3ContactReadInterpolatedNodes(
-                targetHandle, &targetNodes, &targetNodeCount) ||
-            !targetNodes || targetNodeCount <= 0 ||
-            !Halo3MatrixValid(targetNodes[0]))
-        {
-            return false;
-        }
-
-        BoneMatrix currentTargetRoot{};
-        std::memcpy(
-            &currentTargetRoot, &targetNodes[0], sizeof(currentTargetRoot));
-        BoneMatrix inverseReference{}, delta{};
-        if (!InvertBoneMatrix(referenceTargetRoot, inverseReference) ||
-            !ComposeBoneMatrices(
-                currentTargetRoot, inverseReference, delta))
-        {
-            return false;
-        }
-        std::array<BoneMatrix,
-                   Halo3VisibleWeaponPosePublication::kMaximumNodes> moved{};
-        for (uint32_t node = 0; node < weaponNodeCount; ++node)
-            if (!ComposeBoneMatrices(delta, weaponNodes[node], moved[node]))
-                return false;
-        std::memcpy(
-            weaponNodes, moved.data(),
-            static_cast<size_t>(weaponNodeCount) * sizeof(BoneMatrix));
-        g_halo3ContactExactVisibleBodyFollows.fetch_add(
-            1, std::memory_order_relaxed);
-        return true;
-    }
-
     // Copy the same visible-node bank used by Halo's object renderer. The
     // native provider may legitimately report no interpolated bank for an
     // object; in that case the renderer reads the object's bounded raw bank.
@@ -8664,6 +8626,176 @@ namespace
             objectData, visibleNodes.data(),
             static_cast<uint32_t>(matrixCount), outputTransform, output,
             true, &requiresNativeConfirmation, triangleMesh);
+    }
+
+    bool Halo3ApplyExactVisibleBodyFollow(
+        int32_t weaponHandle, int32_t targetHandle,
+        const BoneMatrix& referenceTargetRoot,
+        BoneMatrix* weaponNodes, uint32_t weaponNodeCount)
+    {
+        if (weaponHandle == -1 || targetHandle == -1 || !weaponNodes ||
+            !weaponNodeCount || weaponNodeCount >
+                Halo3VisibleWeaponPosePublication::kMaximumNodes ||
+            !PhysicalContactTransformFinite(
+                Halo3ContactTransformFromBone(referenceTargetRoot)))
+        {
+            return false;
+        }
+        Halo3Matrix4x3* targetNodes = nullptr;
+        int targetNodeCount = 0;
+        if (!Halo3ContactReadInterpolatedNodes(
+                targetHandle, &targetNodes, &targetNodeCount) ||
+            !targetNodes || targetNodeCount <= 0 ||
+            !Halo3MatrixValid(targetNodes[0]))
+        {
+            return false;
+        }
+
+        BoneMatrix currentTargetRoot{};
+        std::memcpy(
+            &currentTargetRoot, &targetNodes[0], sizeof(currentTargetRoot));
+        BoneMatrix inverseReference{}, delta{};
+        if (!InvertBoneMatrix(referenceTargetRoot, inverseReference) ||
+            !ComposeBoneMatrices(
+                currentTargetRoot, inverseReference, delta))
+        {
+            return false;
+        }
+        std::array<BoneMatrix,
+                   Halo3VisibleWeaponPosePublication::kMaximumNodes> moved{};
+        for (uint32_t node = 0; node < weaponNodeCount; ++node)
+            if (!ComposeBoneMatrices(delta, weaponNodes[node], moved[node]))
+                return false;
+
+        static thread_local LARGE_INTEGER qpcFrequency{};
+        if (!qpcFrequency.QuadPart)
+            QueryPerformanceFrequency(&qpcFrequency);
+        LARGE_INTEGER qpcBegin{};
+        QueryPerformanceCounter(&qpcBegin);
+
+        static thread_local PhysicalContactCompoundShape weaponShape{};
+        static thread_local PhysicalContactTriangleMesh weaponMesh{};
+        static thread_local PhysicalContactCompoundShape targetShape{};
+        static thread_local PhysicalContactTriangleMesh targetMesh{};
+        __try
+        {
+            unsigned char* weaponData = nullptr;
+            uint8_t weaponKind = 0xFF;
+            unsigned char* targetData = nullptr;
+            const float worldScale =
+                g_worldScale.load(std::memory_order_relaxed);
+            PhysicalContactTransform weaponTransform =
+                Halo3ContactTransformFromBone(moved[0]);
+            PhysicalContactTransform targetTransform{};
+            bool requiresNativeConfirmation = false;
+            const bool exactGeometry =
+                std::isfinite(worldScale) && worldScale >= 0.05f &&
+                worldScale <= 2.0f &&
+                PhysicalContactTransformFinite(weaponTransform) &&
+                Halo3ContactObjectDataForHandle(
+                    weaponHandle, weaponData, &weaponKind) &&
+                weaponKind == 2 &&
+                Halo3ContactObjectDataForHandle(targetHandle, targetData) &&
+                Halo3ContactVisibleCollisionShape(
+                    weaponData, moved.data(), weaponNodeCount,
+                    weaponTransform, weaponShape, false, nullptr,
+                    &weaponMesh) &&
+                Halo3ContactDetailedTargetShape(
+                    targetHandle, targetData, targetShape, targetTransform,
+                    requiresNativeConfirmation, &targetMesh) &&
+                PhysicalContactTriangleMeshValid(weaponMesh) &&
+                PhysicalContactTriangleMeshValid(targetMesh);
+            if (exactGeometry)
+            {
+                const PhysicalContactTrianglePair overlap =
+                    PhysicalContactTriangleMeshesIntersect(
+                        weaponMesh, weaponTransform,
+                        targetMesh, targetTransform, 0.0f);
+                if (overlap.hit)
+                {
+                    const PhysicalContactVec3 weaponCentre =
+                        PhysicalContactTransformPoint(
+                            weaponTransform,
+                            weaponMesh.triangles[
+                                overlap.weaponTriangle].centre);
+                    const PhysicalContactVec3 targetCentre =
+                        PhysicalContactTransformPoint(
+                            targetTransform,
+                            targetMesh.triangles[
+                                overlap.targetIndex].centre);
+                    const PhysicalContactVec3 outward =
+                        PhysicalContactNormalize(
+                            weaponCentre - targetCentre,
+                            weaponTransform.position -
+                                targetTransform.position);
+                    const auto overlapsAt = [&] (
+                        const PhysicalContactTransform& candidate) {
+                        return PhysicalContactTriangleMeshesIntersect(
+                            weaponMesh, candidate,
+                            targetMesh, targetTransform, 0.0f).hit;
+                    };
+                    const PhysicalContactWallConstraint correction =
+                        PhysicalContactVerifiedSeparationOffset(
+                            weaponTransform, outward, 0.0f,
+                            0.001f * worldScale, worldScale, overlapsAt);
+                    if (correction.constrained)
+                    {
+                        for (uint32_t node = 0;
+                             node < weaponNodeCount; ++node)
+                        {
+                            moved[node].translation[0] += correction.offset.x;
+                            moved[node].translation[1] += correction.offset.y;
+                            moved[node].translation[2] += correction.offset.z;
+                        }
+                        g_halo3ContactExactRenderSeparations.fetch_add(
+                            1, std::memory_order_relaxed);
+                    }
+                    else
+                    {
+                        g_halo3ContactExactRenderSeparationFailures.fetch_add(
+                            1, std::memory_order_relaxed);
+                    }
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            g_halo3ContactExactRenderSeparationFailures.fetch_add(
+                1, std::memory_order_relaxed);
+        }
+
+        LARGE_INTEGER qpcEnd{};
+        QueryPerformanceCounter(&qpcEnd);
+        if (qpcFrequency.QuadPart > 0 &&
+            qpcEnd.QuadPart >= qpcBegin.QuadPart)
+        {
+            const float elapsedUs = static_cast<float>(
+                (qpcEnd.QuadPart - qpcBegin.QuadPart) * 1000000.0 /
+                static_cast<double>(qpcFrequency.QuadPart));
+            if (std::isfinite(elapsedUs))
+            {
+                g_halo3ContactExactRenderSamples.fetch_add(
+                    1, std::memory_order_relaxed);
+                if (elapsedUs > 250.0f)
+                    g_halo3ContactExactRenderOver250Us.fetch_add(
+                        1, std::memory_order_relaxed);
+                float peak = g_halo3ContactExactRenderPeakUs.load(
+                    std::memory_order_relaxed);
+                while (elapsedUs > peak &&
+                       !g_halo3ContactExactRenderPeakUs.compare_exchange_weak(
+                           peak, elapsedUs, std::memory_order_relaxed,
+                           std::memory_order_relaxed))
+                {
+                }
+            }
+        }
+
+        std::memcpy(
+            weaponNodes, moved.data(),
+            static_cast<size_t>(weaponNodeCount) * sizeof(BoneMatrix));
+        g_halo3ContactExactVisibleBodyFollows.fetch_add(
+            1, std::memory_order_relaxed);
+        return true;
     }
 
     // The rotating replay's gameplay-thread checker can only estimate the
@@ -11446,6 +11578,16 @@ namespace
             0, std::memory_order_relaxed);
         g_halo3ContactVelocityBodyFollowFallbacks.store(
             0, std::memory_order_relaxed);
+        g_halo3ContactExactRenderSeparations.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactExactRenderSeparationFailures.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactExactRenderSamples.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactExactRenderOver250Us.store(
+            0, std::memory_order_relaxed);
+        g_halo3ContactExactRenderPeakUs.store(
+            0.0f, std::memory_order_relaxed);
         g_halo3ContactBodyFallbackNormalConstraints.store(
             0, std::memory_order_relaxed);
         g_halo3ContactBodyUncertainHolds.store(
@@ -16484,6 +16626,9 @@ namespace
             "bodyReserve=%.3fm "
             "bodyConstraints=%llu bodyFallbackNormalConstraints=%llu "
             "bodyExactFollows=%llu bodyVelocityFallbacks=%llu "
+            "bodyRenderSeparations=%llu bodyRenderSeparationFailures=%llu "
+            "bodyRenderSamples=%llu bodyRenderOver250us=%llu "
+            "bodyRenderPeakUs=%.1f "
             "bodyUncertainHolds=%llu bodyPeak=%.3fm "
             "wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
@@ -16607,6 +16752,20 @@ namespace
             (unsigned long long)
                 g_halo3ContactVelocityBodyFollowFallbacks.load(
                     std::memory_order_relaxed),
+            (unsigned long long)
+                g_halo3ContactExactRenderSeparations.load(
+                    std::memory_order_relaxed),
+            (unsigned long long)
+                g_halo3ContactExactRenderSeparationFailures.load(
+                    std::memory_order_relaxed),
+            (unsigned long long)
+                g_halo3ContactExactRenderSamples.load(
+                    std::memory_order_relaxed),
+            (unsigned long long)
+                g_halo3ContactExactRenderOver250Us.load(
+                    std::memory_order_relaxed),
+            g_halo3ContactExactRenderPeakUs.load(
+                std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactBodyUncertainHolds.load(
                 std::memory_order_relaxed),
             g_halo3ContactBodyPeakSetbackMeters.load(
