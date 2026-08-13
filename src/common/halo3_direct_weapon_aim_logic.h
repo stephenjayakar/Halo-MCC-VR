@@ -267,35 +267,52 @@ inline bool Halo3DirectWeaponAimRestoreAfterTargeting(
     return true;
 }
 
-// The weapon-barrel transaction copies a torso/camera-selected origin into
-// its projectile record after unit_adjust_projectile_ray and after both
-// targeting branches.  The last official spread helper receives the record's
-// direction in-place.  At that exact call only, use the already validated
-// visible muzzle origin for the adjacent projectile-record origin before
-// authored spread and projectile creation continue.
-inline bool Halo3DirectWeaponAimFinalizeProjectileOrigin(
+// The weapon-barrel transaction can replace both the origin and direction
+// after unit_adjust_projectile_ray and after both targeting branches. The last
+// official spread helper receives the projectile record's direction in-place.
+// At that exact call only, restore the already validated visible muzzle ray
+// into the record before authored spread and projectile creation continue.
+inline bool Halo3DirectWeaponAimFinalizeProjectileRecord(
     bool localVrShot, const float* visibleOrigin,
-    const float* spreadInputDirection, const float* spreadOutputDirection,
-    float* projectileOrigin) noexcept
+    const float* visibleDirection, const float* spreadInputDirection,
+    float* spreadOutputDirection, float* projectileOrigin) noexcept
 {
-    if (!localVrShot || !visibleOrigin || !spreadInputDirection ||
+    if (!localVrShot || !visibleOrigin || !visibleDirection ||
+        !spreadInputDirection ||
         spreadInputDirection != spreadOutputDirection || !projectileOrigin)
         return false;
     for (int axis = 0; axis < 3; ++axis)
     {
         if (!std::isfinite(visibleOrigin[axis]) ||
+            !std::isfinite(visibleDirection[axis]) ||
             !std::isfinite(spreadInputDirection[axis]))
             return false;
     }
-    const float directionLengthSquared =
+    const float inputDirectionLengthSquared =
         spreadInputDirection[0] * spreadInputDirection[0] +
         spreadInputDirection[1] * spreadInputDirection[1] +
         spreadInputDirection[2] * spreadInputDirection[2];
-    if (!std::isfinite(directionLengthSquared) ||
-        directionLengthSquared < 0.25f || directionLengthSquared > 4.0f)
+    const float visibleDirectionLengthSquared =
+        visibleDirection[0] * visibleDirection[0] +
+        visibleDirection[1] * visibleDirection[1] +
+        visibleDirection[2] * visibleDirection[2];
+    if (!std::isfinite(inputDirectionLengthSquared) ||
+        inputDirectionLengthSquared < 0.25f ||
+        inputDirectionLengthSquared > 4.0f ||
+        !std::isfinite(visibleDirectionLengthSquared) ||
+        visibleDirectionLengthSquared < 0.9025f ||
+        visibleDirectionLengthSquared > 1.1025f)
+        return false;
+    const float inverseVisibleLength =
+        1.0f / std::sqrt(visibleDirectionLengthSquared);
+    if (!std::isfinite(inverseVisibleLength))
         return false;
     for (int axis = 0; axis < 3; ++axis)
+    {
         projectileOrigin[axis] = visibleOrigin[axis];
+        spreadOutputDirection[axis] =
+            visibleDirection[axis] * inverseVisibleLength;
+    }
     return true;
 }
 

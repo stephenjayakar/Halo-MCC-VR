@@ -6954,13 +6954,14 @@ namespace
     };
     thread_local Halo3DirectWeaponAimTargetingContext
         g_halo3DirectWeaponAimTargetingContext;
-    struct Halo3DirectWeaponAimFinalOriginContext
+    struct Halo3DirectWeaponAimFinalProjectileContext
     {
         bool active = false;
         float origin[3]{};
+        float direction[3]{};
     };
-    thread_local Halo3DirectWeaponAimFinalOriginContext
-        g_halo3DirectWeaponAimFinalOriginContext;
+    thread_local Halo3DirectWeaponAimFinalProjectileContext
+        g_halo3DirectWeaponAimFinalProjectileContext;
     Halo3InterpolatedNodesFn g_halo3InterpolatedNodes = nullptr;
     Halo3MarkersInternalFn g_halo3MarkersInternal = nullptr;
     using Halo3ObjectSetVelocityFn = void(__fastcall*)(
@@ -8734,7 +8735,7 @@ namespace
         bool offsetOrigin, bool offsetAim, bool verifyOrigin)
     {
         g_halo3DirectWeaponAimTargetingContext = {};
-        g_halo3DirectWeaponAimFinalOriginContext = {};
+        g_halo3DirectWeaponAimFinalProjectileContext = {};
         const Halo3UnitAdjustProjectileRayFn original =
             g_origHalo3UnitAdjustProjectileRay;
         if (!original)
@@ -8819,9 +8820,11 @@ namespace
         g_halo3DirectWeaponAimTargetingContext.active = true;
         memcpy(g_halo3DirectWeaponAimTargetingContext.direction,
                direction, sizeof(direction));
-        g_halo3DirectWeaponAimFinalOriginContext.active = true;
-        memcpy(g_halo3DirectWeaponAimFinalOriginContext.origin,
+        g_halo3DirectWeaponAimFinalProjectileContext.active = true;
+        memcpy(g_halo3DirectWeaponAimFinalProjectileContext.origin,
                visibleOrigin, sizeof(visibleOrigin));
+        memcpy(g_halo3DirectWeaponAimFinalProjectileContext.direction,
+               direction, sizeof(direction));
         g_halo3DirectWeaponAimOverrides.fetch_add(
             1, std::memory_order_relaxed);
         g_halo3DirectWeaponAimOriginDeltaMeters.store(
@@ -8946,22 +8949,26 @@ namespace
             reinterpret_cast<uintptr_t>(_ReturnAddress()) ==
             g_halo3ProjectileSpreadCallerReturn;
         if (g_halo3DirectWeaponAimBinding.load(std::memory_order_acquire) &&
-            exactCaller && g_halo3DirectWeaponAimFinalOriginContext.active)
+            exactCaller &&
+            g_halo3DirectWeaponAimFinalProjectileContext.active)
         {
-            const Halo3DirectWeaponAimFinalOriginContext context =
-                g_halo3DirectWeaponAimFinalOriginContext;
-            g_halo3DirectWeaponAimFinalOriginContext = {};
+            const Halo3DirectWeaponAimFinalProjectileContext context =
+                g_halo3DirectWeaponAimFinalProjectileContext;
+            g_halo3DirectWeaponAimFinalProjectileContext = {};
             __try
             {
                 // Official H3EK and the pinned retail caller both place the
                 // in-place spread direction at projectile record +0x28 and
-                // the final origin at +0x1C.
+                // the final origin at +0x1C. Restore both fields here because
+                // retail performs another native direction rotation after
+                // targeting and before it builds this record.
                 auto* record = reinterpret_cast<unsigned char*>(
                     const_cast<float*>(inputDirection)) - 0x28;
                 auto* projectileOrigin = reinterpret_cast<float*>(
                     record + 0x1C);
-                if (Halo3DirectWeaponAimFinalizeProjectileOrigin(
-                        true, context.origin, inputDirection,
+                if (Halo3DirectWeaponAimFinalizeProjectileRecord(
+                        true, context.origin, context.direction,
+                        inputDirection,
                         outputDirection, projectileOrigin))
                 {
                     g_halo3DirectWeaponAimFinalOriginOverrides.fetch_add(

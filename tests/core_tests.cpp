@@ -1582,38 +1582,60 @@ int main()
 
             float projectileRecordOrigin[3] = {-4.0f, -5.0f, -6.0f};
             float inPlaceSpreadDirection[3] = {0.6f, 0.8f, 0.0f};
-            Check(Halo3DirectWeaponAimFinalizeProjectileOrigin(
-                      true, visibleAimOrigin, inPlaceSpreadDirection,
+            const float finalRecordVisibleDirection[3] = {0.0f, 0.6f, 0.8f};
+            Check(Halo3DirectWeaponAimFinalizeProjectileRecord(
+                      true, visibleAimOrigin, finalRecordVisibleDirection,
+                      inPlaceSpreadDirection,
                       inPlaceSpreadDirection, projectileRecordOrigin) &&
                   std::fabs(projectileRecordOrigin[0] -
                             visibleAimOrigin[0]) < 1.0e-6f &&
                   std::fabs(projectileRecordOrigin[1] -
                             visibleAimOrigin[1]) < 1.0e-6f &&
                   std::fabs(projectileRecordOrigin[2] -
-                            visibleAimOrigin[2]) < 1.0e-6f,
-                "Halo 3 direct weapon aim writes the visible muzzle into the "
-                "final projectile record at the verified in-place spread call");
+                            visibleAimOrigin[2]) < 1.0e-6f &&
+                  std::fabs(inPlaceSpreadDirection[0]) < 1.0e-6f &&
+                  std::fabs(inPlaceSpreadDirection[1] - 0.6f) < 1.0e-6f &&
+                  std::fabs(inPlaceSpreadDirection[2] - 0.8f) < 1.0e-6f,
+                "Halo 3 direct weapon aim writes the visible muzzle ray into "
+                "the final projectile record before authored spread");
             const float untouchedProjectileOrigin[3] = {-4.0f, -5.0f, -6.0f};
             memcpy(projectileRecordOrigin, untouchedProjectileOrigin,
                    sizeof(projectileRecordOrigin));
+            inPlaceSpreadDirection[0] = 0.6f;
+            inPlaceSpreadDirection[1] = 0.8f;
+            inPlaceSpreadDirection[2] = 0.0f;
+            const float untouchedSpreadDirection[3] = {0.6f, 0.8f, 0.0f};
             float separateSpreadOutput[3]{};
-            Check(!Halo3DirectWeaponAimFinalizeProjectileOrigin(
-                      true, visibleAimOrigin, inPlaceSpreadDirection,
+            float invalidInPlaceSpreadDirection[3] = {
+                std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f};
+            Check(!Halo3DirectWeaponAimFinalizeProjectileRecord(
+                      true, visibleAimOrigin, finalVisibleDirection,
+                      inPlaceSpreadDirection,
                       separateSpreadOutput, projectileRecordOrigin) &&
                   std::memcmp(projectileRecordOrigin,
                               untouchedProjectileOrigin,
                               sizeof(projectileRecordOrigin)) == 0 &&
-                  !Halo3DirectWeaponAimFinalizeProjectileOrigin(
-                      false, visibleAimOrigin, inPlaceSpreadDirection,
+                  std::memcmp(inPlaceSpreadDirection,
+                              untouchedSpreadDirection,
+                              sizeof(inPlaceSpreadDirection)) == 0 &&
+                  !Halo3DirectWeaponAimFinalizeProjectileRecord(
+                      false, visibleAimOrigin, finalVisibleDirection,
+                      inPlaceSpreadDirection,
                       inPlaceSpreadDirection, projectileRecordOrigin) &&
-                  !Halo3DirectWeaponAimFinalizeProjectileOrigin(
-                      true, invalidFinalDirection, inPlaceSpreadDirection,
+                  !Halo3DirectWeaponAimFinalizeProjectileRecord(
+                      true, invalidFinalDirection, finalVisibleDirection,
+                      inPlaceSpreadDirection,
                       inPlaceSpreadDirection, projectileRecordOrigin) &&
-                  !Halo3DirectWeaponAimFinalizeProjectileOrigin(
+                  !Halo3DirectWeaponAimFinalizeProjectileRecord(
                       true, visibleAimOrigin, invalidFinalDirection,
-                      invalidFinalDirection, projectileRecordOrigin),
-                "Halo 3 final projectile origin rejects the wrong call shape, "
-                "non-local shots, and non-finite values without changing data");
+                      inPlaceSpreadDirection,
+                      inPlaceSpreadDirection, projectileRecordOrigin) &&
+                  !Halo3DirectWeaponAimFinalizeProjectileRecord(
+                      true, visibleAimOrigin, finalVisibleDirection,
+                      invalidInPlaceSpreadDirection,
+                      invalidInPlaceSpreadDirection, projectileRecordOrigin),
+                "Halo 3 final projectile record rejects the wrong call shape, "
+                "non-local shots, and invalid rays without changing data");
 
             Halo3DirectWeaponAimSample sample{};
             sample.generation = 7;

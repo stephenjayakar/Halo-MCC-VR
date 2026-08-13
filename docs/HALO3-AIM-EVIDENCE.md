@@ -320,6 +320,26 @@ data, or an access fault leaves stock firing for this optional feature without
 disabling VR. The hot path allocates and logs nothing. Pure tests cover the
 valid in-place record update and every reject. Headset acceptance is pending.
 
+### 2026-08-13 final projectile-record direction
+
+The next headset result disproved the remaining direction claim: aim assist
+worked, but shots still followed the torso. Complete pinned-retail disassembly
+shows why. After either targeting helper returns and the prior detour restores
+the visible direction, retail rotates `[rbp-0x40]` again at
+`halo3.dll+0x369010` and `+0x369038`. Only at `+0x369118` is that result copied
+to projectile-record `+0x28`. The prior final-record hook corrected the adjacent
+origin but left this later direction replacement intact.
+
+The exact verified spread call at `+0x3692C4` is still the safe final boundary.
+The local-shot context now carries both the visible `primary_trigger` origin
+and direction to it. Immediately before calling Halo's original spread helper,
+the detour restores both record `+0x1C` and record `+0x28`; Halo then applies
+its authored spread normally. Aim-assist target selection, projectile type,
+velocity, damage, and non-local or vehicle shots remain native. The same exact
+caller, in-place-pointer, finite-value, unit-vector, lifecycle, and fault guards
+apply. Pure coverage proves both fields update from validated input and remain
+untouched on every reject. Headset acceptance is pending.
+
 ## Always-scoped VR auto-aim
 
 ### Pinned evidence
