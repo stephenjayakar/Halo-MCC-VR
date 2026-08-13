@@ -2395,3 +2395,12 @@ during a contact-state transition. The preserved failure log is
 `out/debug-openxr/20260813-002907551Z-rotating-body-gap.log`, SHA-256
 `925235985F7CE16ACD12D8B04C882B5FDAC26DB42B024C966197E1A348594B03`.
 The failed repeated-read behavior is disabled. Its code remains dormant.
+
+The next candidate performs one authored-triangle correction after final
+palette selection, immediately before the visible pose is published and drawn.
+It covers both a worker-approved body-follow palette and the transient current
+proposal that previously bypassed the nested guard. The target root is read
+twice around that last check so a concurrent interpolation update is carried
+into the final weapon palette. This adds no hardcoded geometry and retains the
+bounded, allocation-free render path. Packaging, runtime cost measurement, and
+the 8,000-sample same-frame replay remain pending.

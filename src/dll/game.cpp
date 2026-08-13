@@ -5526,10 +5526,14 @@ namespace
     void Halo3MeasureSameFrameRotatingGap(
         int32_t weaponHandle, const BoneMatrix* visibleNodes,
         uint32_t visibleNodeCount, uint64_t sampleMs);
+    extern std::atomic<int32_t> g_halo3ContactTargetHandle;
+    bool Halo3ContactReadInterpolatedNodes(
+        int32_t objectHandle, Halo3Matrix4x3** matrices, int* count);
     bool Halo3ApplyExactVisibleBodyFollow(
         int32_t weaponHandle, int32_t targetHandle,
         const BoneMatrix& referenceTargetRoot,
-        BoneMatrix* weaponNodes, uint32_t weaponNodeCount);
+        BoneMatrix* weaponNodes, uint32_t weaponNodeCount,
+        bool enforceSeparation);
 
     void __fastcall FpVisiblePaletteHook(uint16_t tag, const BoneMatrix* root,
                                          BoneMatrix* destination, uintptr_t unused,
@@ -5834,7 +5838,8 @@ namespace
                             Halo3ApplyExactVisibleBodyFollow(
                                 activeWeaponHandle, bodyTargetHandle,
                                 bodyTargetRoot, destination,
-                                static_cast<uint32_t>(renderNodeCount));
+                                static_cast<uint32_t>(renderNodeCount),
+                                false);
                         if (!exactVisibleFollow)
                         {
                             g_halo3ContactVelocityBodyFollowFallbacks.fetch_add(
@@ -5874,6 +5879,32 @@ namespace
                     displayedCorrected = approvedCorrected;
                     g_halo3ContactHeldPalettes.fetch_add(
                         1, std::memory_order_relaxed);
+                }
+                // This is the last production mutation before publication and
+                // drawing. Check every final palette, including a transient
+                // proposal that had no usable worker approval.
+                const int32_t finalTargetHandle =
+                    g_halo3ContactTargetHandle.load(
+                        std::memory_order_acquire);
+                Halo3Matrix4x3* finalTargetNodes = nullptr;
+                int finalTargetNodeCount = 0;
+                if (g_config.physical_weapon_contact &&
+                    g_halo3PhysicalContactBindings.load(
+                        std::memory_order_acquire) &&
+                    finalTargetHandle != -1 &&
+                    Halo3ContactReadInterpolatedNodes(
+                        finalTargetHandle, &finalTargetNodes,
+                        &finalTargetNodeCount) &&
+                    finalTargetNodes && finalTargetNodeCount > 0 &&
+                    Halo3MatrixValid(finalTargetNodes[0]))
+                {
+                    BoneMatrix finalTargetRoot{};
+                    std::memcpy(&finalTargetRoot, &finalTargetNodes[0],
+                                sizeof(finalTargetRoot));
+                    Halo3ApplyExactVisibleBodyFollow(
+                        activeWeaponHandle, finalTargetHandle,
+                        finalTargetRoot, destination,
+                        static_cast<uint32_t>(renderNodeCount), true);
                 }
                 if (displayedCorrected)
                     g_halo3ContactDebugVisibleCorrectedPalettes.fetch_add(
@@ -7015,11 +7046,11 @@ namespace
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Three repeated reads still missed final unapproved palettes during a
-    // contact-state transition. Keep this failed placement dormant; the next
-    // candidate moves one exact check after final palette selection.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
-    constexpr int kHalo3ExactRenderSeparationPasses = 3;
+    // Run one bounded authored-triangle check after final palette selection.
+    // This covers approved body-follow palettes and transient unapproved
+    // palettes without multiplying the render cost.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    constexpr int kHalo3ExactRenderSeparationPasses = 1;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
     std::atomic<uint32_t> g_halo3ContactTargetMotionType{0};
@@ -8636,7 +8667,8 @@ namespace
     bool Halo3ApplyExactVisibleBodyFollow(
         int32_t weaponHandle, int32_t targetHandle,
         const BoneMatrix& referenceTargetRoot,
-        BoneMatrix* weaponNodes, uint32_t weaponNodeCount)
+        BoneMatrix* weaponNodes, uint32_t weaponNodeCount,
+        bool enforceSeparation)
     {
         if (weaponHandle == -1 || targetHandle == -1 || !weaponNodes ||
             !weaponNodeCount || weaponNodeCount >
@@ -8673,10 +8705,13 @@ namespace
                 return false;
 
         static thread_local LARGE_INTEGER qpcFrequency{};
-        if (!qpcFrequency.QuadPart)
-            QueryPerformanceFrequency(&qpcFrequency);
         LARGE_INTEGER qpcBegin{};
-        QueryPerformanceCounter(&qpcBegin);
+        if (enforceSeparation)
+        {
+            if (!qpcFrequency.QuadPart)
+                QueryPerformanceFrequency(&qpcFrequency);
+            QueryPerformanceCounter(&qpcBegin);
+        }
 
         static thread_local PhysicalContactCompoundShape weaponShape{};
         static thread_local PhysicalContactTriangleMesh weaponMesh{};
@@ -8687,7 +8722,8 @@ namespace
             const float worldScale =
                 g_worldScale.load(std::memory_order_relaxed);
             for (int pass = 0;
-                 pass < (kEnableHalo3ExactRenderSeparationGuard
+                 pass < (enforceSeparation &&
+                         kEnableHalo3ExactRenderSeparationGuard
                      ? kHalo3ExactRenderSeparationPasses : 0);
                  ++pass)
             {
@@ -8784,8 +8820,9 @@ namespace
         }
 
         LARGE_INTEGER qpcEnd{};
-        QueryPerformanceCounter(&qpcEnd);
-        if (qpcFrequency.QuadPart > 0 &&
+        if (enforceSeparation)
+            QueryPerformanceCounter(&qpcEnd);
+        if (enforceSeparation && qpcFrequency.QuadPart > 0 &&
             qpcEnd.QuadPart >= qpcBegin.QuadPart)
         {
             const float elapsedUs = static_cast<float>(
