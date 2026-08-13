@@ -226,16 +226,14 @@ generation, stale sample, invalid position, invalid direction, or lifecycle
 doubt leaves both stock values untouched. Pure tests cover the finite origin
 copy and reject. Headset acceptance is pending.
 
-Pinned retail also proves that this is the final origin input to the projectile
-transaction. Immediately after the call at `halo3.dll+0x368B92`, the caller
-copies origin XY from `[rbp-0x30]` into nonvolatile `xmm15` at `+0x368C1F` and
-origin Z into its private `[rsp+0x70]` cache. The two targeting branches run
-later, but neither receives either cache. The joined firing path writes those
-cached components into the projectile record at `+0x36912D/+0x369136`.
-Direction remains mutable through targeting and is separately restored at the
-verified branch hooks before its joined copy at `+0x369118`. Therefore an
-additional post-targeting origin restore is unnecessary; candidate `2c9f099`
-was reverted by `527d8b8` rather than retaining that disproven mechanism.
+The headset rejection disproved the claim that this early origin was final.
+Complete pinned-retail disassembly shows two later native writers. The branch
+at `halo3.dll+0x368C44` can load another torso/camera origin from the firing
+unit and replace the value retained in `xmm15`; the later native obstruction
+work beginning at `+0x368C94` can replace it again. Only at `+0x36912D` does
+the caller copy the selected value into the projectile record. Restoring the
+early targeting argument therefore cannot control the projectile's final
+origin, which explains the user's torso-relative result.
 
 The next candidate adds read-only first-shot telemetry at the already hooked
 shot boundary. It records the distance from Halo's stock origin to the
@@ -292,6 +290,35 @@ selection, the already proven aim-assist query, authored spread, projectile
 type, and ballistics remain downstream and unchanged. Pure coverage proves the
 scaled node/marker transform, marker quaternion direction, normalization, and
 invalid-scale rejection. Headset acceptance remains pending.
+
+### 2026-08-13 final projectile-record origin
+
+Official H3EK gives a safe boundary after every native origin selector has
+finished. Its weapon-barrel function calls the full-symbol authored spread
+helper at `halo3_tag_test.exe+0xA853A4`, after building the projectile record.
+The helper receives the record's direction in-place: input and output both
+point to record `+0x28`; the adjacent final origin is record `+0x1C`. The
+official executable remains pinned at SHA-256
+`59A78F2C96034D7CEB5D710505B2B36813AA141FC81A083E3F952973DBCE4602`.
+
+Pinned retail preserves that exact layout and call shape. The optimized helper
+at RVA `0x109648` and caller sequence at RVA `0x369297` each have one unique
+signature in the complete pinned module. Install-time validation also decodes
+the caller's `E8 rel32` at `+0x2D` and requires it to target the matched helper.
+The exact return address limits the detour to this one weapon-barrel call even
+though Halo can use the helper elsewhere.
+
+The local on-foot shot transaction now carries its already validated visible
+`primary_trigger` origin to that final boundary. At the exact verified call it
+requires the input and output direction pointers to be identical, checks finite
+origin and direction values and a sane direction length, derives the adjacent
+record, and replaces only origin `+0x1C`. Halo's authored spread then runs
+unchanged, followed by native projectile creation. The state is thread-local,
+cleared on every new projectile ray, and consumed only at the exact call.
+Signature ambiguity, a bad call edge, hook failure, bad pointer shape, invalid
+data, or an access fault leaves stock firing for this optional feature without
+disabling VR. The hot path allocates and logs nothing. Pure tests cover the
+valid in-place record update and every reject. Headset acceptance is pending.
 
 ## Always-scoped VR auto-aim
 

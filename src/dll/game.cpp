@@ -6884,6 +6884,10 @@ namespace
         int32_t targetHandle, float* origin, float* forward,
         void* targetingResult, void* targetHandleResult,
         float* targetingScalarResult);
+    using Halo3ProjectileSpreadFn = float*(__fastcall*)(
+        int32_t* randomSeed, const char* sourceFile, const char* sourceFunction,
+        int32_t sourceLine, const float* inputDirection,
+        float minimumAngle, float maximumAngle, float* outputDirection);
     // Read-only render-node accessors used by Halo's own native camera-marker
     // path. The first returns the same interpolated 0x34-byte node bank the
     // visible-object renderer consumes; the second resolves an interpolated
@@ -6919,6 +6923,8 @@ namespace
     Halo3ProjectileTargetingFn g_origHalo3ProjectileTargeting = nullptr;
     Halo3AlternateProjectileTargetingFn
         g_origHalo3AlternateProjectileTargeting = nullptr;
+    Halo3ProjectileSpreadFn g_origHalo3ProjectileSpread = nullptr;
+    uintptr_t g_halo3ProjectileSpreadCallerReturn = 0;
     std::atomic<bool> g_halo3DirectWeaponAimBinding{false};
     struct Halo3DirectWeaponAimPublication
     {
@@ -6931,6 +6937,7 @@ namespace
     Halo3DirectWeaponAimPublication g_halo3DirectWeaponAim;
     std::atomic<uint32_t> g_halo3DirectWeaponAimOverrides{0};
     std::atomic<uint32_t> g_halo3DirectWeaponAimFinalOverrides{0};
+    std::atomic<uint32_t> g_halo3DirectWeaponAimFinalOriginOverrides{0};
     std::atomic<uint32_t> g_halo3DirectWeaponAimFaults{0};
     std::atomic<float> g_halo3DirectWeaponAimOriginDeltaMeters{-1.0f};
     std::atomic<float> g_halo3DirectWeaponAimDirectionDeltaDegrees{-1.0f};
@@ -6947,6 +6954,13 @@ namespace
     };
     thread_local Halo3DirectWeaponAimTargetingContext
         g_halo3DirectWeaponAimTargetingContext;
+    struct Halo3DirectWeaponAimFinalOriginContext
+    {
+        bool active = false;
+        float origin[3]{};
+    };
+    thread_local Halo3DirectWeaponAimFinalOriginContext
+        g_halo3DirectWeaponAimFinalOriginContext;
     Halo3InterpolatedNodesFn g_halo3InterpolatedNodes = nullptr;
     Halo3MarkersInternalFn g_halo3MarkersInternal = nullptr;
     using Halo3ObjectSetVelocityFn = void(__fastcall*)(
@@ -8720,6 +8734,7 @@ namespace
         bool offsetOrigin, bool offsetAim, bool verifyOrigin)
     {
         g_halo3DirectWeaponAimTargetingContext = {};
+        g_halo3DirectWeaponAimFinalOriginContext = {};
         const Halo3UnitAdjustProjectileRayFn original =
             g_origHalo3UnitAdjustProjectileRay;
         if (!original)
@@ -8804,6 +8819,9 @@ namespace
         g_halo3DirectWeaponAimTargetingContext.active = true;
         memcpy(g_halo3DirectWeaponAimTargetingContext.direction,
                direction, sizeof(direction));
+        g_halo3DirectWeaponAimFinalOriginContext.active = true;
+        memcpy(g_halo3DirectWeaponAimFinalOriginContext.origin,
+               visibleOrigin, sizeof(visibleOrigin));
         g_halo3DirectWeaponAimOverrides.fetch_add(
             1, std::memory_order_relaxed);
         g_halo3DirectWeaponAimOriginDeltaMeters.store(
@@ -8911,6 +8929,56 @@ namespace
                 1, std::memory_order_relaxed);
         }
         return result;
+    }
+
+    float* __fastcall Halo3ProjectileSpreadHook(
+        int32_t* randomSeed, const char* sourceFile,
+        const char* sourceFunction, int32_t sourceLine,
+        const float* inputDirection, float minimumAngle,
+        float maximumAngle, float* outputDirection)
+    {
+        const Halo3ProjectileSpreadFn original =
+            g_origHalo3ProjectileSpread;
+        if (!original)
+            return outputDirection;
+
+        const bool exactCaller =
+            reinterpret_cast<uintptr_t>(_ReturnAddress()) ==
+            g_halo3ProjectileSpreadCallerReturn;
+        if (g_halo3DirectWeaponAimBinding.load(std::memory_order_acquire) &&
+            exactCaller && g_halo3DirectWeaponAimFinalOriginContext.active)
+        {
+            const Halo3DirectWeaponAimFinalOriginContext context =
+                g_halo3DirectWeaponAimFinalOriginContext;
+            g_halo3DirectWeaponAimFinalOriginContext = {};
+            __try
+            {
+                // Official H3EK and the pinned retail caller both place the
+                // in-place spread direction at projectile record +0x28 and
+                // the final origin at +0x1C.
+                auto* record = reinterpret_cast<unsigned char*>(
+                    const_cast<float*>(inputDirection)) - 0x28;
+                auto* projectileOrigin = reinterpret_cast<float*>(
+                    record + 0x1C);
+                if (Halo3DirectWeaponAimFinalizeProjectileOrigin(
+                        true, context.origin, inputDirection,
+                        outputDirection, projectileOrigin))
+                {
+                    g_halo3DirectWeaponAimFinalOriginOverrides.fetch_add(
+                        1, std::memory_order_relaxed);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                g_halo3DirectWeaponAimBinding.store(
+                    false, std::memory_order_release);
+                g_halo3DirectWeaponAimFaults.fetch_add(
+                    1, std::memory_order_relaxed);
+            }
+        }
+        return original(
+            randomSeed, sourceFile, sourceFunction, sourceLine,
+            inputDirection, minimumAngle, maximumAngle, outputDirection);
     }
 
     bool Halo3ContactMassForObjectBodyData(
@@ -12106,6 +12174,7 @@ namespace
         static uint32_t directAimGenerationLogged = 0;
         static uint32_t directAimFaultsLogged = 0;
         static uint32_t directAimFinalOverridesAtGeneration = 0;
+        static uint32_t directAimFinalOriginOverridesAtGeneration = 0;
         static uint64_t directAimTelemetryAtGeneration = 0;
         static bool directAimFirstShotLogged = false;
         const uint32_t directAimGeneration =
@@ -12116,6 +12185,9 @@ namespace
             directAimFaultsLogged = 0;
             directAimFinalOverridesAtGeneration =
                 g_halo3DirectWeaponAimFinalOverrides.load(
+                    std::memory_order_relaxed);
+            directAimFinalOriginOverridesAtGeneration =
+                g_halo3DirectWeaponAimFinalOriginOverrides.load(
                     std::memory_order_relaxed);
             directAimTelemetryAtGeneration =
                 g_halo3DirectWeaponAimTelemetrySerial.load(
@@ -12135,11 +12207,16 @@ namespace
         const uint32_t directAimFinalOverrides =
             g_halo3DirectWeaponAimFinalOverrides.load(
                 std::memory_order_relaxed);
+        const uint32_t directAimFinalOriginOverrides =
+            g_halo3DirectWeaponAimFinalOriginOverrides.load(
+                std::memory_order_relaxed);
         const uint64_t directAimTelemetrySerial =
             g_halo3DirectWeaponAimTelemetrySerial.load(
                 std::memory_order_acquire);
         if (!directAimFirstShotLogged &&
             directAimFinalOverrides != directAimFinalOverridesAtGeneration &&
+            directAimFinalOriginOverrides !=
+                directAimFinalOriginOverridesAtGeneration &&
             directAimTelemetrySerial != directAimTelemetryAtGeneration)
         {
             const float originDelta =
@@ -12165,6 +12242,7 @@ namespace
                 "authored spread (stock origin shift=%.3fm direction "
                 "change=%.1fdeg visible-root gap=%.3fm native targeting "
                 "rewrite=%.1fdeg branch=%u result=%u targeting=visible-restored "
+                "final-origin=visible-muzzle "
                 "telemetry=%llu)",
                 originDelta, directionDelta, visibleRootDelta,
                 nativeTargetingDelta, nativeTargetingBranch,
@@ -22915,6 +22993,24 @@ namespace
         "48 8D 55 90 48 8D 44 24 60 41 8B CE 48 89 44 24 28 "
         "48 8D 44 24 4C 48 89 44 24 20 75 04 48 8D 55 D0 "
         "E8 ?? ?? ?? ?? 8A D8";
+    // Official H3EK weapon-barrel RVA +0xA853A4 calls its full-symbol
+    // authored spread helper at +0x34E5B0 after writing the projectile record.
+    // Pinned retail preserves the same in-place direction arguments and record
+    // layout at caller +0x3692C4 / helper +0x109648.  The record's origin is
+    // +0x1C and its pre-spread direction is +0x28.
+    inline constexpr uintptr_t kHalo3ProjectileSpreadExpectedRva = 0x109648;
+    inline constexpr uintptr_t kHalo3ProjectileSpreadCallerExpectedRva =
+        0x369297;
+    inline constexpr size_t kHalo3ProjectileSpreadCallOffset = 0x2D;
+    const char* kHalo3ProjectileSpreadSig =
+        "48 8B C4 48 89 58 08 48 89 70 10 57 48 83 EC 60 "
+        "48 8B 94 24 90 00 00 00 48 8B F1 48 8B 9C 24 A8 00 00 00 "
+        "0F 29 70 E8 0F 29 78 D8 F2 0F 10 02 F2 0F 11 03";
+    const char* kHalo3ProjectileSpreadCallerSig =
+        "48 8D 85 F8 00 00 00 48 89 44 24 38 "
+        "48 8D 85 F8 00 00 00 F3 44 0F 11 74 24 30 "
+        "F3 0F 58 C8 48 8B 0C 0A F3 0F 11 4C 24 28 "
+        "48 89 44 24 20 E8 ?? ?? ?? ?? 42 8B 0C 26 BA 01 00 00 00";
 
 #if HALOMCCVR_EXPERIMENTAL_ODST_BRINGUP
     const char* kOdstFpInterpolateSig =
@@ -23911,10 +24007,14 @@ namespace
             g_origHalo3UnitAdjustProjectileRay = nullptr;
             g_origHalo3ProjectileTargeting = nullptr;
             g_origHalo3AlternateProjectileTargeting = nullptr;
+            g_origHalo3ProjectileSpread = nullptr;
+            g_halo3ProjectileSpreadCallerReturn = 0;
             Halo3ClearDirectWeaponAim();
             g_halo3DirectWeaponAimOverrides.store(
                 0, std::memory_order_relaxed);
             g_halo3DirectWeaponAimFinalOverrides.store(
+                0, std::memory_order_relaxed);
+            g_halo3DirectWeaponAimFinalOriginOverrides.store(
                 0, std::memory_order_relaxed);
             g_halo3DirectWeaponAimFaults.store(
                 0, std::memory_order_relaxed);
@@ -23946,6 +24046,10 @@ namespace
                 base, size, kHalo3AlternateProjectileTargetingSig);
             const uintptr_t alternateTargetingCallerHit = sig::Find(
                 base, size, kHalo3AlternateProjectileTargetingCallerSig);
+            const uintptr_t spreadHit =
+                sig::Find(base, size, kHalo3ProjectileSpreadSig);
+            const uintptr_t spreadCallerHit =
+                sig::Find(base, size, kHalo3ProjectileSpreadCallerSig);
             const bool targetingUnique = targetingHit && !sig::Find(
                 targetingHit + 1, base + size - targetingHit - 1,
                 kHalo3ProjectileTargetingSig);
@@ -23984,14 +24088,33 @@ namespace
                     call + 5 + *reinterpret_cast<const int32_t*>(call + 1) ==
                         alternateTargetingHit;
             }
+            const bool spreadUnique = spreadHit && !sig::Find(
+                spreadHit + 1, base + size - spreadHit - 1,
+                kHalo3ProjectileSpreadSig);
+            const bool spreadCallerUnique = spreadCallerHit && !sig::Find(
+                spreadCallerHit + 1,
+                base + size - spreadCallerHit - 1,
+                kHalo3ProjectileSpreadCallerSig);
+            bool spreadCallerConsistent = spreadUnique && spreadCallerUnique;
+            if (spreadCallerConsistent)
+            {
+                const uintptr_t call = spreadCallerHit +
+                    kHalo3ProjectileSpreadCallOffset;
+                spreadCallerConsistent =
+                    *reinterpret_cast<const uint8_t*>(call) == 0xE8 &&
+                    call + 5 + *reinterpret_cast<const int32_t*>(call + 1) ==
+                        spreadHit;
+            }
             MH_STATUS rayCreateStatus = MH_ERROR_NOT_CREATED;
             MH_STATUS targetCreateStatus = MH_ERROR_NOT_CREATED;
             MH_STATUS alternateTargetCreateStatus = MH_ERROR_NOT_CREATED;
+            MH_STATUS spreadCreateStatus = MH_ERROR_NOT_CREATED;
             MH_STATUS rayEnableStatus = MH_ERROR_NOT_CREATED;
             MH_STATUS targetEnableStatus = MH_ERROR_NOT_CREATED;
             MH_STATUS alternateTargetEnableStatus = MH_ERROR_NOT_CREATED;
+            MH_STATUS spreadEnableStatus = MH_ERROR_NOT_CREATED;
             if (rayUnique && targetingCallerConsistent &&
-                alternateTargetingCallerConsistent)
+                alternateTargetingCallerConsistent && spreadCallerConsistent)
             {
                 rayCreateStatus = MH_CreateHook(
                     reinterpret_cast<void*>(rayHit),
@@ -24014,6 +24137,12 @@ namespace
                         reinterpret_cast<void**>(
                             &g_origHalo3AlternateProjectileTargeting));
                 if (alternateTargetCreateStatus == MH_OK)
+                    spreadCreateStatus = MH_CreateHook(
+                        reinterpret_cast<void*>(spreadHit),
+                        reinterpret_cast<void*>(&Halo3ProjectileSpreadHook),
+                        reinterpret_cast<void**>(
+                            &g_origHalo3ProjectileSpread));
+                if (spreadCreateStatus == MH_OK)
                     rayEnableStatus = MH_EnableHook(
                         reinterpret_cast<void*>(rayHit));
                 if (rayEnableStatus == MH_OK)
@@ -24022,33 +24151,46 @@ namespace
                 if (targetEnableStatus == MH_OK)
                     alternateTargetEnableStatus = MH_EnableHook(
                         reinterpret_cast<void*>(alternateTargetingHit));
+                if (alternateTargetEnableStatus == MH_OK)
+                    spreadEnableStatus = MH_EnableHook(
+                        reinterpret_cast<void*>(spreadHit));
             }
             if (rayCreateStatus == MH_OK &&
                 targetCreateStatus == MH_OK &&
                 alternateTargetCreateStatus == MH_OK &&
+                spreadCreateStatus == MH_OK &&
                 rayEnableStatus == MH_OK &&
                 targetEnableStatus == MH_OK &&
-                alternateTargetEnableStatus == MH_OK)
+                alternateTargetEnableStatus == MH_OK &&
+                spreadEnableStatus == MH_OK)
             {
                 RememberInstalledGameHook(reinterpret_cast<void*>(rayHit));
                 RememberInstalledGameHook(
                     reinterpret_cast<void*>(targetingHit));
                 RememberInstalledGameHook(
                     reinterpret_cast<void*>(alternateTargetingHit));
+                RememberInstalledGameHook(reinterpret_cast<void*>(spreadHit));
+                g_halo3ProjectileSpreadCallerReturn =
+                    spreadCallerHit + kHalo3ProjectileSpreadCallOffset + 5;
                 g_halo3DirectWeaponAimBinding.store(
                     true, std::memory_order_release);
                 LOG("H3 direct weapon aim: installed ray=+0x%llX "
-                    "targeting=+0x%llX/+0x%llX callers=+0x%llX/+0x%llX "
-                    "[unique]; every local on-foot targeting branch restores "
-                    "the visible-barrel ray before authored spread",
+                    "targeting=+0x%llX/+0x%llX spread=+0x%llX "
+                    "callers=+0x%llX/+0x%llX/+0x%llX [unique]; local "
+                    "on-foot shots write the visible muzzle into the final "
+                    "projectile record before authored spread",
                     (unsigned long long)(rayHit - base),
                     (unsigned long long)(targetingHit - base),
                     (unsigned long long)(alternateTargetingHit - base),
+                    (unsigned long long)(spreadHit - base),
                     (unsigned long long)(targetingCallerHit - base),
-                    (unsigned long long)(alternateTargetingCallerHit - base));
+                    (unsigned long long)(alternateTargetingCallerHit - base),
+                    (unsigned long long)(spreadCallerHit - base));
             }
             else
             {
+                if (spreadEnableStatus == MH_OK)
+                    MH_DisableHook(reinterpret_cast<void*>(spreadHit));
                 if (alternateTargetEnableStatus == MH_OK)
                     MH_DisableHook(
                         reinterpret_cast<void*>(alternateTargetingHit));
@@ -24063,14 +24205,19 @@ namespace
                 if (alternateTargetCreateStatus == MH_OK)
                     MH_RemoveHook(
                         reinterpret_cast<void*>(alternateTargetingHit));
+                if (spreadCreateStatus == MH_OK)
+                    MH_RemoveHook(reinterpret_cast<void*>(spreadHit));
                 if (rayCreateStatus == MH_OK)
                     MH_RemoveHook(reinterpret_cast<void*>(rayHit));
                 g_origHalo3UnitAdjustProjectileRay = nullptr;
                 g_origHalo3ProjectileTargeting = nullptr;
                 g_origHalo3AlternateProjectileTargeting = nullptr;
+                g_origHalo3ProjectileSpread = nullptr;
+                g_halo3ProjectileSpreadCallerReturn = 0;
                 LOG("H3 direct weapon aim: stock fallback "
                     "(ray=%d/%d targeting=%d/%d caller=%d/%d/%d "
-                    "alternate=%d/%d caller=%d/%d/%d hooks=%d/%d/%d/%d/%d/%d); "
+                    "alternate=%d/%d caller=%d/%d/%d spread=%d/%d "
+                    "caller=%d/%d/%d hooks=%d/%d/%d/%d/%d/%d/%d/%d); "
                     "right-stick aim, native firing, "
                     "camera, and all other features unaffected",
                     rayHit ? 1 : 0, rayUnique ? 1 : 0,
@@ -24083,12 +24230,18 @@ namespace
                     alternateTargetingCallerHit ? 1 : 0,
                     alternateTargetingCallerUnique ? 1 : 0,
                     alternateTargetingCallerConsistent ? 1 : 0,
+                    spreadHit ? 1 : 0, spreadUnique ? 1 : 0,
+                    spreadCallerHit ? 1 : 0,
+                    spreadCallerUnique ? 1 : 0,
+                    spreadCallerConsistent ? 1 : 0,
                     static_cast<int>(rayCreateStatus),
                     static_cast<int>(targetCreateStatus),
                     static_cast<int>(alternateTargetCreateStatus),
+                    static_cast<int>(spreadCreateStatus),
                     static_cast<int>(rayEnableStatus),
                     static_cast<int>(targetEnableStatus),
-                    static_cast<int>(alternateTargetEnableStatus));
+                    static_cast<int>(alternateTargetEnableStatus),
+                    static_cast<int>(spreadEnableStatus));
             }
         }
 

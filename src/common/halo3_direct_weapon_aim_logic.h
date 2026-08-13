@@ -267,6 +267,38 @@ inline bool Halo3DirectWeaponAimRestoreAfterTargeting(
     return true;
 }
 
+// The weapon-barrel transaction copies a torso/camera-selected origin into
+// its projectile record after unit_adjust_projectile_ray and after both
+// targeting branches.  The last official spread helper receives the record's
+// direction in-place.  At that exact call only, use the already validated
+// visible muzzle origin for the adjacent projectile-record origin before
+// authored spread and projectile creation continue.
+inline bool Halo3DirectWeaponAimFinalizeProjectileOrigin(
+    bool localVrShot, const float* visibleOrigin,
+    const float* spreadInputDirection, const float* spreadOutputDirection,
+    float* projectileOrigin) noexcept
+{
+    if (!localVrShot || !visibleOrigin || !spreadInputDirection ||
+        spreadInputDirection != spreadOutputDirection || !projectileOrigin)
+        return false;
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        if (!std::isfinite(visibleOrigin[axis]) ||
+            !std::isfinite(spreadInputDirection[axis]))
+            return false;
+    }
+    const float directionLengthSquared =
+        spreadInputDirection[0] * spreadInputDirection[0] +
+        spreadInputDirection[1] * spreadInputDirection[1] +
+        spreadInputDirection[2] * spreadInputDirection[2];
+    if (!std::isfinite(directionLengthSquared) ||
+        directionLengthSquared < 0.25f || directionLengthSquared > 4.0f)
+        return false;
+    for (int axis = 0; axis < 3; ++axis)
+        projectileOrigin[axis] = visibleOrigin[axis];
+    return true;
+}
+
 // The detour calls Halo first, then may replace only the resulting direction.
 // Every lifecycle or identity doubt keeps that original direction unchanged.
 inline bool Halo3DirectWeaponAimDirectionForShot(
