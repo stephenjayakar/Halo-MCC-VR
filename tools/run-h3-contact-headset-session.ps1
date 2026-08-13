@@ -247,8 +247,7 @@ $sessionName =
 $sessionRoot = Join-Path ([IO.Path]::GetFullPath($OutputRoot)) $sessionName
 [IO.Directory]::CreateDirectory($sessionRoot) | Out-Null
 if (Test-Path -LiteralPath $install.log -PathType Leaf) {
-    Copy-Item -LiteralPath $install.log -Destination
-        (Join-Path $sessionRoot 'before-halo3xr.log')
+    Copy-Item -LiteralPath $install.log -Destination (Join-Path $sessionRoot 'before-halo3xr.log')
 }
 
 if (-not $mcc) {
