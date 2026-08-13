@@ -3624,7 +3624,8 @@ namespace
     bool ControllerWorldPose(float basis[9],float pos[3],float& scale);
     bool ControllerWorldPoseEx(bool left,float basis[9],float pos[3],float& scale);
     bool DesiredWristWorld(bool left, BoneMatrix& out, float& meshScale);
-    void Halo3PublishDirectWeaponAimFromVisibleBasis(const float* basis);
+    void Halo3PublishDirectWeaponAimFromVisiblePose(
+        const float* basis, const float* position);
     // C21: the rigid, vehicle-parented seat placement the hands hang off while
     // a first-person vehicle seat owns the view. False everywhere else.
     bool Halo3ComputeSeatBodyAnchor(float out[3]);
@@ -6267,7 +6268,7 @@ namespace
         for (int j = 0; j < 9; ++j) if (!isfinite(basis[j])) return false;
         for (int j = 0; j < 3; ++j) if (!isfinite(pos[j])) return false;
         if (!left)
-            Halo3PublishDirectWeaponAimFromVisibleBasis(basis);
+            Halo3PublishDirectWeaponAimFromVisiblePose(basis, pos);
         return true;
     }
 
@@ -6902,6 +6903,7 @@ namespace
         std::atomic<uint32_t> sequence{0};
         std::atomic<uint32_t> generation{0};
         std::atomic<uint64_t> sampleMs{0};
+        std::atomic<float> origin[3] = {{0.0f}, {0.0f}, {0.0f}};
         std::atomic<float> direction[3] = {{0.0f}, {0.0f}, {0.0f}};
     };
     Halo3DirectWeaponAimPublication g_halo3DirectWeaponAim;
@@ -8397,7 +8399,8 @@ namespace
     }
 
     void Halo3PublishDirectWeaponAim(
-        uint32_t generation, const float (&direction)[3])
+        uint32_t generation, const float (&origin)[3],
+        const float (&direction)[3])
     {
         if (!generation)
             return;
@@ -8414,13 +8417,16 @@ namespace
         publication.generation.store(generation, std::memory_order_relaxed);
         publication.sampleMs.store(GetTickCount64(), std::memory_order_relaxed);
         for (int axis = 0; axis < 3; ++axis)
+            publication.origin[axis].store(
+                origin[axis], std::memory_order_relaxed);
+        for (int axis = 0; axis < 3; ++axis)
             publication.direction[axis].store(
                 direction[axis], std::memory_order_relaxed);
         publication.sequence.store(sequence + 2u, std::memory_order_release);
     }
 
-    void Halo3PublishDirectWeaponAimFromVisibleBasis(
-        const float* basis)
+    void Halo3PublishDirectWeaponAimFromVisiblePose(
+        const float* basis, const float* position)
     {
         if (!g_halo3DirectWeaponAimBinding.load(std::memory_order_acquire))
             return;
@@ -8433,9 +8439,13 @@ namespace
         {
             return;
         }
+        if (!position || !std::isfinite(position[0]) ||
+            !std::isfinite(position[1]) || !std::isfinite(position[2]))
+            return;
+        float origin[3] = {position[0], position[1], position[2]};
         float direction[3]{};
         if (Halo3DirectWeaponAimFromVisibleBasis(basis, direction))
-            Halo3PublishDirectWeaponAim(generation, direction);
+            Halo3PublishDirectWeaponAim(generation, origin, direction);
     }
 
     void Halo3ClearDirectWeaponAim()
@@ -8454,6 +8464,8 @@ namespace
         }
         publication.generation.store(0, std::memory_order_relaxed);
         publication.sampleMs.store(0, std::memory_order_relaxed);
+        for (auto& component : publication.origin)
+            component.store(0.0f, std::memory_order_relaxed);
         for (auto& component : publication.direction)
             component.store(0.0f, std::memory_order_relaxed);
         publication.sequence.store(sequence + 2u, std::memory_order_release);
@@ -8472,6 +8484,9 @@ namespace
                 std::memory_order_relaxed);
             sample.sampleMs = publication.sampleMs.load(
                 std::memory_order_relaxed);
+            for (int axis = 0; axis < 3; ++axis)
+                sample.origin[axis] = publication.origin[axis].load(
+                    std::memory_order_relaxed);
             for (int axis = 0; axis < 3; ++axis)
                 sample.direction[axis] = publication.direction[axis].load(
                     std::memory_order_relaxed);
@@ -8542,6 +8557,11 @@ namespace
         {
             return;
         }
+        float visibleOrigin[3]{};
+        if (!origin || !Halo3DirectWeaponAimOriginForShot(
+                sample, visibleOrigin))
+            return;
+        memcpy(origin, visibleOrigin, sizeof(visibleOrigin));
         memcpy(forward, direction, sizeof(direction));
         g_halo3DirectWeaponAimTargetingContext.active = true;
         memcpy(g_halo3DirectWeaponAimTargetingContext.direction,

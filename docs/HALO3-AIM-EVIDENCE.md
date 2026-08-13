@@ -211,6 +211,21 @@ transaction; any missing signature, bad call edge, or hook failure leaves
 firing stock without affecting the camera or VR session. Authored spread and
 ballistics remain after the restored direction. Headset acceptance is pending.
 
+### 2026-08-13 visible shot origin
+
+The next campaign headset report described shooting as still relative to the
+torso. The existing detour replaced only `forward`; it deliberately left the
+origin produced by Halo's torso-owned first-person weapon path unchanged. The
+same bounded render snapshot now publishes the finite visible right-hand world
+position with the visible direction. After the official
+`unit_adjust_projectile_ray` has completed its stock work, the verified local,
+on-foot VR transaction replaces both mutable fields before either targeting
+branch consumes them. Halo still owns target selection, authored spread,
+projectile type, velocity, damage, and every non-local or vehicle shot. A stale
+generation, stale sample, invalid position, invalid direction, or lifecycle
+doubt leaves both stock values untouched. Pure tests cover the finite origin
+copy and reject. Headset acceptance is pending.
+
 ## Always-scoped VR auto-aim
 
 ### Pinned evidence

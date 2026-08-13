@@ -1523,6 +1523,9 @@ int main()
             Halo3DirectWeaponAimSample sample{};
             sample.generation = 7;
             sample.sampleMs = 1000;
+            sample.origin[0] = 1.0f;
+            sample.origin[1] = -2.0f;
+            sample.origin[2] = 3.5f;
             sample.direction[0] = 0.6f;
             sample.direction[1] = 0.8f;
             sample.direction[2] = 0.0f;
@@ -1565,6 +1568,22 @@ int main()
                 "Halo 3 direct weapon aim covers both native aim-offset modes "
                 "and rejects disabled, vehicle, "
                 "non-local, invalid-generation, future, and stale shots");
+
+            float acceptedOrigin[3]{};
+            Check(Halo3DirectWeaponAimOriginForShot(
+                      sample, acceptedOrigin) &&
+                  std::fabs(acceptedOrigin[0] - 1.0f) < 1.0e-6f &&
+                  std::fabs(acceptedOrigin[1] + 2.0f) < 1.0e-6f &&
+                  std::fabs(acceptedOrigin[2] - 3.5f) < 1.0e-6f,
+                "Halo 3 direct weapon aim carries the visible right-hand "
+                "origin with the shot ray");
+            sample.origin[1] =
+                std::numeric_limits<float>::quiet_NaN();
+            Check(!Halo3DirectWeaponAimOriginForShot(
+                      sample, acceptedOrigin),
+                "Halo 3 direct weapon aim rejects a non-finite visible "
+                "shot origin");
+            sample.origin[1] = -2.0f;
 
             sample.direction[0] =
                 std::numeric_limits<float>::infinity();

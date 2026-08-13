@@ -9,8 +9,21 @@ struct Halo3DirectWeaponAimSample
 {
     uint32_t generation = 0;
     uint64_t sampleMs = 0;
+    float origin[3]{};
     float direction[3]{};
 };
+
+inline bool Halo3DirectWeaponAimOriginForShot(
+    const Halo3DirectWeaponAimSample& sample, float (&outOrigin)[3]) noexcept
+{
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        if (!std::isfinite(sample.origin[axis]))
+            return false;
+        outOrigin[axis] = sample.origin[axis];
+    }
+    return true;
+}
 
 // Halo's world basis uses yaw in XY and pitch on Z. This conversion remains
 // covered for the controller-to-body steering calculation. It must not publish
