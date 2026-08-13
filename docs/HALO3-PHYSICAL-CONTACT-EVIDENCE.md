@@ -2675,3 +2675,11 @@ rotating compound pose. Preserved log:
 `out/debug-openxr/20260813-030435875Z-rotating-body-gap.log`, SHA-256
 `C2296390F4B084B3CFA5D3AC152C3AC1E38416331D2F3BFE886D0227BE5D257D`.
 The behavior is rejected and disabled before the next candidate.
+
+Candidate `ee38ad0` added a rare authored-triangle proof for conservative-hull
+refusals. The proof correctly accepted nine hull-only overlaps, but three
+other frames remained real authored-surface overlaps and the same-frame check
+confirmed one penetration. Preserved log:
+`out/debug-openxr/20260813-031515820Z-rotating-body-gap.log`, SHA-256
+`44F02A10614EB6D0AA62765152EFFBBDE1112332C4D6934D10EF6A309C62055E`.
+The conservative-first behavior is rejected and disabled.
