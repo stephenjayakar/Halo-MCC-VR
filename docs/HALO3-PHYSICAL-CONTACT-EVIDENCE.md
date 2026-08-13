@@ -2970,3 +2970,23 @@ published deliberately, preserving the short-gap guard until exact separation
 or reset. This is an ordering correction only; collision geometry, impulses,
 melee admission, and target selection are unchanged. Headset sustained-push
 and no-clipping acceptance remain pending.
+
+### 2026-08-13 fixed-object triangle target sweep
+
+The generic fixed-object wall path called the detailed H3EK-authored collision
+reader but passed a null triangle-mesh output. It therefore discarded the
+validated per-face geometry and swept the weapon only against the accompanying
+convex representation. Dynamic props already retained and used the same
+detailed target triangles. This mismatch could simplify or miss an irregular
+campaign rock even when its authored collision decoded successfully.
+
+The fixed-object path now requests the immutable target triangle mesh. When
+both the held weapon and fixed object supply valid meshes, it performs the same
+bounded continuous triangle-vs-triangle sweep used for dynamic detailed
+objects and feeds the exact target point into the existing wall-plane solver.
+If either mesh is unavailable, the existing validated convex path remains the
+fallback. No object, map, wall, rock, or tag identity is hardcoded. Existing
+finite, count, broad-phase, root-object, static-motion, and plane-capacity
+guards remain unchanged. The full continuous triangle sweep tests cover the
+underlying geometry path; the reported campaign rock still requires headset
+acceptance.

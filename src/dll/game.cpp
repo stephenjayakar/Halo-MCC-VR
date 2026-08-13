@@ -15290,11 +15290,13 @@ namespace
                             continue;
 
                         PhysicalContactCompoundShape targetShape{};
+                        PhysicalContactTriangleMesh targetTriangleMesh{};
                         PhysicalContactTransform targetTransform{};
                         bool requiresNativeConfirmation = false;
                         bool resolved = Halo3ContactDetailedTargetShape(
                             handle, data, targetShape, targetTransform,
-                            requiresNativeConfirmation, nullptr);
+                            requiresNativeConfirmation,
+                            &targetTriangleMesh);
                         if (!resolved)
                         {
                             resolved = Halo3ContactShapeForObject(
@@ -15308,12 +15310,24 @@ namespace
                             continue;
 
                         PhysicalContactCompoundHit hit{};
+                        bool exactTriangleTargetPoint = false;
+                        PhysicalContactVec3 triangleTargetPoint{};
                         if (collisionShape &&
                             PhysicalContactTriangleMeshValid(
                                 weaponTriangleMesh))
                         {
                             const PhysicalContactTriangleMeshHit meshHit =
-                                PhysicalContactSweepTriangleMeshCompound(
+                                PhysicalContactTriangleMeshValid(
+                                    targetTriangleMesh)
+                                ? PhysicalContactSweepTriangleMeshes(
+                                    weaponTriangleMesh, previousStaticPose,
+                                    unconstrainedWeaponTransform,
+                                    targetTriangleMesh, targetTransform,
+                                    kHalo3ContactTriangleStepMeters *
+                                        worldScale,
+                                    kHalo3ContactTriangleSurfaceRadiusMeters *
+                                        worldScale)
+                                : PhysicalContactSweepTriangleMeshCompound(
                                     weaponTriangleMesh, previousStaticPose,
                                     unconstrainedWeaponTransform,
                                     targetShape, targetTransform,
@@ -15326,7 +15340,15 @@ namespace
                             if (meshHit.hit)
                             {
                                 hit.weaponChild = 0;
-                                hit.targetChild = meshHit.targetIndex;
+                                if (PhysicalContactTriangleMeshValid(
+                                        targetTriangleMesh))
+                                {
+                                    exactTriangleTargetPoint = true;
+                                    triangleTargetPoint = meshHit.targetPoint;
+                                    hit.targetChild = 0;
+                                }
+                                else
+                                    hit.targetChild = meshHit.targetIndex;
                             }
                             else
                             {
@@ -15345,7 +15367,8 @@ namespace
                                 targetShape, targetTransform);
                         }
                         if (!hit.hit ||
-                            hit.targetChild >= targetShape.childCount)
+                            (!exactTriangleTargetPoint &&
+                             hit.targetChild >= targetShape.childCount))
                             continue;
                         PhysicalContactVec3 normal =
                             PhysicalContactNormalize(
@@ -15366,9 +15389,11 @@ namespace
                                   unconstrainedWeaponTransform,
                                   normal * -1.0f);
                         const PhysicalContactVec3 targetPoint =
-                            PhysicalContactConvexSupport(
-                                targetShape.children[hit.targetChild],
-                                targetTransform, normal);
+                            exactTriangleTargetPoint
+                            ? triangleTargetPoint
+                            : PhysicalContactConvexSupport(
+                                  targetShape.children[hit.targetChild],
+                                  targetTransform, normal);
                         if (!PhysicalContactFinite(weaponPoint) ||
                             !PhysicalContactFinite(targetPoint) ||
                             !PhysicalContactFinite(normal))
