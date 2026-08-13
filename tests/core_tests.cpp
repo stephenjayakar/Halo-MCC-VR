@@ -9042,6 +9042,24 @@ int main()
                   0x12340001, 0x12340001, 5, 5, 12, 11, 1000, 1101),
             "The render gate consumes only a fresh, same-weapon, same-shape "
             "worker approval that cannot come from a future proposal");
+        Check(PhysicalContactApprovedPaletteCompatible(
+                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
+                  0x12340001, 0x12340001, 5, 5, 30, 11, 1000, 5000) &&
+              !PhysicalContactApprovedPaletteCompatible(
+                  kActiveWeaponRenderTag, 0x4321u,
+                  0x12340001, 0x12340001, 5, 5, 30, 11, 1000, 5000) &&
+              !PhysicalContactApprovedPaletteCompatible(
+                  kActiveWeaponRenderTag, kActiveWeaponRenderTag,
+                  0x12340001, 0x12340001, 5, 5, 30, 31, 1000, 5000) &&
+              PhysicalContactPaletteDispositionForRender(false, false) ==
+                  PhysicalContactPaletteDisposition::Proposal &&
+              PhysicalContactPaletteDispositionForRender(true, true) ==
+                  PhysicalContactPaletteDisposition::Approved &&
+              PhysicalContactPaletteDispositionForRender(true, false) ==
+                  PhysicalContactPaletteDisposition::Hidden,
+            "The on-foot collision renderer holds an old compatible safe "
+            "pose and hides an unapproved or unprovable weapon instead of "
+            "drawing through geometry");
 
         const PhysicalContactHit translation = PhysicalContactSweepCapsule(
             {0, 0, 0}, {0.5f, 0, 0}, {2, 0, 0}, {2.5f, 0, 0},

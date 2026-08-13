@@ -509,6 +509,46 @@ inline constexpr bool PhysicalContactApprovedPaletteUsable(
         nowMs - approvedSampleMs <= maximumAgeMs;
 }
 
+// Collision rendering is fail-closed. A worker approval may be older than the
+// normal freshness window and still be the last pose proven to be on the safe
+// side of a wall or body. Identity and serial ordering remain mandatory; title
+// and weapon resets clear the publication before either can be reused.
+inline constexpr bool PhysicalContactApprovedPaletteCompatible(
+    uint16_t expectedRenderTag, uint16_t approvedRenderTag,
+    int32_t expectedWeaponHandle, int32_t approvedWeaponHandle,
+    uint32_t expectedNodeCount, uint32_t approvedNodeCount,
+    uint64_t currentProposalSerial, uint64_t approvedProposalSerial,
+    uint64_t approvedSampleMs, uint64_t nowMs)
+{
+    return expectedRenderTag != 0xFFFFu &&
+        approvedRenderTag == expectedRenderTag &&
+        expectedWeaponHandle != -1 &&
+        approvedWeaponHandle == expectedWeaponHandle &&
+        expectedNodeCount > 0 && expectedNodeCount <= 16 &&
+        approvedNodeCount == expectedNodeCount &&
+        currentProposalSerial != 0 && approvedProposalSerial != 0 &&
+        approvedProposalSerial <= currentProposalSerial &&
+        approvedSampleMs != 0 && nowMs >= approvedSampleMs;
+}
+
+enum class PhysicalContactPaletteDisposition : uint8_t
+{
+    Proposal,
+    Approved,
+    Hidden,
+};
+
+inline constexpr PhysicalContactPaletteDisposition
+PhysicalContactPaletteDispositionForRender(
+    bool guardActive, bool compatibleApproval)
+{
+    if (!guardActive)
+        return PhysicalContactPaletteDisposition::Proposal;
+    return compatibleApproval
+        ? PhysicalContactPaletteDisposition::Approved
+        : PhysicalContactPaletteDisposition::Hidden;
+}
+
 inline int32_t PhysicalContactCollisionPermutationIndex(
     int32_t permutationCount, bool allowFirstOfMany)
 {

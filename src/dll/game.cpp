@@ -3630,6 +3630,7 @@ namespace
         uint16_t renderTag, const BoneMatrix* nodes, uint32_t nodeCount,
         int32_t weaponHandle, uint64_t sampleMs);
     void Halo3ClearDirectWeaponAim();
+    bool Halo3PhysicalContactRenderGuardOnFoot(uint32_t generation);
     // C21: the rigid, vehicle-parented seat placement the hands hang off while
     // a first-person vehicle seat owns the view. False everywhere else.
     bool Halo3ComputeSeatBodyAnchor(float out[3]);
@@ -5816,33 +5817,40 @@ namespace
                     approvedNodes.data(), &approvedNodeCount, &approvedTag,
                     &approvedWeaponHandle, &approvedSerial,
                     &approvedCorrected);
-                const bool useApproval =
+                const uint32_t contactGeneration =
+                    g_halo3RuntimeGeneration.load(std::memory_order_acquire);
+                const bool guardActive =
                     g_config.physical_weapon_contact &&
-                    g_halo3RuntimeGeneration.load(std::memory_order_acquire) &&
+                    contactGeneration &&
                     g_halo3PhysicalContactBindings.load(
                         std::memory_order_acquire) &&
+                    Halo3PhysicalContactRenderGuardOnFoot(
+                        contactGeneration);
+                const bool compatibleApproval =
+                    guardActive &&
                     haveApproval &&
-                    PhysicalContactApprovedPaletteUsable(
+                    PhysicalContactApprovedPaletteCompatible(
                         tag, approvedTag, activeWeaponHandle,
                         approvedWeaponHandle,
                         static_cast<uint32_t>(renderNodeCount),
                         approvedNodeCount, proposalSerial, approvedSerial,
                         approvedMs, nowMs);
+                const PhysicalContactPaletteDisposition paletteDisposition =
+                    PhysicalContactPaletteDispositionForRender(
+                        guardActive, compatibleApproval);
+                const bool useApproval = paletteDisposition ==
+                    PhysicalContactPaletteDisposition::Approved;
+                const auto hideVisibleWeapon = [&]() {
+                    for (int node = 0; node < renderNodeCount; ++node)
+                        destination[node].scale = 0.0001f;
+                };
                 uint64_t displayedSerial = proposalSerial;
                 bool displayedCorrected = false;
-                std::array<BoneMatrix,
-                           Halo3VisibleWeaponPosePublication::kMaximumNodes>
-                    guardFallbackNodes{};
-                bool guardFallbackValid = false;
                 if (useApproval)
                 {
                     memcpy(destination, approvedNodes.data(),
                            static_cast<size_t>(renderNodeCount) *
                                sizeof(BoneMatrix));
-                    memcpy(guardFallbackNodes.data(), destination,
-                           static_cast<size_t>(renderNodeCount) *
-                               sizeof(BoneMatrix));
-                    guardFallbackValid = true;
                     PhysicalContactVec3 bodyLinearVelocity{};
                     PhysicalContactVec3 bodyAngularVelocity{};
                     PhysicalContactVec3 bodyPivot{};
@@ -5910,6 +5918,14 @@ namespace
                     g_halo3ContactHeldPalettes.fetch_add(
                         1, std::memory_order_relaxed);
                 }
+                else if (paletteDisposition ==
+                         PhysicalContactPaletteDisposition::Hidden)
+                {
+                    // The raw proposal is already published for the worker.
+                    // Do not draw it until collision has approved a pose for
+                    // this exact weapon identity.
+                    hideVisibleWeapon();
+                }
                 // This is the last production mutation before publication and
                 // drawing. Check every final palette, including a transient
                 // proposal that had no usable worker approval.
@@ -5927,12 +5943,12 @@ namespace
                         finalTargetShapeSource, finalTargetBodyIndex);
                 Halo3Matrix4x3* finalTargetNodes = nullptr;
                 int finalTargetNodeCount = 0;
-                if (g_config.physical_weapon_contact &&
-                    g_halo3PhysicalContactBindings.load(
-                        std::memory_order_acquire) &&
+                const bool finalGuardRequired = guardActive &&
                     finalTargetHandle != -1 &&
                     (finalTargetShapeSource != 3 ||
-                     finalVisualTargetBodyIndex >= 0) &&
+                     finalVisualTargetBodyIndex >= 0);
+                bool finalGuardProved = !finalGuardRequired;
+                if (finalGuardRequired &&
                     Halo3ContactReadInterpolatedNodes(
                         finalTargetHandle, &finalTargetNodes,
                         &finalTargetNodeCount) &&
@@ -5963,19 +5979,19 @@ namespace
                             &finalTargetRoot,
                             &finalTargetNodes[finalTargetNodeIndex],
                                 sizeof(finalTargetRoot));
-                        const bool finalGuardProved =
-                            Halo3ApplyExactVisibleBodyFollow(
+                        finalGuardProved = Halo3ApplyExactVisibleBodyFollow(
                             activeWeaponHandle, finalTargetHandle,
                             finalTargetRoot, destination,
                             static_cast<uint32_t>(renderNodeCount), true,
                             finalVisualTargetBodyIndex);
-                        if (!finalGuardProved && guardFallbackValid)
-                        {
-                            memcpy(destination, guardFallbackNodes.data(),
-                                   static_cast<size_t>(renderNodeCount) *
-                                       sizeof(BoneMatrix));
-                        }
                     }
+                }
+                if (!finalGuardProved)
+                {
+                    // A previous approval can become unsafe when the target
+                    // moves. If the same-frame exact check cannot prove the
+                    // final palette clear, do not draw intersecting geometry.
+                    hideVisibleWeapon();
                 }
                 if (displayedCorrected)
                     g_halo3ContactDebugVisibleCorrectedPalettes.fetch_add(
@@ -7285,6 +7301,13 @@ namespace
     void** g_halo3TagInstanceTable = nullptr;
     void** g_halo3TagDataBase = nullptr;
     std::atomic<uint64_t> g_halo3VehicleSnapshot{0};
+
+    bool Halo3PhysicalContactRenderGuardOnFoot(uint32_t generation)
+    {
+        return generation != 0 && Halo3VehicleSnapshotState(
+            g_halo3VehicleSnapshot.load(std::memory_order_acquire),
+            generation) == Halo3VehicleState::OnFoot;
+    }
     std::atomic<uint32_t> g_halo3VehicleFaults{0};
     std::atomic<uint64_t> g_halo3VehicleSampleMs{0};
 

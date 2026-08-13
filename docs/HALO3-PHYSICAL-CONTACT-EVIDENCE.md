@@ -2989,6 +2989,30 @@ stale pose, excessive offset, or still-overlapping previous position is not
 trusted. Pure tests cover the proven-clear hold and still-blocked reject.
 Headset lift, sustained push, and no-clipping acceptance remain pending.
 
+### 2026-08-13 fail-closed render approval
+
+The next headset report still allowed the visible weapon to clip through a
+nudged object. The render callback accepted only worker palettes newer than
+100 ms. When the simulation worker lagged or a frame stalled, that freshness
+test discarded the last safe pose and drew the raw controller proposal. The
+fallback therefore became least safe at exactly the moment collision evidence
+was late.
+
+On-foot Halo 3 contact now separates freshness from compatibility. A same-tag,
+same-weapon, same-node-count approval whose serial is not from the future
+remains the last safe render pose until a newer approval arrives. A title or
+weapon reset still clears it, and entering a vehicle returns to the ordinary
+unconstrained renderer. If no compatible approval exists yet, the weapon draw
+is suppressed for that transient frame after its raw proposal has already been
+published to the worker. The same-frame moving-target guard also suppresses a
+draw when current target separation cannot be proven, rather than replaying an
+older palette that the moved body may now overlap. Contact faults still disable
+the guard and fail open to normal VR, preserving feature isolation. Pure tests
+cover stale-compatible acceptance, identity/future rejection, normal rendering
+outside the on-foot guard, safe-pose hold, and hidden unapproved state. Headset
+smoothness, sustained pushing, lifting, and no-clipping acceptance remain
+pending.
+
 ### 2026-08-13 final-guard target ordering
 
 The final palette guard independently rechecks the contacted moving object at
