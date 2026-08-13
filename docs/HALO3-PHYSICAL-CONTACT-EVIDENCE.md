@@ -2434,3 +2434,11 @@ comparisons. Rebuilding three target meshes also exceeded 0.25 ms on 1,101 of
 The failed multi-mesh behavior is disabled and remains dormant. The next
 candidate will decode one authored mesh, sample only the changing rigid root,
 and try multiple exact, verified escape directions only when overlap exists.
+
+The replacement candidate decodes the authored target triangles once per final
+palette and records three bounded root transforms. The final predicate requires
+the same exact mesh to be clear at every observed transform. If it overlaps,
+the fixed search tries triangle-centre, object-centre, and weapon-local axis
+directions, accepting only the shortest candidate directly verified clear of
+all banks. The extra searches run only on an overlap. Packaging, cost
+measurement, and the 8,000-sample replay remain pending.

@@ -7046,9 +7046,9 @@ namespace
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Rebuilding every observed target mesh exceeded the render budget and a
-    // one-direction combined solve could still fail. Keep this attempt dormant.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    // Decode one authored mesh, sample the changing rigid root three times,
+    // and use several verified directions only when an overlap exists.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
@@ -8714,10 +8714,8 @@ namespace
 
         static thread_local PhysicalContactCompoundShape weaponShape{};
         static thread_local PhysicalContactTriangleMesh weaponMesh{};
-        static thread_local std::array<PhysicalContactCompoundShape,
-            kHalo3ExactRenderSeparationPasses> targetShapes{};
-        static thread_local std::array<PhysicalContactTriangleMesh,
-            kHalo3ExactRenderSeparationPasses> targetMeshes{};
+        static thread_local PhysicalContactCompoundShape targetShape{};
+        static thread_local PhysicalContactTriangleMesh targetMesh{};
         static thread_local std::array<PhysicalContactTransform,
             kHalo3ExactRenderSeparationPasses> targetTransforms{};
         __try
@@ -8744,28 +8742,41 @@ namespace
                     &weaponMesh) &&
                 PhysicalContactTriangleMeshValid(weaponMesh);
             int observationCount = 0;
-            for (int pass = 0;
-                 weaponGeometry &&
-                 pass < kHalo3ExactRenderSeparationPasses;
-                 ++pass)
+            unsigned char* targetData = nullptr;
+            bool requiresNativeConfirmation = false;
+            targetShape = {};
+            targetMesh = {};
+            targetTransforms[0] = {};
+            if (weaponGeometry &&
+                Halo3ContactObjectDataForHandle(
+                    targetHandle, targetData) &&
+                Halo3ContactDetailedTargetShape(
+                    targetHandle, targetData, targetShape,
+                    targetTransforms[0], requiresNativeConfirmation,
+                    &targetMesh) &&
+                PhysicalContactTriangleMeshValid(targetMesh))
             {
-                unsigned char* targetData = nullptr;
-                bool requiresNativeConfirmation = false;
-                targetShapes[observationCount] = {};
-                targetMeshes[observationCount] = {};
-                targetTransforms[observationCount] = {};
-                if (Halo3ContactObjectDataForHandle(
-                        targetHandle, targetData) &&
-                    Halo3ContactDetailedTargetShape(
-                        targetHandle, targetData,
-                        targetShapes[observationCount],
-                        targetTransforms[observationCount],
-                        requiresNativeConfirmation,
-                        &targetMeshes[observationCount]) &&
-                    PhysicalContactTriangleMeshValid(
-                        targetMeshes[observationCount]))
+                observationCount = 1;
+                for (int pass = 1;
+                     pass < kHalo3ExactRenderSeparationPasses; ++pass)
                 {
-                    ++observationCount;
+                    Halo3Matrix4x3* observedNodes = nullptr;
+                    int observedNodeCount = 0;
+                    if (Halo3ContactReadInterpolatedNodes(
+                            targetHandle, &observedNodes,
+                            &observedNodeCount) &&
+                        observedNodes && observedNodeCount > 0 &&
+                        Halo3MatrixValid(observedNodes[0]))
+                    {
+                        BoneMatrix observedRoot{};
+                        std::memcpy(&observedRoot, &observedNodes[0],
+                                    sizeof(observedRoot));
+                        const PhysicalContactTransform observedTransform =
+                            Halo3ContactTransformFromBone(observedRoot);
+                        if (PhysicalContactTransformFinite(observedTransform))
+                            targetTransforms[observationCount++] =
+                                observedTransform;
+                    }
                 }
             }
             if (observationCount > 0)
@@ -8779,7 +8790,7 @@ namespace
                 {
                     overlap = PhysicalContactTriangleMeshesIntersect(
                         weaponMesh, weaponTransform,
-                        targetMeshes[observation],
+                        targetMesh,
                         targetTransforms[observation], renderGuardRadius);
                     if (overlap.hit)
                     {
@@ -8789,21 +8800,6 @@ namespace
                 }
                 if (overlapObservation >= 0)
                 {
-                    const PhysicalContactVec3 weaponCentre =
-                        PhysicalContactTransformPoint(
-                            weaponTransform,
-                            weaponMesh.triangles[
-                                overlap.weaponTriangle].centre);
-                    const PhysicalContactVec3 targetCentre =
-                        PhysicalContactTransformPoint(
-                            targetTransforms[overlapObservation],
-                            targetMeshes[overlapObservation].triangles[
-                                overlap.targetIndex].centre);
-                    const PhysicalContactVec3 outward =
-                        PhysicalContactNormalize(
-                            weaponCentre - targetCentre,
-                            weaponTransform.position -
-                                targetTransforms[overlapObservation].position);
                     const auto overlapsAt = [&] (
                         const PhysicalContactTransform& candidate) {
                         for (int observation = 0;
@@ -8811,7 +8807,7 @@ namespace
                         {
                             if (PhysicalContactTriangleMeshesIntersect(
                                     weaponMesh, candidate,
-                                    targetMeshes[observation],
+                                    targetMesh,
                                     targetTransforms[observation],
                                     renderGuardRadius).hit)
                             {
@@ -8820,10 +8816,59 @@ namespace
                         }
                         return false;
                     };
-                    const PhysicalContactWallConstraint correction =
-                        PhysicalContactVerifiedSeparationOffset(
-                            weaponTransform, outward, 0.0f,
-                            0.001f * worldScale, worldScale, overlapsAt);
+                    std::array<PhysicalContactVec3, 12> directions{};
+                    int directionCount = 0;
+                    for (int observation = 0;
+                         observation < observationCount; ++observation)
+                    {
+                        const PhysicalContactTrianglePair observedOverlap =
+                            PhysicalContactTriangleMeshesIntersect(
+                                weaponMesh, weaponTransform, targetMesh,
+                                targetTransforms[observation],
+                                renderGuardRadius);
+                        if (!observedOverlap.hit)
+                            continue;
+                        const PhysicalContactVec3 weaponCentre =
+                            PhysicalContactTransformPoint(
+                                weaponTransform,
+                                weaponMesh.triangles[
+                                    observedOverlap.weaponTriangle].centre);
+                        const PhysicalContactVec3 targetCentre =
+                            PhysicalContactTransformPoint(
+                                targetTransforms[observation],
+                                targetMesh.triangles[
+                                    observedOverlap.targetIndex].centre);
+                        directions[directionCount++] =
+                            weaponCentre - targetCentre;
+                        directions[directionCount++] =
+                            weaponTransform.position -
+                            targetTransforms[observation].position;
+                    }
+                    directions[directionCount++] = weaponTransform.forward;
+                    directions[directionCount++] =
+                        weaponTransform.forward * -1.0f;
+                    directions[directionCount++] = weaponTransform.left;
+                    directions[directionCount++] =
+                        weaponTransform.left * -1.0f;
+                    directions[directionCount++] = weaponTransform.up;
+                    directions[directionCount++] =
+                        weaponTransform.up * -1.0f;
+                    PhysicalContactWallConstraint correction{};
+                    for (int direction = 0;
+                         direction < directionCount; ++direction)
+                    {
+                        const PhysicalContactWallConstraint candidate =
+                            PhysicalContactVerifiedSeparationOffset(
+                                weaponTransform, directions[direction], 0.0f,
+                                0.001f * worldScale, worldScale, overlapsAt);
+                        if (candidate.constrained &&
+                            (!correction.constrained ||
+                             candidate.setbackWorldUnits <
+                                 correction.setbackWorldUnits))
+                        {
+                            correction = candidate;
+                        }
+                    }
                     if (correction.constrained)
                     {
                         for (uint32_t node = 0;
