@@ -7028,6 +7028,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactUnreliableNormalRejects{0};
     std::atomic<uint64_t> g_halo3ContactEnemySustainedMelees{0};
     std::atomic<uint64_t> g_halo3ContactEnemyFallbackNormalMelees{0};
+    std::atomic<uint64_t> g_halo3ContactEnemyAssistHits{0};
     std::atomic<uint64_t> g_halo3ContactPoseDeltaRejects{0};
     std::atomic<uint64_t> g_halo3ContactPointVelocityRejects{0};
     std::atomic<uint64_t> g_halo3ContactMeleeSpikeRejects{0};
@@ -8536,6 +8537,7 @@ namespace
         PhysicalContactConvexShape targetShape{};
         PhysicalContactTransform targetTransform{};
         int32_t rigidBodyIndex = -1;
+        bool meleeAssist = false;
     };
 
     bool Halo3ContactReadInterpolatedNodes(
@@ -9571,6 +9573,7 @@ namespace
         const PhysicalContactTransform& previousWeaponTransform,
         const PhysicalContactTransform& currentWeaponTransform,
         float triangleStepWorldUnits, float triangleSurfaceRadius,
+        float meleeAssistSurfaceRadius,
         Halo3ContactAnimatedBodyHit& output)
     {
         output = {};
@@ -9625,14 +9628,25 @@ namespace
             PhysicalContactCompoundHit candidate{};
             PhysicalContactConvexShape candidateWeaponShape{};
             PhysicalContactConvexShape candidateTargetShape{};
+            bool candidateMeleeAssist = false;
             if (weaponTriangleMesh &&
                 PhysicalContactTriangleMeshValid(*weaponTriangleMesh))
             {
-                const PhysicalContactTriangleMeshHit meshHit =
+                PhysicalContactTriangleMeshHit meshHit =
                     PhysicalContactSweepTriangleMeshCompound(
                         *weaponTriangleMesh, previousWeaponTransform,
                         currentWeaponTransform, targetShape, targetTransform,
                         triangleStepWorldUnits, triangleSurfaceRadius);
+                if (!meshHit.hit &&
+                    std::isfinite(meleeAssistSurfaceRadius) &&
+                    meleeAssistSurfaceRadius > triangleSurfaceRadius)
+                {
+                    meshHit = PhysicalContactSweepTriangleMeshCompound(
+                        *weaponTriangleMesh, previousWeaponTransform,
+                        currentWeaponTransform, targetShape, targetTransform,
+                        triangleStepWorldUnits, meleeAssistSurfaceRadius);
+                    candidateMeleeAssist = meshHit.hit;
+                }
                 static_cast<PhysicalContactConvexHit&>(candidate) = meshHit;
                 if (meshHit.hit)
                 {
@@ -9666,6 +9680,7 @@ namespace
             output.targetShape = candidateTargetShape;
             output.targetTransform = targetTransform;
             output.rigidBodyIndex = bodyIndex;
+            output.meleeAssist = candidateMeleeAssist;
         }
         return resolvedAny;
     }
@@ -15153,6 +15168,7 @@ namespace
             bool closestUsesAuthoredShape = false;
             bool closestUsesRigidWeaponPoint = false;
             bool closestNormalReliable = false;
+            bool closestEnemyMeleeAssist = false;
             PhysicalContactConvexShape closestWeaponShape{};
             PhysicalContactConvexShape closestTargetShape{};
             PhysicalContactTransform closestTargetTransform{};
@@ -15337,6 +15353,7 @@ namespace
                 PhysicalContactTransform authoredTargetTransform{};
                 uint32_t targetShapeSource = 0;
                 int32_t targetBodyIndex = -1;
+                bool enemyMeleeAssist = false;
                 PhysicalContactCompoundShape targetShape{};
                 PhysicalContactTriangleMesh targetTriangleMesh{};
                 uint32_t targetTriangleCount = 0;
@@ -15513,6 +15530,10 @@ namespace
                 {
                     targetShapeSource = 3;
                     Halo3ContactAnimatedBodyHit animated{};
+                    const float meleeAssistRadius =
+                        PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
+                            kHalo3ContactTriangleSurfaceRadiusMeters, kind) *
+                        worldScale;
                     if (!Halo3ContactSweepAnimatedBodies(
                             handle, data, weaponShape,
                             collisionShape ? &weaponTriangleMesh : nullptr,
@@ -15520,6 +15541,7 @@ namespace
                             kHalo3ContactTriangleStepMeters * worldScale,
                             kHalo3ContactTriangleSurfaceRadiusMeters *
                                 worldScale,
+                            meleeAssistRadius,
                             animated))
                         continue;
                     targetGeometryResolved = true;
@@ -15529,6 +15551,7 @@ namespace
                     authoredTargetShape = animated.targetShape;
                     authoredTargetTransform = animated.targetTransform;
                     targetBodyIndex = animated.rigidBodyIndex;
+                    enemyMeleeAssist = animated.meleeAssist;
                 }
                 if (isConstrainedBodyTarget)
                 {
@@ -15575,8 +15598,12 @@ namespace
                 closestTargetShapeSource = targetShapeSource;
                 closestTargetTriangleCount = targetTriangleCount;
                 closestTargetBodyIndex = targetBodyIndex;
+                closestEnemyMeleeAssist = enemyMeleeAssist;
                 if (targetShapeSource == 3)
                     g_halo3ContactAnimatedBodyHits.fetch_add(
+                        1, std::memory_order_relaxed);
+                if (enemyMeleeAssist)
+                    g_halo3ContactEnemyAssistHits.fetch_add(
                         1, std::memory_order_relaxed);
                 // Convex Havok shapes carry the material on their primitive,
                 // not per face. Zero selects the authored default material.
@@ -16069,6 +16096,11 @@ namespace
                 else
                     bodyConstraint = {};
             }
+            // The 3 cm animated-limb catch zone exists only to prevent a
+            // sampled fast swing from missing native melee. It must never
+            // create an invisible visual wall or a pre-contact physics shove.
+            if (closestEnemyMeleeAssist)
+                bodyConstraint = {};
             updateBodyConstraint(
                 bodyConstraint.constrained
                     ? PhysicalContactDynamicBodyObservation::Blocked
@@ -16336,7 +16368,8 @@ namespace
             const bool haveNativeMasses = Halo3ContactMassForObjectData(
                     weaponData, weaponComponent, weaponBodyIndex,
                     weaponMass) && targetMassResolved;
-            const bool targetIsDynamic = haveNativeMasses &&
+            const bool targetIsDynamic = !closestEnemyMeleeAssist &&
+                haveNativeMasses &&
                 PhysicalContactMotionTypeIsDynamic(targetMotionType) &&
                 dynamicImpulseNormalEligible;
             const PhysicalContactConstraintImpulse constraintImpulse =
@@ -17055,6 +17088,7 @@ namespace
             "authoredShapeHits=%llu animatedBodyHits=%llu "
             "unsupportedShapes=%llu rejectNormal=%llu "
             "enemySustainedMelees=%llu enemyFallbackNormalMelees=%llu "
+            "enemyAssistHits=%llu "
             "rejectPose=%llu "
             "rejectVelocity=%llu rejectMeleeSpike=%llu "
             "candidate=0x%08X candidateNormal=%u "
@@ -17148,6 +17182,8 @@ namespace
             (unsigned long long)g_halo3ContactEnemySustainedMelees.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactEnemyFallbackNormalMelees.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactEnemyAssistHits.load(
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactPoseDeltaRejects.load(
                 std::memory_order_relaxed),

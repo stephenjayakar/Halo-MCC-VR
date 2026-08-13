@@ -2631,6 +2631,22 @@ inline bool PhysicalContactEnemyMeleeKind(uint8_t kind)
     return kind == 0 || kind == 12 || kind == 13;
 }
 
+inline float PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
+    float exactSurfaceRadiusMeters, uint8_t targetKind)
+{
+    if (!std::isfinite(exactSurfaceRadiusMeters) ||
+        exactSurfaceRadiusMeters < 0.0f)
+        return exactSurfaceRadiusMeters;
+    // A render-tracked controller and an animated limb are sampled on
+    // different clocks.  The exact 1.25 mm physics surface is retained for
+    // blocking and impulse, but enemy melee gets a small catch zone so a fast
+    // visible strike cannot pass entirely between two samples.  This is
+    // deliberately enemy-only: props and vehicles keep exact contact.
+    return PhysicalContactEnemyMeleeKind(targetKind)
+        ? std::max(exactSurfaceRadiusMeters, 0.030f)
+        : exactSurfaceRadiusMeters;
+}
+
 inline bool PhysicalContactTargetMeleeSpeedEligible(
     bool firstContact, uint8_t targetKind, bool meleeArmed)
 {

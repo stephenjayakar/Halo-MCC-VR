@@ -9723,6 +9723,14 @@ int main()
               PhysicalContactEnemyMeleeKind(13) &&
               !PhysicalContactEnemyMeleeKind(1) &&
               !PhysicalContactEnemyMeleeKind(2) &&
+              std::fabs(PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
+                            0.00125f, 0) - 0.030f) < 1.0e-6f &&
+              std::fabs(PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
+                            0.00125f, 12) - 0.030f) < 1.0e-6f &&
+              std::fabs(PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
+                            0.00125f, 1) - 0.00125f) < 1.0e-6f &&
+              std::fabs(PhysicalContactAnimatedMeleeSurfaceRadiusMeters(
+                            0.040f, 0) - 0.040f) < 1.0e-6f &&
               armedEnemyContinuation &&
               !PhysicalContactTargetMeleeSpeedEligible(false, 0, false) &&
               !PhysicalContactTargetMeleeSpeedEligible(false, 1, true) &&

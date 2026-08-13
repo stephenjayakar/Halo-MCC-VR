@@ -2195,6 +2195,28 @@ Its preserved rejected log is
 The corrected validator accepts any positive cumulative self-test count; no
 runtime behavior changed.
 
+### 2026-08-13 animated-enemy sampling catch zone
+
+The user's next Campaign result on source `23e9664` still found physical melee
+too difficult even though that source already used the minimum `0.50 m/s`
+enemy threshold, later-sample admission, and exact node-bound animated rigid
+bodies. Lowering the speed again would not repair a contact the sweep never
+observed.
+
+The animated-body sweep used the same `1.25 mm` surface radius as rigid-body
+physics. A fast tracked weapon and an animated limb are sampled on different
+render/game clocks, so both exact shapes can visibly cross between samples
+without ever entering that very thin band. The next isolated candidate adds a
+`30 mm` sweep radius only when the target kind is biped, creature, or giant and
+only after the exact animated limb shape has resolved. A hit admitted by this
+outer band may request the existing native melee transaction, but it cannot
+publish a visual constraint or a rigid-body impulse. Props and vehicles retain
+their exact `1.25 mm` surface and their full configured melee threshold.
+
+Runtime telemetry records `enemyAssistHits`. Pure coverage proves the radius is
+`30 mm` for the three animated enemy kinds, unchanged for vehicles, and never
+shrinks a larger exact radius. Headset acceptance remains pending.
+
 ## Verification boundary
 
 The pure regression suite covers translation and rotation sweeps, tunnelling,
