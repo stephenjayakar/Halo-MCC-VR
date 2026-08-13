@@ -3626,6 +3626,10 @@ namespace
     bool DesiredWristWorld(bool left, BoneMatrix& out, float& meshScale);
     void Halo3PublishDirectWeaponAimFromVisiblePose(
         const float* basis, const float* position);
+    void Halo3PublishDirectWeaponAimFromVisiblePalette(
+        uint16_t renderTag, const BoneMatrix* nodes, uint32_t nodeCount,
+        int32_t weaponHandle, uint64_t sampleMs);
+    void Halo3ClearDirectWeaponAim();
     // C21: the rigid, vehicle-parented seat placement the hands hang off while
     // a first-person vehicle seat owns the view. False everywhere else.
     bool Halo3ComputeSeatBodyAnchor(float out[3]);
@@ -5981,6 +5985,10 @@ namespace
                     static_cast<uint32_t>(renderNodeCount), tag,
                     activeWeaponHandle, displayedSerial, nowMs,
                     displayedCorrected);
+                Halo3PublishDirectWeaponAimFromVisiblePalette(
+                    tag, destination,
+                    static_cast<uint32_t>(renderNodeCount),
+                    activeWeaponHandle, nowMs);
                 Halo3MeasureSameFrameRotatingGap(
                     activeWeaponHandle, destination,
                     static_cast<uint32_t>(renderNodeCount), nowMs);
@@ -6267,8 +6275,6 @@ namespace
         scale = Clamp(g_config.gun_scale, 0.3f, 3.0f);
         for (int j = 0; j < 9; ++j) if (!isfinite(basis[j])) return false;
         for (int j = 0; j < 3; ++j) if (!isfinite(pos[j])) return false;
-        if (!left)
-            Halo3PublishDirectWeaponAimFromVisiblePose(basis, pos);
         return true;
     }
 
@@ -8450,6 +8456,167 @@ namespace
         float direction[3]{};
         if (Halo3DirectWeaponAimFromVisibleBasis(basis, direction))
             Halo3PublishDirectWeaponAim(generation, origin, direction);
+    }
+
+    // Official H3EK render_model_get_markers (+0x735930) proves this loaded
+    // layout: marker groups block +0x3C, group stride 0x10, marker block at
+    // group +0x04, marker stride 0x24, node byte +0x02, translation +0x04,
+    // quaternion +0x10. H3's static string table proves primary_trigger is
+    // SID 0xD4. Resolve it only when the render tag or title generation
+    // changes; the normal render callback then performs fixed finite math.
+    void Halo3PublishDirectWeaponAimFromVisiblePalette(
+        uint16_t renderTag, const BoneMatrix* nodes, uint32_t nodeCount,
+        int32_t weaponHandle, uint64_t sampleMs)
+    {
+        (void)weaponHandle;
+        if (!g_halo3DirectWeaponAimBinding.load(std::memory_order_acquire) ||
+            !nodes || !nodeCount ||
+            nodeCount > Halo3VisibleWeaponPosePublication::kMaximumNodes ||
+            renderTag == 0xFFFFu || !sampleMs)
+        {
+            Halo3ClearDirectWeaponAim();
+            return;
+        }
+        struct PrimaryTriggerCache
+        {
+            uint32_t generation = 0;
+            uint16_t renderTag = 0xFFFFu;
+            uint8_t nodeIndex = 0xFFu;
+            bool resolved = false;
+            bool present = false;
+            float translation[3]{};
+            float quaternion[4]{};
+        };
+        static thread_local PrimaryTriggerCache cache{};
+        const uint32_t generation =
+            g_halo3RuntimeGeneration.load(std::memory_order_acquire);
+        if (!generation)
+        {
+            Halo3ClearDirectWeaponAim();
+            return;
+        }
+        if (!cache.resolved || cache.generation != generation ||
+            cache.renderTag != renderTag)
+        {
+            cache = {};
+            cache.generation = generation;
+            cache.renderTag = renderTag;
+            cache.resolved = true;
+            __try
+            {
+                constexpr int32_t kPrimaryTriggerSid = 0xD4;
+                constexpr size_t kMarkerGroupsBlockOffset = 0x3C;
+                constexpr size_t kMarkerGroupStride = 0x10;
+                constexpr size_t kMarkersBlockOffset = 0x04;
+                constexpr size_t kMarkerStride = 0x24;
+                const unsigned char* renderDef =
+                    Halo3LoadedTagDefinition(renderTag);
+                auto* tagBase = g_halo3TagDataBase
+                    ? static_cast<unsigned char*>(*g_halo3TagDataBase)
+                    : nullptr;
+                const int32_t groupCount = renderDef
+                    ? *reinterpret_cast<const int32_t*>(
+                          renderDef + kMarkerGroupsBlockOffset)
+                    : 0;
+                const uint32_t groupAddress = renderDef
+                    ? *reinterpret_cast<const uint32_t*>(
+                          renderDef + kMarkerGroupsBlockOffset + 4)
+                    : 0;
+                if (tagBase && groupCount > 0 && groupCount <= 64 &&
+                    groupAddress)
+                {
+                    const auto* groups = tagBase +
+                        static_cast<size_t>(groupAddress) * 4;
+                    for (int32_t groupIndex = 0;
+                         groupIndex < groupCount && !cache.present;
+                         ++groupIndex)
+                    {
+                        const auto* group = groups +
+                            static_cast<size_t>(groupIndex) *
+                                kMarkerGroupStride;
+                        if (*reinterpret_cast<const int32_t*>(group) !=
+                            kPrimaryTriggerSid)
+                            continue;
+                        const int32_t markerCount =
+                            *reinterpret_cast<const int32_t*>(
+                                group + kMarkersBlockOffset);
+                        const uint32_t markerAddress =
+                            *reinterpret_cast<const uint32_t*>(
+                                group + kMarkersBlockOffset + 4);
+                        if (markerCount <= 0 || markerCount > 32 ||
+                            !markerAddress)
+                            break;
+                        const auto* markers = tagBase +
+                            static_cast<size_t>(markerAddress) * 4;
+                        for (int32_t markerIndex = 0;
+                             markerIndex < markerCount; ++markerIndex)
+                        {
+                            const auto* marker = markers +
+                                static_cast<size_t>(markerIndex) *
+                                    kMarkerStride;
+                            const uint8_t markerNode = marker[2];
+                            if (markerNode >= nodeCount)
+                                continue;
+                            const auto* translation =
+                                reinterpret_cast<const float*>(marker + 0x04);
+                            const auto* quaternion =
+                                reinterpret_cast<const float*>(marker + 0x10);
+                            float translationLengthSquared = 0.0f;
+                            float quaternionLengthSquared = 0.0f;
+                            bool finite = true;
+                            for (int axis = 0; axis < 3; ++axis)
+                            {
+                                finite = finite &&
+                                    std::isfinite(translation[axis]);
+                                translationLengthSquared +=
+                                    translation[axis] * translation[axis];
+                            }
+                            for (int value = 0; value < 4; ++value)
+                            {
+                                finite = finite &&
+                                    std::isfinite(quaternion[value]);
+                                quaternionLengthSquared +=
+                                    quaternion[value] * quaternion[value];
+                            }
+                            if (!finite ||
+                                !std::isfinite(translationLengthSquared) ||
+                                translationLengthSquared > 25.0f ||
+                                !std::isfinite(quaternionLengthSquared) ||
+                                quaternionLengthSquared < 0.9025f ||
+                                quaternionLengthSquared > 1.1025f)
+                                continue;
+                            cache.nodeIndex = markerNode;
+                            memcpy(cache.translation, translation,
+                                   sizeof(cache.translation));
+                            memcpy(cache.quaternion, quaternion,
+                                   sizeof(cache.quaternion));
+                            cache.present = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                cache.present = false;
+            }
+        }
+        if (!cache.present || cache.nodeIndex >= nodeCount)
+        {
+            Halo3ClearDirectWeaponAim();
+            return;
+        }
+        const BoneMatrix& node = nodes[cache.nodeIndex];
+        float origin[3]{};
+        float direction[3]{};
+        if (!Halo3DirectWeaponAimFromVisibleMarker(
+                node.scale, node.rotation, node.translation,
+                cache.translation, cache.quaternion, origin, direction))
+        {
+            Halo3ClearDirectWeaponAim();
+            return;
+        }
+        Halo3PublishDirectWeaponAim(generation, origin, direction);
     }
 
     void Halo3ClearDirectWeaponAim()

@@ -247,6 +247,47 @@ It makes the next headset result distinguish a hook/gate failure, a coordinate
 space error, and an authored wrist-to-render-root offset without relying only
 on visual judgement.
 
+### 2026-08-13 authored visible trigger origin
+
+The user's next report clarified that firing still looked torso-relative. The
+previous candidate replaced Halo's stock origin with `ControllerWorldPoseEx`'s
+right-hand point. That point seats the visible wrist; it is not the rendered
+weapon's muzzle and is therefore still an approximation even though it is no
+longer the stock torso origin.
+
+Official H3EK provides an exact authored source. The first-person assault-rifle
+render model (SHA-256
+`922DED5A6FDC4A3A71B9866F5E619C7A37A9F68946CADD07020D741B6B6457DD`)
+exports one `primary_trigger` marker on node zero at local translation
+`0.233428, 1.0871e-08, 0.0512855`; its quaternion is effectively identity.
+The XML evidence produced by official `tool.exe` has SHA-256
+`5532F8A50363393837117519DBA2C377FBA57A01828428F7FCA1FDAF7D5D9EDE`.
+Halo 3's static string registry independently identifies `primary_trigger` as
+SID `0xD4`.
+
+The full-symbol H3EK `render_model_get_markers` at RVA `0x735930` proves the
+loaded layout rather than relying on XML field order. It reads the marker-group
+block at render-model `+0x3C`, walks groups at stride `0x10`, reads each group's
+marker block at `+0x04`, and walks marker records at stride `0x24`. Within a
+marker it reads region/permutation/node bytes at `+0/+1/+2`, translation at
+`+0x04`, quaternion at `+0x10`, and radius at `+0x20`. The official executable
+is the already pinned SHA-256
+`59A78F2C96034D7CEB5D710505B2B36813AA141FC81A083E3F952973DBCE4602`.
+
+The render-owned primary-slot callback now resolves that exact marker only when
+the immutable render tag or title generation changes. Every frame then
+transforms its local translation and +X direction through its exact final,
+post-contact visible node palette and publishes that world muzzle ray. The old
+wrist-point publication is removed, so a later controller-pose query cannot
+overwrite the final visible muzzle. Missing marker data, a stale generation,
+invalid node, non-finite transform, or malformed quaternion clears this
+optional publication and keeps Halo's stock shot. The callback performs no
+allocation, logging, signature scan, file I/O, COM call, or lock. Native target
+selection, the already proven aim-assist query, authored spread, projectile
+type, and ballistics remain downstream and unchanged. Pure coverage proves the
+scaled node/marker transform, marker quaternion direction, normalization, and
+invalid-scale rejection. Headset acceptance remains pending.
+
 ## Always-scoped VR auto-aim
 
 ### Pinned evidence

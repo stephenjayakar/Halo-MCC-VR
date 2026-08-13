@@ -1504,6 +1504,33 @@ int main()
                 "Halo 3 direct weapon aim publishes the normalized forward "
                 "column of the final visible right-hand pose");
 
+            const float markerNodeBasis[9] = {
+                0.0f, 1.0f, 0.0f,
+                -1.0f, 0.0f, 0.0f,
+                0.0f, 0.0f, 1.0f};
+            const float markerNodePosition[3] = {10.0f, 20.0f, 30.0f};
+            const float markerTranslation[3] = {0.25f, 0.0f, 0.05f};
+            const float identityMarkerRotation[4] = {
+                0.0f, 0.0f, 0.0f, -1.0f};
+            float markerOrigin[3]{};
+            float markerDirection[3]{};
+            Check(Halo3DirectWeaponAimFromVisibleMarker(
+                      2.0f, markerNodeBasis, markerNodePosition,
+                      markerTranslation, identityMarkerRotation,
+                      markerOrigin, markerDirection) &&
+                  std::fabs(markerOrigin[0] - 10.0f) < 1.0e-6f &&
+                  std::fabs(markerOrigin[1] - 20.5f) < 1.0e-6f &&
+                  std::fabs(markerOrigin[2] - 30.1f) < 1.0e-6f &&
+                  std::fabs(markerDirection[0]) < 1.0e-6f &&
+                  std::fabs(markerDirection[1] - 1.0f) < 1.0e-6f &&
+                  std::fabs(markerDirection[2]) < 1.0e-6f &&
+                  !Halo3DirectWeaponAimFromVisibleMarker(
+                      0.0f, markerNodeBasis, markerNodePosition,
+                      markerTranslation, identityMarkerRotation,
+                      markerOrigin, markerDirection),
+                "Halo 3 direct weapon aim transforms the authored trigger "
+                "marker through its exact final visible palette node");
+
             const float stockAimOrigin[3] = {0.0f, 0.0f, 0.0f};
             const float stockAimDirection[3] = {1.0f, 0.0f, 0.0f};
             const float visibleAimOrigin[3] = {0.0f, 0.33f, 0.0f};

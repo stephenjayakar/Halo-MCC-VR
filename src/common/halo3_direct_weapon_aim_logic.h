@@ -150,6 +150,78 @@ inline bool Halo3DirectWeaponAimFromVisibleBasis(
     return true;
 }
 
+// Convert an authored render-model marker into the same world space as the
+// final visible node palette. Halo stores each node as a uniformly scaled
+// forward/left/up basis plus translation; marker rotation is an x/y/z/w
+// quaternion. The marker's +X axis is the authored firing direction.
+inline bool Halo3DirectWeaponAimFromVisibleMarker(
+    float nodeScale, const float* nodeBasis, const float* nodePosition,
+    const float* markerTranslation, const float* markerQuaternion,
+    float (&outOrigin)[3], float (&outDirection)[3]) noexcept
+{
+    if (!nodeBasis || !nodePosition || !markerTranslation ||
+        !markerQuaternion || !std::isfinite(nodeScale) ||
+        nodeScale <= 0.001f || nodeScale > 100.0f)
+        return false;
+    for (int value = 0; value < 9; ++value)
+        if (!std::isfinite(nodeBasis[value]))
+            return false;
+    for (int axis = 0; axis < 3; ++axis)
+        if (!std::isfinite(nodePosition[axis]) ||
+            !std::isfinite(markerTranslation[axis]))
+            return false;
+    float quaternionLengthSquared = 0.0f;
+    for (int value = 0; value < 4; ++value)
+    {
+        if (!std::isfinite(markerQuaternion[value]))
+            return false;
+        quaternionLengthSquared +=
+            markerQuaternion[value] * markerQuaternion[value];
+    }
+    if (!std::isfinite(quaternionLengthSquared) ||
+        quaternionLengthSquared < 0.9025f ||
+        quaternionLengthSquared > 1.1025f)
+        return false;
+    const float inverseQuaternionLength =
+        1.0f / std::sqrt(quaternionLengthSquared);
+    const float x = markerQuaternion[0] * inverseQuaternionLength;
+    const float y = markerQuaternion[1] * inverseQuaternionLength;
+    const float z = markerQuaternion[2] * inverseQuaternionLength;
+    const float w = markerQuaternion[3] * inverseQuaternionLength;
+    const float markerForward[3] = {
+        1.0f - 2.0f * (y * y + z * z),
+        2.0f * (x * y + w * z),
+        2.0f * (x * z - w * y),
+    };
+    for (int row = 0; row < 3; ++row)
+    {
+        outOrigin[row] = nodePosition[row] + nodeScale * (
+            nodeBasis[row] * markerTranslation[0] +
+            nodeBasis[3 + row] * markerTranslation[1] +
+            nodeBasis[6 + row] * markerTranslation[2]);
+        outDirection[row] =
+            nodeBasis[row] * markerForward[0] +
+            nodeBasis[3 + row] * markerForward[1] +
+            nodeBasis[6 + row] * markerForward[2];
+    }
+    const float directionLengthSquared =
+        outDirection[0] * outDirection[0] +
+        outDirection[1] * outDirection[1] +
+        outDirection[2] * outDirection[2];
+    if (!std::isfinite(outOrigin[0]) || !std::isfinite(outOrigin[1]) ||
+        !std::isfinite(outOrigin[2]) ||
+        !std::isfinite(directionLengthSquared) ||
+        directionLengthSquared < 1.0e-6f)
+        return false;
+    const float inverseDirectionLength =
+        1.0f / std::sqrt(directionLengthSquared);
+    if (!std::isfinite(inverseDirectionLength))
+        return false;
+    for (int axis = 0; axis < 3; ++axis)
+        outDirection[axis] *= inverseDirectionLength;
+    return true;
+}
+
 // Halo's projectile-targeting helper is downstream of
 // unit_adjust_projectile_ray and may replace that helper's direction. Restore
 // the already validated visible-barrel ray at this last targeting boundary;
