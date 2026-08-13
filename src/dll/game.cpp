@@ -7048,9 +7048,10 @@ namespace
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactFinalRenderReserveMeters = 0.050f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // One child-aware step can clear its first child and meet another observed
-    // child. Keep it dormant before adding bounded forward-only child steps.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    // Clear encountered target children with fixed-direction, forward-only
+    // support-plane steps. Eight bounded steps replace an open-ended search.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    constexpr int kHalo3ExactRenderChildSeparationSteps = 8;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
@@ -8813,77 +8814,58 @@ namespace
                     result.targetIndex = pair.targetIndex;
                     return result;
                 };
-                const auto targetOverlaps = [&] (
-                    const PhysicalContactTransform& candidate,
-                    int observation) {
-                    return targetHit(candidate, observation).hit;
-                };
                 int overlapObservation = -1;
-                std::array<bool, kHalo3ExactRenderSeparationPasses>
-                    overlappingObservations{};
-                std::array<PhysicalContactTriangleMeshHit,
-                    kHalo3ExactRenderSeparationPasses> overlapHits{};
+                PhysicalContactTriangleMeshHit firstHit{};
                 for (int observation = 0;
                      observation < observationCount; ++observation)
                 {
-                    overlapHits[observation] =
+                    const PhysicalContactTriangleMeshHit hit =
                         targetHit(weaponTransform, observation);
-                    if (overlapHits[observation].hit)
+                    if (hit.hit)
                     {
-                        overlappingObservations[observation] = true;
-                        if (overlapObservation < 0)
-                            overlapObservation = observation;
+                        overlapObservation = observation;
+                        firstHit = hit;
+                        break;
                     }
                 }
                 if (overlapObservation >= 0)
                 {
-                    const auto overlapsAt = [&] (
-                        const PhysicalContactTransform& candidate) {
-                        for (int observation = 0;
-                             observation < observationCount; ++observation)
-                        {
-                            if (targetOverlaps(candidate, observation))
-                            {
-                                return true;
-                            }
-                        }
-                        return false;
-                    };
-                    const PhysicalContactTriangleMeshHit& firstHit =
-                        overlapHits[overlapObservation];
                     const PhysicalContactVec3 weaponHitCentre =
                         PhysicalContactTransformPoint(
                             weaponTransform,
                             weaponMesh.triangles[
                                 firstHit.weaponTriangle].centre);
-                    const PhysicalContactConvexShape& firstTargetChild =
-                        targetShape.children[firstHit.targetIndex];
-                    PhysicalContactVec3 firstChildMinimum{
-                        FLT_MAX, FLT_MAX, FLT_MAX};
-                    PhysicalContactVec3 firstChildMaximum{
-                        -FLT_MAX, -FLT_MAX, -FLT_MAX};
-                    for (uint16_t vertex = 0;
-                         vertex < firstTargetChild.vertexCount; ++vertex)
+                    PhysicalContactVec3 targetHitCentre{};
+                    if (exactTargetGeometry)
                     {
-                        const PhysicalContactVec3 point =
-                            firstTargetChild.vertices[vertex];
-                        firstChildMinimum.x = std::min(
-                            firstChildMinimum.x, point.x);
-                        firstChildMinimum.y = std::min(
-                            firstChildMinimum.y, point.y);
-                        firstChildMinimum.z = std::min(
-                            firstChildMinimum.z, point.z);
-                        firstChildMaximum.x = std::max(
-                            firstChildMaximum.x, point.x);
-                        firstChildMaximum.y = std::max(
-                            firstChildMaximum.y, point.y);
-                        firstChildMaximum.z = std::max(
-                            firstChildMaximum.z, point.z);
-                    }
-                    const PhysicalContactVec3 targetHitCentre =
-                        PhysicalContactTransformPoint(
+                        targetHitCentre = PhysicalContactTransformPoint(
                             targetTransforms[overlapObservation],
-                            (firstChildMinimum + firstChildMaximum) * 0.5f);
+                            targetMesh.triangles[firstHit.targetIndex].centre);
+                    }
+                    else
+                    {
+                        const PhysicalContactConvexShape& firstTargetChild =
+                            targetShape.children[firstHit.targetIndex];
+                        PhysicalContactVec3 minimum{
+                            FLT_MAX, FLT_MAX, FLT_MAX};
+                        PhysicalContactVec3 maximum{
+                            -FLT_MAX, -FLT_MAX, -FLT_MAX};
+                        for (uint16_t vertex = 0;
+                             vertex < firstTargetChild.vertexCount; ++vertex)
+                        {
+                            const PhysicalContactVec3 point =
+                                firstTargetChild.vertices[vertex];
+                            minimum.x = std::min(minimum.x, point.x);
+                            minimum.y = std::min(minimum.y, point.y);
+                            minimum.z = std::min(minimum.z, point.z);
+                            maximum.x = std::max(maximum.x, point.x);
+                            maximum.y = std::max(maximum.y, point.y);
+                            maximum.z = std::max(maximum.z, point.z);
+                        }
+                        targetHitCentre = PhysicalContactTransformPoint(
+                            targetTransforms[overlapObservation],
+                            (minimum + maximum) * 0.5f);
+                    }
                     PhysicalContactVec3 outward =
                         weaponHitCentre - targetHitCentre;
                     if (PhysicalContactLengthSquared(outward) <= 1.0e-10f)
@@ -8893,36 +8875,66 @@ namespace
                     }
                     const PhysicalContactVec3 outwardUnit =
                         PhysicalContactNormalize(outward, {});
-                    const PhysicalContactVec3 weaponMinimum =
-                        PhysicalContactTriangleMeshSupport(
-                            weaponMesh, weaponTransform,
-                            outwardUnit * -1.0f, 0.0f);
+                    PhysicalContactTransform candidate = weaponTransform;
                     float directDistance = 0.0f;
-                    for (int observation = 0;
-                         observation < observationCount; ++observation)
+                    bool clear = false;
+                    for (int step = 0;
+                         step < kHalo3ExactRenderChildSeparationSteps; ++step)
                     {
-                        if (!overlappingObservations[observation])
-                            continue;
-                        const PhysicalContactTriangleMeshHit& hit =
-                            overlapHits[observation];
-                        if (hit.targetIndex >= targetShape.childCount)
-                            continue;
-                        const PhysicalContactVec3 targetMaximum =
-                            PhysicalContactConvexSupport(
+                        int hitObservation = -1;
+                        PhysicalContactTriangleMeshHit hit{};
+                        for (int observation = 0;
+                             observation < observationCount; ++observation)
+                        {
+                            hit = targetHit(candidate, observation);
+                            if (hit.hit)
+                            {
+                                hitObservation = observation;
+                                break;
+                            }
+                        }
+                        if (hitObservation < 0)
+                        {
+                            clear = true;
+                            break;
+                        }
+                        const PhysicalContactVec3 weaponMinimum =
+                            PhysicalContactTriangleMeshSupport(
+                                weaponMesh, candidate,
+                                outwardUnit * -1.0f, 0.0f);
+                        PhysicalContactVec3 targetMaximum{};
+                        if (exactTargetGeometry)
+                        {
+                            if (hit.targetIndex >= targetMesh.triangleCount)
+                                break;
+                            targetMaximum = PhysicalContactTriangleSupport(
+                                targetMesh.triangles[hit.targetIndex],
+                                targetTransforms[hitObservation],
+                                outwardUnit, 0.0f);
+                        }
+                        else
+                        {
+                            if (hit.targetIndex >= targetShape.childCount)
+                                break;
+                            targetMaximum = PhysicalContactConvexSupport(
                                 targetShape.children[hit.targetIndex],
-                                targetTransforms[observation], outwardUnit);
-                        directDistance = std::max(
-                            directDistance,
+                                targetTransforms[hitObservation], outwardUnit);
+                        }
+                        const float remaining =
+                            4.0f * worldScale - directDistance;
+                        const float stepDistance =
                             PhysicalContactSupportPlaneSeparationDistance(
                                 weaponMinimum, targetMaximum, outwardUnit,
                                 renderGuardRadius + 0.001f * worldScale,
-                                4.0f * worldScale));
+                                remaining);
+                        if (stepDistance <= 1.0e-5f)
+                            break;
+                        candidate.position = candidate.position +
+                            outwardUnit * stepDistance;
+                        directDistance += stepDistance;
                     }
                     PhysicalContactWallConstraint correction{};
-                    PhysicalContactTransform candidate = weaponTransform;
-                    candidate.position = candidate.position +
-                        outwardUnit * directDistance;
-                    if (directDistance > 1.0e-5f && !overlapsAt(candidate))
+                    if (clear && directDistance > 1.0e-5f)
                     {
                         correction.offset =
                             candidate.position - weaponTransform.position;

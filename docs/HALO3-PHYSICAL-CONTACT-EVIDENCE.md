@@ -2629,3 +2629,11 @@ the independent checker then recorded one confirmed penetration. Preserved
 log: `out/debug-openxr/20260813-024350832Z-rotating-body-gap.log`, SHA-256
 `DECFD5B8F6CBA4F50194B5C1AC1479F151F212BDF3EBD22B2A8538B65417601E`.
 The one-step child behavior is rejected and disabled.
+
+The replacement fixes the outward axis from the first real primitive pair and
+moves only forward on that axis. Up to eight fixed steps inspect the three
+observed target poses, separate the whole held-weapon mesh from the exact child
+encountered, and repeat if that forward motion exposes another child. Because
+every step advances on one axis, a child already cleared cannot be re-entered.
+The loop is fixed and allocation-free; a correction is published only after a
+complete pass over all observed poses finds no remaining overlap.
