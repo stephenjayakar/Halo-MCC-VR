@@ -7048,9 +7048,10 @@ namespace
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactFinalRenderReserveMeters = 0.050f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // Use one conservative sphere-ray bound and one real-geometry proof. This
-    // retains the 5 cm motion reserve without a repeated triangle search.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    // The direct sphere bound can hit the one-metre cap on an extreme rotating
+    // sample and refuse correction. Keep it dormant before replacing the
+    // coarse radius with an exact support-plane distance.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};

@@ -2584,3 +2584,13 @@ Every run used the SteamVR null driver only for automation and restored the
 original settings hash
 `F8B2C009AE05A2AC796D3458B9AA8B072A5BEA97CA8EC5A74FAA5DD585DBAB9E`.
 These passes are strong runtime evidence, but are not headset acceptance.
+
+The documentation-only descendant `2007344` was rebuilt and rerun to verify
+its exact installed identity. That longer run caught one confirmed same-frame
+penetration after four `bodyRenderSeparationFailures`. The coarse sphere exit
+reached its one-metre safety cap and could not prove a clear result for those
+frames. Preserved log:
+`out/debug-openxr/20260813-022740574Z-rotating-body-gap.log`, SHA-256
+`0D3C682078B084893341F0CA3BEB65570DC7014DED599949F5A7B3C8C00C3503`.
+This overrules the earlier pass: the direct-sphere behavior is rejected and
+disabled before the next candidate.
