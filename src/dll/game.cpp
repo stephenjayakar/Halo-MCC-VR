@@ -7046,10 +7046,12 @@ namespace
     // earlier so its last approved palette has room for one worker/render
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
+    constexpr float kHalo3ContactFinalRenderReserveMeters = 0.050f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // The consistent 8 mm convex-target guard still failed a target-bank jump.
-    // Keep it dormant before testing a larger bounded motion reserve.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
+    // Target interpolation banks can jump after a collision impulse. Keep the
+    // held weapon's exact triangles outside the authored convex target plus a
+    // bounded 5 cm motion reserve.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
@@ -8789,7 +8791,7 @@ namespace
             if (observationCount > 0)
             {
                 const float renderGuardRadius =
-                    kHalo3ContactVisualGuardRadiusMeters * worldScale;
+                    kHalo3ContactFinalRenderReserveMeters * worldScale;
                 const auto targetOverlaps = [&] (
                     const PhysicalContactTransform& candidate,
                     int observation) {

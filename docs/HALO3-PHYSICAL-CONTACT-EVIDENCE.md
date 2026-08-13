@@ -2514,3 +2514,9 @@ confirmed penetration after 3,334 same-frame comparisons. The preserved log is
 `out/debug-openxr/20260813-012921442Z-rotating-body-gap.log`, SHA-256
 `0C591F64B90F3F99B8BEDC6EC4A4CB4AE73B7D75F225BDA6AD07D921AF236239`.
 The 8 mm consistent-target guard is disabled and remains dormant.
+
+The replacement keeps the same exact-weapon/convex-target model and raises its
+bounded motion reserve to 5 cm. This intentionally prefers a small visible gap
+over any weapon penetration when Halo changes target interpolation banks after
+an impulse. The final headset test must judge whether this safety distance is
+acceptable for precise interaction.
