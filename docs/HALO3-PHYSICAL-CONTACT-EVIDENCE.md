@@ -2491,3 +2491,12 @@ multi-direction verified-clear search. The rotating validator now requires at
 least 2,500 fallback samples, at least 8,000 timed final samples, and no more than 5% of
 those samples above 0.25 ms, in addition to its existing 8,000 independent
 same-frame exact-triangle comparisons and zero-penetration requirement.
+
+Candidate `652e6b6` exercised the complex-target convex fallback for 7,138 of
+8,269 timed final samples and stayed inside budget (118 samples over 0.25 ms,
+1.43%), but the validator found one confirmed penetration after 3,865
+same-frame comparisons when the rig changed back to a 12-triangle exact target.
+The preserved failure log is
+`out/debug-openxr/20260813-012325269Z-rotating-body-gap.log`, SHA-256
+`E8B12B3D4A27EFB159CB72115D1F848BFBF50C158350D808B9E5E6A5CFC21C31`.
+The mixed exact/convex target behavior is disabled and remains dormant.

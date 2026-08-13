@@ -7047,10 +7047,9 @@ namespace
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // The held weapon remains triangle-accurate. Complex target meshes use
-    // their authored conservative convex compound once exact target decoding
-    // has exceeded the measured render budget.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    // Mixed exact/convex target modes failed during target changes. Keep this
+    // candidate dormant before enabling one consistent target fallback.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr uint32_t kHalo3ExactRenderTargetTriangleBudget = 48;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
