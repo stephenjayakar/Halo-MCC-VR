@@ -2950,3 +2950,23 @@ native impulse continues to move the prop. A moved target, changed rotation,
 stale pose, excessive offset, or still-overlapping previous position is not
 trusted. Pure tests cover the proven-clear hold and still-blocked reject.
 Headset lift, sustained push, and no-clipping acceptance remain pending.
+
+### 2026-08-13 final-guard target ordering
+
+The final palette guard independently rechecks the contacted moving object at
+render time, but inspection found its target identity was published too late.
+The worker first solved and approved exact visual separation, then performed
+tracked-velocity, object-centre, native-mass, impulse, and melee work. Only
+after those fallible steps did it publish `g_halo3ContactTargetHandle`. An early
+return could therefore leave the final guard checking the preceding object
+while the newly contacted object received the approved palette.
+
+The visual target handle, kind, and exact animated-body index now publish
+immediately after the exact hit's live datum and root-object identity are
+validated. Physics and damage remain later and independent. A velocity, mass,
+or melee failure can withhold its own action, but it can no longer weaken the
+render-time collision guard. On a no-hit gap the existing prior target remains
+published deliberately, preserving the short-gap guard until exact separation
+or reset. This is an ordering correction only; collision geometry, impulses,
+melee admission, and target selection are unchanged. Headset sustained-push
+and no-clipping acceptance remain pending.

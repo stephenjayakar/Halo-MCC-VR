@@ -16454,6 +16454,18 @@ namespace
                     closestHandle, nowMs, &firstContact);
             const uint8_t targetKind =
                 *(closestEntry + kHalo3ObjectEntryKindOffset);
+            // The final render guard is part of collision, not physics. Publish
+            // the exact visual target as soon as its live object identity and
+            // authored hit are proven. Velocity, mass, impulse, or melee may
+            // fail later without leaving the guard on a preceding object.
+            g_halo3ContactTargetHandle.store(
+                closestHandle, std::memory_order_relaxed);
+            g_halo3ContactTargetKind.store(
+                targetKind, std::memory_order_relaxed);
+            g_halo3ContactTargetBodyIndex.store(
+                closestTargetShapeSource == 3 && !closestEnemyMeleeAssist
+                    ? closestTargetBodyIndex : -1,
+                std::memory_order_relaxed);
             const bool enemyMeleeWithoutReliableNormal =
                 closestUsesAuthoredShape && !closestNormalReliable &&
                 !contact->contactNormalValid &&
@@ -16954,14 +16966,6 @@ namespace
                 std::memory_order_relaxed);
             g_halo3ContactTangentImpulse.store(
                 constraintImpulse.tangentImpulseKilogramMetersPerSecond,
-                std::memory_order_relaxed);
-            g_halo3ContactTargetHandle.store(
-                closestHandle, std::memory_order_relaxed);
-            g_halo3ContactTargetKind.store(
-                targetKind, std::memory_order_relaxed);
-            g_halo3ContactTargetBodyIndex.store(
-                haveNativeMasses && !closestEnemyMeleeAssist
-                    ? targetBodyIndex : -1,
                 std::memory_order_relaxed);
             if (constraintImpulse.apply)
             {
