@@ -9895,19 +9895,19 @@ int main()
               !PhysicalContactTargetMeleeSpeedEligible(false, 1, true) &&
               PhysicalContactTargetMeleeSpeedEligible(true, 1, true) &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 0) -
-                            0.25f) < 1.0e-6f &&
+                            0.05f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 12) -
-                            0.25f) < 1.0e-6f &&
+                            0.05f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(3.00f, 13) -
-                            0.50f) < 1.0e-6f &&
+                            0.05f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 1) -
                             1.50f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 2) -
                             1.50f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(0.50f, 0) -
-                            0.25f) < 1.0e-6f &&
+                            0.05f) < 1.0e-6f &&
               PhysicalContactClassify(
-                  0.25f, 0.25f,
+                  0.05f, 0.05f,
                   PhysicalContactTargetMeleeThreshold(1.50f, 0)) ==
                   PhysicalContactAction::ImpulseAndMelee &&
               PhysicalContactClassify(
@@ -9946,8 +9946,8 @@ int main()
             "melee, armed enemy contact accepts later deliberate tracked "
             "weapon-point speed and a motion-facing effects normal, "
             "target rebound and vehicle/prop tangential or sustained shoving "
-            "stay physics-only, enemies use the bounded half-threshold "
-            "enemy-only low-speed allowance, rigid targets begin exactly at the configured threshold, and implausible "
+            "stay physics-only, enemies begin at the tracking-noise boundary, "
+            "rigid targets begin exactly at the configured threshold, and implausible "
             "headset spikes remain impulse-only");
 
         PhysicalContactDebounce debounce;

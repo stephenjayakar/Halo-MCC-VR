@@ -2916,6 +2916,20 @@ continuous contact rule, 250 ms global cooldown, and 8 m/s spike rejection are
 unchanged. Pure coverage proves the new floor for all three enemy kinds and the
 unchanged vehicle threshold. Headset acceptance remains pending.
 
+### 2026-08-13 moving-contact enemy melee boundary
+
+The `0.25 m/s` enemy-only floor above remained visibly too hard in Campaign.
+The requested interaction is now literal: once tracked weapon motion clears
+the established `0.05 m/s` noise rejection and reaches the enemy-only 18 cm
+sampled-contact skin, it may request the exact target's native melee response.
+This changes only bipeds, creatures, and giants. Vehicles, props, loose
+weapons, and other rigid objects still require the configured value (default
+`1.50 m/s`) before native melee, so sustained Mongoose pushing remains
+physics-only. Exact target identity, the armed one-event-per-continuous-contact
+latch, separation rearm, 250 ms global cooldown, and 8 m/s spike rejection are
+unchanged. Pure coverage proves all three enemy kinds at `0.05 m/s` and the
+unchanged vehicle/prop thresholds. Headset acceptance remains pending.
+
 ### 2026-08-13 fixed-object exact wall sweep
 
 The next campaign report still identified a rock that the weapon could cross.
