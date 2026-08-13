@@ -2507,3 +2507,10 @@ authored convex collision compound. The independent same-frame validator still
 judges both objects using exact triangles, so a pass proves that the
 conservative fallback prevented real visible penetration. The runtime no
 longer changes constraint models when the target changes complexity.
+
+Candidate `54bd633` used the convex target consistently and stayed within the
+render budget (42 of 7,123 samples over 0.25 ms, 0.59%), but still recorded one
+confirmed penetration after 3,334 same-frame comparisons. The preserved log is
+`out/debug-openxr/20260813-012921442Z-rotating-body-gap.log`, SHA-256
+`0C591F64B90F3F99B8BEDC6EC4A4CB4AE73B7D75F225BDA6AD07D921AF236239`.
+The 8 mm consistent-target guard is disabled and remains dormant.

@@ -7047,10 +7047,9 @@ namespace
     // handoff and for a loose target to rotate after an impulse.
     constexpr float kHalo3ContactVisualGuardRadiusMeters = 0.008f;
     constexpr float kHalo3ContactVisualGuardClearanceMeters = 0.004f;
-    // The visible held weapon remains authored-triangle accurate. Use the
-    // target's conservative authored convex compound consistently so changing
-    // target complexity cannot switch the final constraint model.
-    constexpr bool kEnableHalo3ExactRenderSeparationGuard = true;
+    // The consistent 8 mm convex-target guard still failed a target-bank jump.
+    // Keep it dormant before testing a larger bounded motion reserve.
+    constexpr bool kEnableHalo3ExactRenderSeparationGuard = false;
     constexpr int kHalo3ExactRenderSeparationPasses = 3;
     std::atomic<float> g_halo3ContactWeaponMass{0.0f};
     std::atomic<float> g_halo3ContactTargetMass{0.0f};
