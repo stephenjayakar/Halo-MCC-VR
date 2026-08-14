@@ -9108,15 +9108,21 @@ int main()
               !PhysicalContactApprovedPaletteCompatible(
                   kActiveWeaponRenderTag, kActiveWeaponRenderTag,
                   0x12340001, 0x12340001, 5, 5, 30, 31, 1000, 5000) &&
-              PhysicalContactPaletteDispositionForRender(false, false) ==
+              PhysicalContactPaletteDispositionForRender(
+                  false, false, false) ==
                   PhysicalContactPaletteDisposition::Proposal &&
-              PhysicalContactPaletteDispositionForRender(true, true) ==
+              PhysicalContactPaletteDispositionForRender(
+                  true, true, false) ==
                   PhysicalContactPaletteDisposition::Approved &&
-              PhysicalContactPaletteDispositionForRender(true, false) ==
-                  PhysicalContactPaletteDisposition::Hidden,
+              PhysicalContactPaletteDispositionForRender(
+                  true, false, true) ==
+                  PhysicalContactPaletteDisposition::Previous &&
+              PhysicalContactPaletteDispositionForRender(
+                  true, false, false) ==
+                  PhysicalContactPaletteDisposition::Proposal,
             "The on-foot collision renderer holds an old compatible safe "
-            "pose and hides an unapproved or unprovable weapon instead of "
-            "drawing through geometry");
+            "pose when available and otherwise fails open without erasing "
+            "the visible weapon");
 
         const PhysicalContactHit translation = PhysicalContactSweepCapsule(
             {0, 0, 0}, {0.5f, 0, 0}, {2, 0, 0}, {2.5f, 0, 0},

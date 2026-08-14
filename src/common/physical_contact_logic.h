@@ -535,18 +535,20 @@ enum class PhysicalContactPaletteDisposition : uint8_t
 {
     Proposal,
     Approved,
-    Hidden,
+    Previous,
 };
 
 inline constexpr PhysicalContactPaletteDisposition
 PhysicalContactPaletteDispositionForRender(
-    bool guardActive, bool compatibleApproval)
+    bool guardActive, bool compatibleApproval, bool compatiblePrevious)
 {
     if (!guardActive)
         return PhysicalContactPaletteDisposition::Proposal;
-    return compatibleApproval
-        ? PhysicalContactPaletteDisposition::Approved
-        : PhysicalContactPaletteDisposition::Hidden;
+    if (compatibleApproval)
+        return PhysicalContactPaletteDisposition::Approved;
+    return compatiblePrevious
+        ? PhysicalContactPaletteDisposition::Previous
+        : PhysicalContactPaletteDisposition::Proposal;
 }
 
 inline int32_t PhysicalContactCollisionPermutationIndex(

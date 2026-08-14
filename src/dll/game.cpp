@@ -954,6 +954,11 @@ namespace
         std::atomic<float> nodes[kMaximumNodes][13]{};
     };
     Halo3VisibleWeaponPosePublication g_halo3VisibleWeaponPose;
+    // Last palette actually sent to the renderer. The collision guard uses
+    // this same-weapon snapshot when a worker approval is temporarily absent
+    // or a final target read cannot be proved. Never publish a hidden palette
+    // here: hands-only rendering is much worse than holding a safe pose.
+    Halo3VisibleWeaponPosePublication g_halo3LastDrawnWeaponPose;
     // The render hook publishes the newest raw palette here before drawing.
     // The camera/gameplay worker collision-checks it and publishes a corrected
     // copy to the approval slot. Rendering can then hold the last proven-safe
@@ -4660,6 +4665,7 @@ namespace
                 // A weapon change must never consume the preceding weapon's
                 // still-fresh final palette while the new one is publishing.
                 Halo3ClearWeaponPose(g_halo3VisibleWeaponPose);
+                Halo3ClearWeaponPose(g_halo3LastDrawnWeaponPose);
                 Halo3ClearWeaponPose(g_halo3ProposedWeaponPose);
                 // The gameplay worker is the sole writer for the approval
                 // slot. Clearing the active handle invalidates it here; the
@@ -5835,14 +5841,44 @@ namespace
                         static_cast<uint32_t>(renderNodeCount),
                         approvedNodeCount, proposalSerial, approvedSerial,
                         approvedMs, nowMs);
+                std::array<BoneMatrix,
+                           Halo3VisibleWeaponPosePublication::kMaximumNodes>
+                    previousNodes{};
+                float previousBasis[9]{}, previousPosition[3]{};
+                float previousScale = 1.0f;
+                uint64_t previousMs = 0;
+                uint64_t previousSerial = 0;
+                uint32_t previousNodeCount = 0;
+                uint16_t previousTag = 0xFFFFu;
+                int32_t previousWeaponHandle = -1;
+                bool previousCorrected = false;
+                const bool havePrevious = Halo3ReadWeaponPose(
+                    g_halo3LastDrawnWeaponPose, previousBasis,
+                    previousPosition, previousScale, previousMs,
+                    previousNodes.data(), &previousNodeCount, &previousTag,
+                    &previousWeaponHandle, &previousSerial,
+                    &previousCorrected);
+                const bool compatiblePrevious =
+                    guardActive && havePrevious &&
+                    PhysicalContactApprovedPaletteCompatible(
+                        tag, previousTag, activeWeaponHandle,
+                        previousWeaponHandle,
+                        static_cast<uint32_t>(renderNodeCount),
+                        previousNodeCount, proposalSerial, previousSerial,
+                        previousMs, nowMs);
                 const PhysicalContactPaletteDisposition paletteDisposition =
                     PhysicalContactPaletteDispositionForRender(
-                        guardActive, compatibleApproval);
+                        guardActive, compatibleApproval,
+                        compatiblePrevious);
                 const bool useApproval = paletteDisposition ==
                     PhysicalContactPaletteDisposition::Approved;
-                const auto hideVisibleWeapon = [&]() {
-                    for (int node = 0; node < renderNodeCount; ++node)
-                        destination[node].scale = 0.0001f;
+                const auto restorePreviousWeapon = [&]() {
+                    if (!compatiblePrevious)
+                        return false;
+                    memcpy(destination, previousNodes.data(),
+                           static_cast<size_t>(renderNodeCount) *
+                               sizeof(BoneMatrix));
+                    return true;
                 };
                 uint64_t displayedSerial = proposalSerial;
                 bool displayedCorrected = false;
@@ -5919,12 +5955,13 @@ namespace
                         1, std::memory_order_relaxed);
                 }
                 else if (paletteDisposition ==
-                         PhysicalContactPaletteDisposition::Hidden)
+                         PhysicalContactPaletteDisposition::Previous)
                 {
-                    // The raw proposal is already published for the worker.
-                    // Do not draw it until collision has approved a pose for
-                    // this exact weapon identity.
-                    hideVisibleWeapon();
+                    restorePreviousWeapon();
+                    displayedSerial = previousSerial;
+                    displayedCorrected = previousCorrected;
+                    g_halo3ContactHeldPalettes.fetch_add(
+                        1, std::memory_order_relaxed);
                 }
                 // This is the last production mutation before publication and
                 // drawing. Check every final palette, including a transient
@@ -5988,16 +6025,28 @@ namespace
                 }
                 if (!finalGuardProved)
                 {
-                    // A previous approval can become unsafe when the target
-                    // moves. If the same-frame exact check cannot prove the
-                    // final palette clear, do not draw intersecting geometry.
-                    hideVisibleWeapon();
+                    // A target can disappear between the gameplay and render
+                    // reads. Keep the last palette actually drawn for this
+                    // exact weapon rather than scaling the model away. The raw
+                    // proposal remains published so the worker can recover.
+                    if (restorePreviousWeapon())
+                    {
+                        displayedSerial = previousSerial;
+                        displayedCorrected = previousCorrected;
+                        g_halo3ContactHeldPalettes.fetch_add(
+                            1, std::memory_order_relaxed);
+                    }
                 }
                 if (displayedCorrected)
                     g_halo3ContactDebugVisibleCorrectedPalettes.fetch_add(
                         1, std::memory_order_relaxed);
                 Halo3PublishWeaponPose(
                     g_halo3VisibleWeaponPose, destination,
+                    static_cast<uint32_t>(renderNodeCount), tag,
+                    activeWeaponHandle, displayedSerial, nowMs,
+                    displayedCorrected);
+                Halo3PublishWeaponPose(
+                    g_halo3LastDrawnWeaponPose, destination,
                     static_cast<uint32_t>(renderNodeCount), tag,
                     activeWeaponHandle, displayedSerial, nowMs,
                     displayedCorrected);
@@ -12677,6 +12726,7 @@ namespace
         g_halo3ContactActiveWeaponHandle.store(
             -1, std::memory_order_release);
         Halo3ClearWeaponPose(g_halo3ApprovedWeaponPose);
+        Halo3ClearWeaponPose(g_halo3LastDrawnWeaponPose);
         g_halo3ContactPreviousPoseValid = false;
         g_halo3ContactPreviousPoseMs = 0;
         g_halo3ContactWallOffset = {};
