@@ -3315,3 +3315,25 @@ this does not broaden the unverified renderer boundary. Pure coverage admits a
 36-instance creator-qualified part-zero stream and rejects an equally uniform
 large heuristic stream. The reported Campaign rock remains pending headset
 acceptance.
+
+### 2026-08-13 visible-pose proof telemetry
+
+The real-headset report that sometimes only Master Chief's hands remained
+visible was traced to the fail-closed render branch scaling every weapon node
+to `0.0001` when worker approval or the final moving-target read stalled. Source
+`cc81078` removed that hands-only state: the renderer now keeps the last palette
+actually drawn for the same weapon, or fails open to the current proposal when
+no compatible palette has ever existed.
+
+The next isolated diagnostic makes that policy measurable in an ordinary
+headset log. Three lock-free counters distinguish palettes rendered from a
+worker approval, palettes held from the same-weapon cache, and raw unproved
+fallbacks. The existing two-second worker status line reports them as
+`renderApproved`, `renderCached`, and `renderUnproved`; the session analyzer
+also reports `renderUnprovedTarget` separately, so normal first-frame startup
+does not look like a failed moving-target guard. The analyzer reports whether a
+proved/cached path was observed and whether any target-bound unproved fallback
+occurred. The final-palette callback still performs no logging,
+allocation, file I/O, locking, or scanning, and this diagnostic does not change
+collision, rendering, impulse, melee, aiming, or pickup behavior. Visual
+acceptance remains a real-headset result.

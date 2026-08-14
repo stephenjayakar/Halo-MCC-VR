@@ -969,6 +969,15 @@ namespace
     std::atomic<int32_t> g_halo3ContactActiveWeaponHandle{-1};
     std::atomic<uint64_t> g_halo3ContactApprovedPalettes{0};
     std::atomic<uint64_t> g_halo3ContactHeldPalettes{0};
+    // Normal-play visibility telemetry. These counters are written only by
+    // the final palette callback and read by the existing two-second worker
+    // status line. They distinguish a collision-approved draw from the
+    // same-weapon cached pose that replaced hands-only rendering, and make a
+    // raw unproved fallback visible in the next headset log.
+    std::atomic<uint64_t> g_halo3ContactRenderApprovedPalettes{0};
+    std::atomic<uint64_t> g_halo3ContactRenderCachedPalettes{0};
+    std::atomic<uint64_t> g_halo3ContactRenderUnprovedPalettes{0};
+    std::atomic<uint64_t> g_halo3ContactRenderUnprovedTargetPalettes{0};
     extern std::atomic<bool> g_halo3PhysicalContactBindings;
     // Debug-only replay publication. Unlike the older contact rig, this moves
     // the palette Halo actually submits for the visible held weapon. The
@@ -5882,6 +5891,12 @@ namespace
                 };
                 uint64_t displayedSerial = proposalSerial;
                 bool displayedCorrected = false;
+                // 0 = outside the contact guard, 1 = worker-approved,
+                // 2 = last same-weapon palette, 3 = raw unproved proposal.
+                uint32_t renderProof = 0;
+                if (guardActive)
+                    renderProof = useApproval ? 1u :
+                        (compatiblePrevious ? 2u : 3u);
                 if (useApproval)
                 {
                     memcpy(destination, approvedNodes.data(),
@@ -5985,6 +6000,7 @@ namespace
                     (finalTargetShapeSource != 3 ||
                      finalVisualTargetBodyIndex >= 0);
                 bool finalGuardProved = !finalGuardRequired;
+                bool unprovedFinalTarget = false;
                 if (finalGuardRequired &&
                     Halo3ContactReadInterpolatedNodes(
                         finalTargetHandle, &finalTargetNodes,
@@ -6033,10 +6049,28 @@ namespace
                     {
                         displayedSerial = previousSerial;
                         displayedCorrected = previousCorrected;
+                        renderProof = 2;
                         g_halo3ContactHeldPalettes.fetch_add(
                             1, std::memory_order_relaxed);
                     }
+                    else if (guardActive)
+                    {
+                        renderProof = 3;
+                        unprovedFinalTarget = finalGuardRequired;
+                    }
                 }
+                if (renderProof == 1)
+                    g_halo3ContactRenderApprovedPalettes.fetch_add(
+                        1, std::memory_order_relaxed);
+                else if (renderProof == 2)
+                    g_halo3ContactRenderCachedPalettes.fetch_add(
+                        1, std::memory_order_relaxed);
+                else if (renderProof == 3)
+                    g_halo3ContactRenderUnprovedPalettes.fetch_add(
+                        1, std::memory_order_relaxed);
+                if (unprovedFinalTarget)
+                    g_halo3ContactRenderUnprovedTargetPalettes.fetch_add(
+                        1, std::memory_order_relaxed);
                 if (displayedCorrected)
                     g_halo3ContactDebugVisibleCorrectedPalettes.fetch_add(
                         1, std::memory_order_relaxed);
@@ -18209,6 +18243,8 @@ namespace
             "bodyRenderPeakUs=%.1f bodyRenderConvexFallbacks=%llu "
             "bodyRenderExactTargets=%llu "
             "bodyRenderExactClears=%llu "
+            "renderApproved=%llu renderCached=%llu renderUnproved=%llu "
+            "renderUnprovedTarget=%llu "
             "bodyUncertainHolds=%llu bodyPeak=%.3fm "
             "wallRays=%llu "
             "wallMotionRays=%llu wallObjectPlanes=%llu "
@@ -18373,6 +18409,15 @@ namespace
                 std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactRenderExactClears.load(
                 std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactRenderApprovedPalettes.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactRenderCachedPalettes.load(
+                std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactRenderUnprovedPalettes.load(
+                std::memory_order_relaxed),
+            (unsigned long long)
+                g_halo3ContactRenderUnprovedTargetPalettes.load(
+                    std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactBodyUncertainHolds.load(
                 std::memory_order_relaxed),
             g_halo3ContactBodyPeakSetbackMeters.load(
@@ -23542,6 +23587,14 @@ namespace
         g_halo3ContactApprovedPalettes.store(
             0, std::memory_order_release);
         g_halo3ContactHeldPalettes.store(
+            0, std::memory_order_release);
+        g_halo3ContactRenderApprovedPalettes.store(
+            0, std::memory_order_release);
+        g_halo3ContactRenderCachedPalettes.store(
+            0, std::memory_order_release);
+        g_halo3ContactRenderUnprovedPalettes.store(
+            0, std::memory_order_release);
+        g_halo3ContactRenderUnprovedTargetPalettes.store(
             0, std::memory_order_release);
         g_halo3ContactDebugVisibleMeasurementStarted.store(
             false, std::memory_order_release);

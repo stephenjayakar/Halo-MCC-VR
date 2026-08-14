@@ -161,6 +161,8 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
                 'bodyRenderSeparationFailures', 'bodyRenderSamples',
                 'bodyRenderOver250us', 'bodyRenderConvexFallbacks',
                 'bodyRenderExactTargets', 'bodyRenderExactClears', 'wallRays',
+                'renderApproved', 'renderCached', 'renderUnproved',
+                'renderUnprovedTarget',
                 'wallMotionRays', 'wallObjectPlanes', 'wallVertices',
                 'wallPlanes', 'decoratorSolidDraws', 'decoratorInstances',
                 'decoratorPlanes', 'decoratorSelfTest', 'contactHaptic',
@@ -272,6 +274,13 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
         render_guard_no_recorded_failure =
             (Test-Positive $maximum 'bodyRenderSamples') -and
             (-not (Test-Positive $maximum 'bodyRenderSeparationFailures'))
+        visible_pose_proof_observed =
+            (Test-Positive $maximum 'renderApproved') -or
+            (Test-Positive $maximum 'renderCached')
+        visible_pose_no_unproved_fallback =
+            ((Test-Positive $maximum 'renderApproved') -or
+             (Test-Positive $maximum 'renderCached')) -and
+            (-not (Test-Positive $maximum 'renderUnprovedTarget'))
         left_hand_pickup =
             (Test-Positive $maximum 'left_acquisitions') -and
             (Test-Positive $maximum 'left_applied') -and
@@ -356,7 +365,7 @@ if ($SelfTest) {
 [10:00:00.005] H3 physical contact: optional native bindings installed
 [10:00:00.006] H3 direct weapon aim: installed ray=+0x3524B0 targeting=+0x13BAD0/+0x5B15A4 [unique]
 [10:00:00.007] H3 direct weapon aim: first local on-foot shot used fresh visible origin+direction after native targeting, before authored spread (stock origin shift=0.423m direction change=37.5deg visible-root gap=0.233m native targeting rewrite=4.5deg branch=2 result=1 telemetry=1)
-[10:00:01.000] H3 physical contact status: sweeps=2 hits=1 impulses=1 releases=0 melees=1 commandStatus=2 meleeStatus=2 target=0x12340001 candidate=0x12340001 kind=0 weaponMass=2.764 targetMass=0.382 contactHaptic=0.250 authoredShapeHits=1 animatedBodyHits=1 enemyAssistHits=1 enemyCandidates=3 enemyGeometry=2 enemyExactHits=1 enemyMeleeRequests=1 enemyMeleeApplied=1 enemyMeleeRejected=0 enemyMeleeFaulted=0 enemyMeleeNoDamage=0 weaponTriangles=36 targetShapeSource=3 targetTriangles=8 targetDetailed=1 targetFallback=0 wallBlocks=1 bodyConstraints=1 bodyFallbackNormalConstraints=1 bodyUncertainHolds=1 bodyRenderSeparations=1 bodyRenderSeparationFailures=0 bodyRenderSamples=12 bodyRenderOver250us=0 bodyRenderConvexFallbacks=0 bodyRenderExactTargets=12 bodyRenderExactClears=12 wallRays=4 wallObjectPlanes=2 wallPlanes=3 decoratorPlanes=5 decoratorSelfTest=0
+[10:00:01.000] H3 physical contact status: sweeps=2 hits=1 impulses=1 releases=0 melees=1 commandStatus=2 meleeStatus=2 target=0x12340001 candidate=0x12340001 kind=0 weaponMass=2.764 targetMass=0.382 contactHaptic=0.250 authoredShapeHits=1 animatedBodyHits=1 enemyAssistHits=1 enemyCandidates=3 enemyGeometry=2 enemyExactHits=1 enemyMeleeRequests=1 enemyMeleeApplied=1 enemyMeleeRejected=0 enemyMeleeFaulted=0 enemyMeleeNoDamage=0 weaponTriangles=36 targetShapeSource=3 targetTriangles=8 targetDetailed=1 targetFallback=0 wallBlocks=1 bodyConstraints=1 bodyFallbackNormalConstraints=1 bodyUncertainHolds=1 bodyRenderSeparations=1 bodyRenderSeparationFailures=0 bodyRenderSamples=12 bodyRenderOver250us=0 bodyRenderConvexFallbacks=0 bodyRenderExactTargets=12 bodyRenderExactClears=12 renderApproved=10 renderCached=2 renderUnproved=1 renderUnprovedTarget=0 wallRays=4 wallObjectPlanes=2 wallPlanes=3 decoratorPlanes=5 decoratorSelfTest=0
 [10:00:01.001] H3 left grab status: bindings=1 acquisitions=1 commands=2 applied=2 releases=1 mass=0.382
 [10:00:01.002] H3 physical contact visible IDs: slotMatches=3 slotMisses=0 submissions=3
 '@
@@ -378,6 +387,8 @@ if ($SelfTest) {
         -not $report.observed.native_melee -or
         -not $report.observed.render_collision_guard -or
         -not $report.observed.render_guard_no_recorded_failure -or
+        -not $report.observed.visible_pose_proof_observed -or
+        -not $report.observed.visible_pose_no_unproved_fallback -or
         -not $report.observed.left_hand_pickup -or
         $report.direct_weapon_aim.stock_origin_shift_m -ne 0.423 -or
         $report.direct_weapon_aim.stock_direction_change_deg -ne 37.5 -or
