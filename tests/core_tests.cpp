@@ -9720,6 +9720,10 @@ int main()
                   {}, {1.0f, 1.0f, 1.0f}, rejectedIndexedList) &&
               decodedPlane && decodedPlaneStrip.triangleCount == 1 &&
               !PhysicalContactH3DecoratorMeshIsSolid(decodedPlaneStrip) &&
+               PhysicalContactRecentFrameSerial(1000, 401, 600) &&
+               !PhysicalContactRecentFrameSerial(1001, 400, 600) &&
+               !PhysicalContactRecentFrameSerial(400, 401, 600) &&
+               !PhysicalContactRecentFrameSerial(0, 0, 600) &&
                decoratorBlockCrossed && decoratorBlockNearMissAccepted &&
                decoratorBlockFarMissRejected &&
                decodedIndirectIndexed &&
@@ -9737,7 +9741,7 @@ int main()
             "Halo 3 decorator decoding reconstructs Valhalla position, "
             "rotation, and scale, expands exact strips, indexed lists, "
             "bounded windows from large indexed geometry buffers, and "
-            "bounded indirect draw arguments, "
+            "bounded indirect draw arguments and recent-frame retention, "
             "rejects invalid indices and planar foliage as a rigid wall, "
             "rejects distant blocks before decoding, and "
             "fails closed on invalid block bounds");

@@ -291,6 +291,7 @@ struct H3DecoratorFrameDraw
 struct H3DecoratorFrame
 {
     std::atomic<uint32_t> version{0};
+    uint64_t frameSerial = 0;
     uint32_t drawCount = 0;
     H3DecoratorFrameDraw draws[kH3DecoratorFrameDraws]{};
 };
@@ -298,6 +299,7 @@ struct H3DecoratorFrame
 static H3DecoratorFrame g_h3DecoratorFrames[3]{};
 static unsigned g_h3DecoratorWriteFrame = 0;
 static std::atomic<unsigned> g_h3DecoratorPublishedFrame{UINT_MAX};
+static std::atomic<uint64_t> g_h3DecoratorFrameSerial{0};
 
 static unsigned H3ProbeBufferHash(ID3D11Buffer* buffer)
 {
@@ -1038,6 +1040,12 @@ static void H3DecoratorPublishFrame()
         return;
     H3DecoratorFrame& published =
         g_h3DecoratorFrames[g_h3DecoratorWriteFrame];
+    uint64_t frameSerial = g_h3DecoratorFrameSerial.fetch_add(
+        1u, std::memory_order_relaxed) + 1u;
+    if (!frameSerial)
+        frameSerial = g_h3DecoratorFrameSerial.fetch_add(
+            1u, std::memory_order_relaxed) + 1u;
+    published.frameSerial = frameSerial;
     published.version.fetch_add(1u, std::memory_order_release);
     g_h3DecoratorPublishedFrame.store(
         g_h3DecoratorWriteFrame, std::memory_order_release);
@@ -1114,6 +1122,7 @@ size_t D3D_Halo3DecoratorWallPlanes(
 
     std::array<H3DecoratorFrameDraw, kH3DecoratorFrameDraws> draws{};
     uint32_t drawCount = 0;
+    uint64_t frameSerial = 0;
     bool copied = false;
     for (unsigned attempt = 0; attempt < 3u && !copied; ++attempt)
     {
@@ -1126,13 +1135,66 @@ size_t D3D_Halo3DecoratorWallPlanes(
         if ((before & 1u) != 0u)
             continue;
         drawCount = std::min(frame.drawCount, kH3DecoratorFrameDraws);
+        frameSerial = frame.frameSerial;
         std::memcpy(draws.data(), frame.draws,
                     static_cast<size_t>(drawCount) * sizeof(draws[0]));
         const uint32_t after = frame.version.load(std::memory_order_acquire);
         copied = before == after && (after & 1u) == 0u;
     }
-    if (!copied)
+    if (!copied || !frameSerial)
         return 0;
+
+    // Decorator submission is camera-culled and can disappear for an
+    // individual frame while the weapon is still touching the same visible
+    // rock. Keep a bounded worker-side catalog of immutable draw descriptors
+    // seen during the last few seconds. Loading screens advance the renderer
+    // serial without refreshing old entries, so old-map placements expire
+    // before contact becomes active in the next level.
+    constexpr uint32_t kRetainedDrawCapacity = 512u;
+    constexpr uint64_t kRetainedDrawMaximumAgeFrames = 600u;
+    struct RetainedDraw
+    {
+        H3DecoratorFrameDraw draw{};
+        uint64_t lastSeenFrame = 0;
+    };
+    static thread_local std::array<RetainedDraw, kRetainedDrawCapacity>
+        retainedDraws{};
+    static thread_local uint64_t lastProcessedFrame = 0;
+    if (frameSerial < lastProcessedFrame ||
+        (lastProcessedFrame && frameSerial - lastProcessedFrame >
+             kRetainedDrawMaximumAgeFrames))
+    {
+        retainedDraws = {};
+    }
+    if (frameSerial != lastProcessedFrame)
+    {
+        for (uint32_t drawIndex = 0; drawIndex < drawCount; ++drawIndex)
+        {
+            RetainedDraw* match = nullptr;
+            RetainedDraw* replacement = nullptr;
+            for (RetainedDraw& retained : retainedDraws)
+            {
+                if (retained.lastSeenFrame &&
+                    std::memcmp(
+                        &retained.draw, &draws[drawIndex],
+                        sizeof(retained.draw)) == 0)
+                {
+                    match = &retained;
+                    break;
+                }
+                if (!replacement || !retained.lastSeenFrame ||
+                    retained.lastSeenFrame < replacement->lastSeenFrame)
+                    replacement = &retained;
+            }
+            RetainedDraw* destination = match ? match : replacement;
+            if (destination)
+            {
+                destination->draw = draws[drawIndex];
+                destination->lastSeenFrame = frameSerial;
+            }
+        }
+        lastProcessedFrame = frameSerial;
+    }
     uint32_t selfTestStage =
         g_h3DecoratorSelfTestState.load(std::memory_order_acquire);
     if (drawCount > 0u && selfTestStage >= kH3DecoratorSelfTestWaiting &&
@@ -1156,10 +1218,15 @@ size_t D3D_Halo3DecoratorWallPlanes(
     uint32_t exactInstances = 0;
     size_t planeCount = 0;
     for (uint32_t drawIndex = 0;
-         drawIndex < drawCount && planeCount < planeCapacity &&
+         drawIndex < kRetainedDrawCapacity && planeCount < planeCapacity &&
          exactInstances < kMaximumExactInstances; ++drawIndex)
     {
-        const H3DecoratorFrameDraw& draw = draws[drawIndex];
+        const RetainedDraw& retained = retainedDraws[drawIndex];
+        if (!PhysicalContactRecentFrameSerial(
+                frameSerial, retained.lastSeenFrame,
+                kRetainedDrawMaximumAgeFrames))
+            continue;
+        const H3DecoratorFrameDraw& draw = retained.draw;
         const PhysicalContactVec3 blockMaximum{
             draw.blockMinimum.x + draw.blockStep.x * 65535.0f,
             draw.blockMinimum.y + draw.blockStep.y * 65535.0f,

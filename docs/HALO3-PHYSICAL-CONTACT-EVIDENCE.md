@@ -3097,6 +3097,26 @@ guards remain unchanged. The full continuous triangle sweep tests cover the
 underlying geometry path; the reported campaign rock still requires headset
 acceptance.
 
+### 2026-08-13 recent decorator draw retention
+
+The real-headset `a9831c6` session reported that some visible rocks still did
+not block the weapon. Its preserved status samples alternated between zero,
+three, and six decoded solid decorator draws, but the contact worker consumed
+only the single most recently published renderer frame. Halo camera-culls
+decorator submissions. Treating absence from one frame as removal therefore
+made otherwise immutable rock geometry disappear from collision before the
+map or placement had changed.
+
+The decorator worker now retains up to 512 unique, immutable draw descriptors
+seen during the last 600 renderer frames. The render hook still performs only
+its existing bounded snapshot publication; catalog merging, expiry, geometry
+copying, decoding, and collision remain outside the render callback. Entries
+not refreshed during a loading screen expire before a later level can use
+them. Exact packed placement transforms, authored triangle meshes, solid-mesh
+rejection, broad phase, and the sixteen-instance exact-work cap are unchanged.
+Pure tests cover the inclusive age boundary, stale entries, reversed serials,
+and zero initialization. The reported rocks still require headset acceptance.
+
 ### 2026-08-13 fast enemy swing saturation
 
 The preserved Quest headset Campaign session contains 977 physical-contact

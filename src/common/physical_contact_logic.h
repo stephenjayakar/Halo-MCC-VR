@@ -1104,6 +1104,15 @@ inline bool PhysicalContactH3DecoratorMeshIsSolid(
         maximum > 1.0e-5f && minimum / maximum >= minimumAxisRatio;
 }
 
+inline constexpr bool PhysicalContactRecentFrameSerial(
+    uint64_t currentSerial, uint64_t observedSerial,
+    uint64_t maximumAgeFrames)
+{
+    return currentSerial != 0 && observedSerial != 0 &&
+        currentSerial >= observedSerial &&
+        currentSerial - observedSerial <= maximumAgeFrames;
+}
+
 inline PhysicalContactVec3 PhysicalContactCompoundWorldCentroid(
     const PhysicalContactCompoundShape& shape,
     const PhysicalContactTransform& transform)
