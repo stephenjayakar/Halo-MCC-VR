@@ -3167,12 +3167,12 @@ inline float PhysicalContactTargetMeleeThreshold(
     if (!PhysicalContactEnemyMeleeKind(targetKind))
         return configuredThresholdMetersPerSecond;
 
-    // The requested Campaign behavior is that any deliberate moving weapon
-    // contact can melee an enemy. Use the same 0.05 m/s boundary that already
-    // rejects tracking noise. Props and vehicles retain the configured value,
-    // while the per-target armed latch and cooldown still limit continuous
-    // enemy contact to one native event.
-    return 0.05f;
+    // A real-headset run proved every requested enemy melee reached native
+    // damage, but using the exact 0.05 m/s tracking-noise edge made incidental
+    // touches too easy to damage. Require twice that floor for living enemies.
+    // Props and vehicles retain the configured value, while the per-target
+    // armed latch and cooldown still limit continuous contact to one event.
+    return 0.10f;
 }
 
 inline float PhysicalContactTargetMeleeImpactSpeed(

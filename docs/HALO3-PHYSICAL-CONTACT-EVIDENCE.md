@@ -3117,6 +3117,18 @@ rejection, broad phase, and the sixteen-instance exact-work cap are unchanged.
 Pure tests cover the inclusive age boundary, stale entries, reversed serials,
 and zero initialization. The reported rocks still require headset acceptance.
 
+### 2026-08-13 headset enemy-melee sensitivity correction
+
+The preserved real-headset `a9831c6` session recorded 19 enemy melee requests
+and 19 successful native applications, with no rejection, fault, or no-damage
+result. The player reported that melee was working well but slightly too easy.
+The native route and enemy contact catch are therefore retained. Only the
+enemy speed threshold changes from the exact `0.05 m/s` tracking-noise boundary
+to `0.10 m/s`, still far below the configured `1.50 m/s` rigid-target
+threshold. Vehicles, props, exact target identity, the per-contact armed latch,
+separation rearm, and the 250 ms cooldown are unchanged. Headset feel remains
+pending.
+
 ### 2026-08-13 fast enemy swing saturation
 
 The preserved Quest headset Campaign session contains 977 physical-contact
