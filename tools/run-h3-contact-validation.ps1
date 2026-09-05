@@ -13,6 +13,7 @@ param(
         'decorator-wall',
         'npc-contact',
         'npc-shove',
+        'npc-geometry',
         'npc-motor',
         'melee')]
     [string]$Test = 'equipment-scoop',
@@ -423,6 +424,10 @@ function Test-VisibleWeaponGapFailure(
 
 function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
+        'npc-geometry' {
+            $status = ($Text -split "`r?`n" | Where-Object { $_ -like '*H3 physical contact status:*' } | Select-Object -Last 1)
+            return $status -match 'enemyGeometry=([1-9][0-9]*) ' -and $status -match 'enemyExactHits=([1-9][0-9]*) ' -and $status -match 'melees=0 '
+        }
         'npc-shove' {
             $line = ($Text -split "`r?`n" | Where-Object { $_ -like '*H3 NPC contact shove:*' } | Select-Object -Last 1)
             $status = ($Text -split "`r?`n" | Where-Object { $_ -like '*H3 physical contact status:*' } | Select-Object -Last 1)
@@ -589,7 +594,7 @@ try {
             $name, $null, [EnvironmentVariableTarget]::Process)
     }
     $env:HALOMCCVR_H3_CONTACT_DEBUG_RIG = '1'
-    if ($Test -eq 'npc-shove') {
+    if ($Test -in @('npc-shove', 'npc-geometry')) {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
         $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE = '1'
     }
@@ -866,6 +871,7 @@ public static class HaloMccVrContactInput {
     # Campaign can spend several minutes loading and playing its opening
     # cinematic. Start the contact-test clock only after its base gate opens.
     Wait-Until {
+        if (-not (Get-UniqueMccWindowProcess)) { throw 'MCC closed before contact sampling.' }
         $text = Get-NewLogText $runtimeLog $startedUtc
         $status = ($text -split "`r?`n" | Where-Object { $_ -like '*H3 physical contact status:*' } | Select-Object -Last 1)
         $status -and $status -notmatch 'stage=(base-gate|disabled) '
@@ -874,6 +880,7 @@ public static class HaloMccVrContactInput {
     Wait-Until {
         $text = Get-NewLogText $runtimeLog $startedUtc
         $useSameFrameGapCounters = $Test -eq 'rotating-body-gap'
+        if (-not (Get-UniqueMccWindowProcess)) { throw 'MCC closed during contact validation.' }
         if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
             (Test-VisibleWeaponGapFailure $text $useSameFrameGapCounters)) {
             throw 'Halo 3 visible-weapon-gap recorded an exact visible-geometry penetration.'
