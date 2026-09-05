@@ -535,6 +535,14 @@ try {
     $settings.driver_null.enable = $true
     $settings.steamvr.forcedDriver = 'null'
     $settings.steamvr.requireHmd = $false
+    # A stationary null HMD otherwise enters standby after five seconds on
+    # current SteamVR, leaving OpenXR synchronized with zero rendered layers.
+    # These diagnostic-only settings are restored byte-for-byte in finally.
+    if (-not $settings.PSObject.Properties['power']) {
+        $settings | Add-Member -NotePropertyName power -NotePropertyValue ([pscustomobject]@{})
+    }
+    $settings.power | Add-Member -Force -NotePropertyName turnOffScreensTimeout -NotePropertyValue 3600.0
+    $settings.power | Add-Member -Force -NotePropertyName pauseCompositorOnStandby -NotePropertyValue $false
     $settings | ConvertTo-Json -Depth 32 |
         Set-Content -LiteralPath $steamVrSettings -Encoding UTF8
     $nullSettings = Get-Content -Raw -LiteralPath $steamVrSettings |
