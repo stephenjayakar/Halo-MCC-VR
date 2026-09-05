@@ -1001,6 +1001,22 @@ namespace
         g_halo3HandRecoveryRecordStates{};
     std::array<Halo3HandRecoveryRecord, kHalo3HandRecoveryRecordCount>
         g_halo3HandRecoveryRecords{};
+    struct Halo3LargeWallCorrectionRecord
+    {
+        uint64_t ms = 0, proposalSerial = 0, proposalMs = 0;
+        uint32_t planeCount = 0;
+        bool cameraValid = false, consumedValid = false;
+        float scale = 0.0f;
+        PhysicalContactVec3 camera{}, root{}, consumed{}, correction{};
+        PhysicalContactWallPlane firstPlane{};
+    };
+    // Bounded immutable worker records, drained by the cold status logger.
+    constexpr size_t kHalo3LargeWallCorrectionRecords = 8;
+    std::atomic<uint64_t> g_halo3LargeWallCorrectionReservations{0};
+    std::array<std::atomic<uint32_t>, kHalo3LargeWallCorrectionRecords>
+        g_halo3LargeWallCorrectionStates{};
+    std::array<Halo3LargeWallCorrectionRecord, kHalo3LargeWallCorrectionRecords>
+        g_halo3LargeWallCorrections{};
     // Capture the exact offset consumed while reconstructing this submission.
     // Reading the worker publication again afterward can observe a new sample.
     thread_local bool g_halo3CaptureHandOffset = false;
@@ -16280,6 +16296,28 @@ namespace
                 const PhysicalContactWallConstraint requested =
                     PhysicalContactSolveWallPlanes(
                         wallPlanes.data(), wallPlaneCount, worldScale);
+                if (requested.constrained && requested.setbackWorldUnits >= .30f * worldScale)
+                {
+                    const uint64_t index = g_halo3LargeWallCorrectionReservations.fetch_add(
+                        1, std::memory_order_relaxed);
+                    if (index < kHalo3LargeWallCorrectionRecords)
+                    {
+                        auto& record = g_halo3LargeWallCorrections[index];
+                        record.ms = nowMs;
+                        record.proposalSerial = proposalSerial;
+                        record.proposalMs = palettePoseMs;
+                        record.planeCount = static_cast<uint32_t>(wallPlaneCount);
+                        record.cameraValid = g_camValid.load(std::memory_order_acquire);
+                        record.consumedValid = proposalConsumedOffsetValid;
+                        record.scale = worldScale;
+                        record.camera = camera;
+                        record.root = unconstrainedWeaponTransform.position;
+                        record.consumed = previouslyAppliedOffset;
+                        record.correction = requested.offset;
+                        record.firstPlane = wallPlanes[0];
+                        g_halo3LargeWallCorrectionStates[index].store(2, std::memory_order_release);
+                    }
+                }
                 if (debugWall && requested.constrained &&
                     wallPlaneCount > 0 &&
                     PhysicalContactLength(requested.offset) / worldScale >=
@@ -18607,6 +18645,25 @@ namespace
             return;
         nextLogMs = nowMs + 2000;
         Halo3LogNpcShoveProbe();
+        for (size_t index = 0; index < kHalo3LargeWallCorrectionRecords; ++index)
+        {
+            uint32_t expected = 2;
+            if (!g_halo3LargeWallCorrectionStates[index].compare_exchange_strong(
+                    expected, 3, std::memory_order_acquire, std::memory_order_relaxed))
+                continue;
+            const auto& r = g_halo3LargeWallCorrections[index];
+            LOG("H3 large wall correction: index=%u ms=%llu proposal=%llu proposalMs=%llu planes=%u cameraValid=%d consumedValid=%d scale=%.6f camera=(%.6f %.6f %.6f) root=(%.6f %.6f %.6f) consumed=(%.6f %.6f %.6f) correction=(%.6f %.6f %.6f) firstWeapon=(%.6f %.6f %.6f) firstSurface=(%.6f %.6f %.6f) firstNormal=(%.6f %.6f %.6f) clearance=%.6f",
+                static_cast<uint32_t>(index), (unsigned long long)r.ms,
+                (unsigned long long)r.proposalSerial, (unsigned long long)r.proposalMs,
+                r.planeCount, r.cameraValid, r.consumedValid, r.scale,
+                r.camera.x, r.camera.y, r.camera.z, r.root.x, r.root.y, r.root.z,
+                r.consumed.x, r.consumed.y, r.consumed.z,
+                r.correction.x, r.correction.y, r.correction.z,
+                r.firstPlane.weaponPoint.x, r.firstPlane.weaponPoint.y, r.firstPlane.weaponPoint.z,
+                r.firstPlane.surfacePoint.x, r.firstPlane.surfacePoint.y, r.firstPlane.surfacePoint.z,
+                r.firstPlane.freeSideNormal.x, r.firstPlane.freeSideNormal.y, r.firstPlane.freeSideNormal.z,
+                r.firstPlane.clearanceWorldUnits);
+        }
         for (size_t index = 0; index < kHalo3HandRecoveryRecordCount; ++index)
         {
             uint32_t published = 2;
