@@ -975,6 +975,19 @@ namespace
     std::atomic<uint64_t> g_halo3ContactHandLeashMissingPose{0};
     std::atomic<bool> g_halo3ContactDebugHandRecovery{false};
     std::atomic<bool> g_halo3ContactDebugHandRecoveryInjected{false};
+    struct Halo3FirstHandRecovery
+    {
+        uint64_t ms = 0, proposalSerial = 0, displayedSerial = 0;
+        int32_t weapon = -1, target = -1;
+        uint32_t proof = 0;
+        float scale = 0.0f;
+        PhysicalContactVec3 tracked{}, final{}, consumedOffset{};
+        bool corrected = false, finalGuardRequired = false, finalGuardProved = false;
+    };
+    // One immutable record per DLL lifetime: 0 empty, 1 writer owns it,
+    // 2 published, 3 logged. No render-thread logging, allocation or waiting.
+    std::atomic<uint32_t> g_halo3FirstHandRecoveryState{0};
+    Halo3FirstHandRecovery g_halo3FirstHandRecovery;
     // Capture the exact offset consumed while reconstructing this submission.
     // Reading the worker publication again afterward can observe a new sample.
     thread_local bool g_halo3CaptureHandOffset = false;
@@ -6151,6 +6164,28 @@ namespace
                          destination[0].translation[2]},
                         g_worldScale.load(std::memory_order_relaxed)))
                 {
+                    uint32_t empty = 0;
+                    if (g_halo3FirstHandRecoveryState.compare_exchange_strong(
+                            empty, 1, std::memory_order_relaxed))
+                    {
+                        auto& record = g_halo3FirstHandRecovery;
+                        record.ms = nowMs;
+                        record.proposalSerial = proposalSerial;
+                        record.displayedSerial = displayedSerial;
+                        record.weapon = activeWeaponHandle;
+                        record.target = finalTargetHandle;
+                        record.proof = renderProof;
+                        record.scale = g_worldScale.load(std::memory_order_relaxed);
+                        record.tracked = {trackedNodes[0].translation[0],
+                            trackedNodes[0].translation[1], trackedNodes[0].translation[2]};
+                        record.final = {destination[0].translation[0],
+                            destination[0].translation[1], destination[0].translation[2]};
+                        record.consumedOffset = g_halo3CapturedHandOffset;
+                        record.corrected = displayedCorrected;
+                        record.finalGuardRequired = finalGuardRequired;
+                        record.finalGuardProved = finalGuardProved;
+                        g_halo3FirstHandRecoveryState.store(2, std::memory_order_release);
+                    }
                     memcpy(destination, trackedNodes.data(),
                            static_cast<size_t>(renderNodeCount) * sizeof(BoneMatrix));
                     g_halo3ContactHandRecoveryUntilMs.store(
@@ -18478,6 +18513,18 @@ namespace
             return;
         nextLogMs = nowMs + 2000;
         Halo3LogNpcShoveProbe();
+        uint32_t published = 2;
+        if (g_halo3FirstHandRecoveryState.compare_exchange_strong(
+                published, 3, std::memory_order_acquire))
+        {
+            const auto& r = g_halo3FirstHandRecovery;
+            LOG("H3 contact first hand recovery: ms=%llu weapon=0x%08X target=0x%08X proposal=%llu displayed=%llu proof=%u corrected=%d finalGuard=%d/%d scale=%.6f tracked=(%.6f %.6f %.6f) final=(%.6f %.6f %.6f) consumedOffset=(%.6f %.6f %.6f)",
+                (unsigned long long)r.ms, (unsigned)r.weapon, (unsigned)r.target,
+                (unsigned long long)r.proposalSerial, (unsigned long long)r.displayedSerial,
+                r.proof, r.corrected, r.finalGuardRequired, r.finalGuardProved, r.scale,
+                r.tracked.x, r.tracked.y, r.tracked.z, r.final.x, r.final.y, r.final.z,
+                r.consumedOffset.x, r.consumedOffset.y, r.consumedOffset.z);
+        }
         LOG("H3 contact hand recovery: resets=%llu checks=%llu missingPose=%llu limit=0.30m cooldown=500ms active=%d",
             (unsigned long long)g_halo3ContactHandRecoveries.load(std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactHandLeashChecks.load(std::memory_order_relaxed),
