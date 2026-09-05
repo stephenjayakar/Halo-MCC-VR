@@ -589,7 +589,10 @@ try {
             $name, $null, [EnvironmentVariableTarget]::Process)
     }
     $env:HALOMCCVR_H3_CONTACT_DEBUG_RIG = '1'
-    if ($Test -eq 'npc-shove') { $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0' }
+    if ($Test -eq 'npc-shove') {
+        $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
+        $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE = '1'
+    }
     switch ($Test) {
         'npc-motor' {
             $env:HALOMCCVR_H3_CONTACT_DEBUG_NPC_SHOVE = '1'
