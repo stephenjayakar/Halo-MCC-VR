@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Enter', 'Escape', 'Up', 'Down', 'Left', 'Right', 'Space', 'W', 'A', 'S', 'D')]
+    [ValidateSet('Enter', 'Escape', 'Up', 'Down', 'Left', 'Right', 'Space', 'W', 'A', 'S', 'D', 'F8', 'F9')]
     [string[]]$Keys,
     [ValidateRange(50, 5000)]
     [int]$DelayMilliseconds = 350,
@@ -64,6 +64,8 @@ $mapping = @{
     A = @(0x1E, $false)
     S = @(0x1F, $false)
     D = @(0x20, $false)
+    F8 = @(0x42, $false)
+    F9 = @(0x43, $false)
 }
 
 if (-not $Background) {
@@ -82,7 +84,7 @@ foreach ($key in $Keys) {
         # UE4's menu consumes addressed key messages without foreground focus.
         # This does not inject keys into another foreground app or rely on
         # GetAsyncKeyState. Gameplay/raw-input paths may behave differently.
-        $virtualKey = @{ Enter=0x0D; Escape=0x1B; Up=0x26; Down=0x28; Left=0x25; Right=0x27; Space=0x20; W=0x57; A=0x41; S=0x53; D=0x44 }[$key]
+        $virtualKey = @{ Enter=0x0D; Escape=0x1B; Up=0x26; Down=0x28; Left=0x25; Right=0x27; Space=0x20; W=0x57; A=0x41; S=0x53; D=0x44; F8=0x77; F9=0x78 }[$key]
         $flags = [int64](1 -bor ($value[0] -shl 16))
         if ($value[1]) { $flags = $flags -bor 0x01000000 }
         $down = [HaloMccVrVisibleInput]::PostMessage($mcc.MainWindowHandle, 0x100, [UIntPtr]$virtualKey, [IntPtr]$flags)
