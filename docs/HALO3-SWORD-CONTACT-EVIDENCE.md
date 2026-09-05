@@ -108,6 +108,17 @@ its linear disassembler stopped early. Positive RIP-relative references and
 assert descriptors led to the functions above; do not cite that earlier zero
 as evidence of absence.
 
+Audit schema 2 now decodes the serialized inverse floats in the verified order
+and checks this sword's translation-only rest skeleton. Both inverses have unit
+scale and identity basis. The blade inverse position is `(-0.117739, 0, 0)`,
+canceling its authored rest position `(0.117739, 0, 0)`. All 774 vertices round
+trip through inverse bind and rest pose with maximum error `1.39e-17` world
+units. Removing the blade inverse translation in an in-memory negative check
+correctly fails the audit. Rotated rest skeletons are explicitly rejected by
+this narrow audit rather than interpreted using unverified quaternion rules.
+The fixture remains in export space; this result does not change its contract
+or demonstrate an animated retail collision solve.
+
 ## Required runtime work
 
 1. Verify the equipped retail sword's exact render identity and node mapping.

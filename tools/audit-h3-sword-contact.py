@@ -40,6 +40,53 @@ def bounds(points):
             "max": [max(p[a] for p in points) for a in range(3)]}
 
 
+def sword_bind_audit(render, vertices, joints):
+    """Validate this sword's translation-only rest pose, not arbitrary skeletons.
+
+    H3EK explicitly warns that inverse scale is displayed last instead of
+    first. Preserve the serialized float order, then decode scale/basis/position.
+    See HALO3-SWORD-CONTACT-EVIDENCE.md for the native consumer proof.
+    """
+    result, rest_positions = [], {}
+    for node in render.findall("block[@name='nodes']/element"):
+        index = int(node.attrib["index"])
+        parent = int(value(node, "parent node").split(",")[-1])
+        rotation = [float(x) for x in value(node, "default rotation").split(",")]
+        translation = [float(x) for x in value(node, "default translation").split(",")]
+        if (len(rotation) != 4 or len(translation) != 3
+                or not all(math.isfinite(x) for x in rotation + translation)
+                or any(abs(x) > 1e-6 for x in rotation[:3])
+                or abs(abs(rotation[3]) - 1) > 1e-6):
+            raise ValueError("bind audit requires the sword's identity rest rotations")
+        if parent != -1 and parent not in rest_positions:
+            raise ValueError("invalid or unordered sword parent node")
+        origin = rest_positions.get(parent, [0, 0, 0])
+        rest = [origin[k] + translation[k] for k in range(3)]
+        rest_positions[index] = rest
+        serialized = [float(x) for name in (
+            "inverse forward", "inverse left", "inverse up", "inverse position",
+            "inverse scale") for x in value(node, name).split(",")]
+        if len(serialized) != 13 or not all(math.isfinite(x) for x in serialized):
+            raise ValueError("invalid inverse matrix serialization")
+        scale, basis, position = serialized[0], serialized[1:10], serialized[10:13]
+        expected = [1, 0, 0, 0, 1, 0, 0, 0, 1]
+        if abs(scale - 1) > 1e-6 or any(abs(a-b) > 1e-6 for a, b in zip(basis, expected)):
+            raise ValueError("unexpected sword inverse scale or basis")
+        points = [p for p, joint in zip(vertices, joints) if joint == index]
+        local = [[p[k] + position[k] for k in range(3)] for p in points]
+        error = max(abs(q[k] + rest[k] - p[k])
+                    for p, q in zip(points, local) for k in range(3))
+        if error > 1e-6:
+            raise ValueError("authored rest pose does not cancel the inverse bind")
+        result.append({"index": index, "parent": parent,
+                       "inverse_scale": scale, "inverse_basis": basis,
+                       "inverse_position": position, "rest_position": rest,
+                       "node_local_bounds": bounds(local),
+                       "rest_roundtrip_max_error": error,
+                       "checked_vertices": len(points)})
+    return result
+
+
 def influences(mesh_object, vertex_count):
     decls = [o for o in mesh_object.walk() if o.type_name == "DeclData"]
     if len(decls) != 1:
@@ -111,7 +158,7 @@ def audit(directory, collision_path):
         face_nodes.append(next(iter(unique)))
     counts = Counter(face_nodes)
     return {
-        "schema": 1,
+        "schema": 2,
         "scope": "official H3EK exports only; not retail runtime coverage",
         "inputs": [{"path": str(p.resolve()), "sha256": hashlib.sha256(
             p.read_bytes()).hexdigest()} for p in paths],
@@ -122,6 +169,7 @@ def audit(directory, collision_path):
         "render_regions": [value(e, "name") for e in
                            render.findall("block[@name='regions']/element")],
         "export_vertices": len(mesh.vertices), "export_triangles": len(mesh.faces),
+        "bind_audit": sword_bind_audit(render, mesh.vertices, joints),
         "nodes": [{"index": index, "name": name,
                    "vertices": joints.count(index), "triangles": counts[index],
                    "export_model_space_bounds": bounds([
