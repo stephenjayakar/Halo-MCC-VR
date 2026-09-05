@@ -840,6 +840,14 @@ public static class HaloMccVrContactInput {
         Start-Sleep -Seconds 5
     }
 
+    # Campaign can spend several minutes loading and playing its opening
+    # cinematic. Start the contact-test clock only after its base gate opens.
+    Wait-Until {
+        $text = Get-NewLogText $runtimeLog $startedUtc
+        $status = Get-LatestContactStatusLine $text
+        $status -and $status -notmatch 'stage=(base-gate|disabled) '
+    } 600 'Halo 3 did not reach player-controlled contact sampling.'
+
     Wait-Until {
         $text = Get-NewLogText $runtimeLog $startedUtc
         $useSameFrameGapCounters = $Test -eq 'rotating-body-gap'
