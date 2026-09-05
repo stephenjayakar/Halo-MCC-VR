@@ -9205,10 +9205,10 @@ namespace
     // native provider may legitimately report no interpolated bank for an
     // object; in that case the renderer reads the object's bounded raw bank.
     // A provider fault is different and rejects this optional contact sample.
+    template<size_t NodeCapacity>
     bool Halo3ContactCopyVisibleNodes(
         int32_t objectHandle, const unsigned char* objectData,
-        std::array<Halo3Matrix4x3,
-                   Halo3VisibleWeaponPosePublication::kMaximumNodes>& output,
+        std::array<Halo3Matrix4x3, NodeCapacity>& output,
         int& outputCount, bool& outputInterpolated)
     {
         output = {};
@@ -10300,7 +10300,7 @@ namespace
     // and polyhedron coordinates are local to the named render node. Halo's
     // proven interpolated-node provider returns that node in world space.
     std::atomic<uint32_t> g_halo3AnimatedRawNodes{0}, g_halo3AnimatedInterpolatedNodes{0}, g_halo3AnimatedMissingNodes{0};
-    constexpr bool kEnableHalo3AnimatedRawNodeCandidate = false;
+    constexpr bool kEnableHalo3AnimatedRawNodeCandidate = true;
     bool Halo3ContactSweepAnimatedBodies(
         int32_t objectHandle, const unsigned char* objectData,
         const PhysicalContactCompoundShape& weaponShape,
@@ -10321,7 +10321,7 @@ namespace
             !g_halo3InterpolatedNodes)
             return false;
 
-        std::array<Halo3Matrix4x3, Halo3VisibleWeaponPosePublication::kMaximumNodes> copiedMatrices{};
+        std::array<Halo3Matrix4x3, kHalo3MaximumRenderNodes> copiedMatrices{};
         Halo3Matrix4x3* matrices = nullptr;
         int matrixCount = 0;
         bool interpolated = false;
