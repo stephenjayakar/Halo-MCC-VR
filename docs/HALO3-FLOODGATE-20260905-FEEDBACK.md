@@ -419,3 +419,45 @@ MCC/vrserver absent after cleanup, null=false, forcedDriver empty,
 requireHmd=true, exact settings SHA
 `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E` restored.
 No headset acceptance or accepted-pointer advance.
+
+## Outward-retreat candidate (September 5, 22:18 UTC)
+
+Candidate `b9b192b65e88a2e8ec9bb4d8bf66eee55fbedd94` replaces distance-only
+translation rearming with a .10 m projection toward the recovery correction.
+Moving farther into the obstruction or tangentially no longer releases the
+hold. The existing 20-degree turn escape and weapon/generation changes remain.
+If the correction vector is unusable, the prior distance escape remains so a
+valid tracked pose is not stranded by an invalid output. The reference now
+publishes two roots together (uncorrected and displaced), preserving the
+correction direction without racing a later worker offset. Core regressions
+cover inward/tangential/subthreshold/outward and diagonal movement across all
+supported world scales, plus invalid-direction escape. Build/core tests and
+Reach consistency passed.
+Package: `out/candidates/b9b192b-h3-physical-contact-20260905-221803994Z`.
+Installed DLL independently verified:
+`419044BBBB035BA9EF6F30136CEEEBE4A720556FA49858174BFD4C5021A43C34`.
+
+The live attempt passed controller contact admission but did not exercise the
+new recovery rule: zero wall blocks, zero resets, and 27,275 leash checks at
+preserved cutoff 15:22:13.385. Result:
+`out/debug-openxr/20260905-221818553Z-controller-contact-result.json`.
+Log SHA: `86CEB4E49C35A6E90568E4089ECDCC4DA3508DAFFB0C9E8C7A46F24CB4FA11A7`.
+Steam Construct Forge / SteamVR null driver / Null Model Number,
+22:18:24-22:22:32 UTC. The spawn faced an open railing beside the intended wall.
+D600ms, then W2500ms and S2500ms did not reach the wall. The 26-second recording
+frame shows forward movement toward the railing, so failed delivery of keyboard
+input is not the explanation established by this attempt.
+
+The 30-second file
+`out/demos/20260905-222134-forge-wall-pressure-retreat-test/raw.mp4`
+is an unsuccessful test recording, explicitly NOT a functionality demo.
+Its adjacent `result.json` records that limitation. Frames at 18 and 26 seconds
+were inspected; no frame-by-frame verification or success claim. A later
+window capture coincided with harness shutdown and is black; it adds no wall
+contact evidence. A valid wall-pressure/retreat test is still required before
+claiming this candidate prevents the observed loop.
+
+Normal settings independently restored: null=false, forcedDriver empty,
+requireHmd=true, MCC/vrserver absent, SHA
+`175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
+No headset acceptance or accepted-pointer advance.
