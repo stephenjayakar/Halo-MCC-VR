@@ -100,6 +100,15 @@ def main():
                   draw_count == struct.unpack("<H", read(base + draw_count_rva, 2))[0])
         result = {"scope": __doc__, "module_identity": identity, "pid": proc.pid,
                   "unchanged_on_reread": stable, "atomic_snapshot": False,
+                  "draw_count": draw_count,
+                  "tag_only_draw_candidates": [
+                      {"slot": i, "render_tag": struct.unpack_from("<I", draws, i*96+4)[0],
+                       "object_handle": struct.unpack_from("<I", draws, i*96+0x48)[0]}
+                      for i in range(draw_count)
+                      if any(e["render_tag"] == struct.unpack_from("<I", draws, i*96+4)[0]
+                             for e in entries)],
+                  "draw_record_prefixes": [draws[i*96:i*96+16].hex()
+                                           for i in range(min(draw_count, 8))],
                   "palette": entries, "matching_draw_records": records}
         args.output.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8")
         print(json.dumps({"palette_entries": len(entries), "draw_records": len(records), "unchanged_on_reread": stable}))

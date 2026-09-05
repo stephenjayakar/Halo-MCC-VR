@@ -122,6 +122,31 @@ state that limitation explicitly. This is a diagnostic candidate: syntax/help
 checks pass, but live observation is still untested. Its first run found zero
 MCC processes and exited before opening a process or creating a snapshot.
 
+### First live probe, 2026-09-05 20:48-20:52 UTC
+
+The existing Forge `visible-weapon-gap` null-driver harness passed on installed
+source `6ea7e86` (the existing weapon fixture, not a sword). Result and preserved
+log are `out/debug-openxr/20260905-204851293Z-visible-weapon-gap-result.json`
+and the adjacent `.log`; log SHA-256 is
+`186B2FB65FA854725E96EC50B668625DF554A240EF16CE5B0DDFFB5B6F7B1261`.
+This is not headset acceptance or a meaningful sword demo.
+
+The read-only probe returned three palette entries with 37, 5 and 51 nodes.
+Repeated snapshots, including one unchanged on reread, returned **zero matching
+draw records**. A diagnostic snapshot counted 123 records but found none of the
+palette render tags in them. Therefore the proposed draw-record correlation is
+not runtime verified: do not promote it into a sword-visibility gate. Preserve
+the negative result and investigate render-pass timing/storage selection.
+Snapshots are `live-render-snapshot*.json` and `live-render-draw-debug.json`
+under the sword research directory. Palette/inverse reads work; this does not
+prove the correct live sword identity or selection.
+
+The menu helper initially failed under Windows PowerShell 5 converting an Int32
+directly to UIntPtr. The same session navigated successfully under PowerShell 7.
+`send-mcc-keys.ps1` now constructs the key parameter explicitly from UInt32;
+the Enter value 13 conversion was verified under Windows PowerShell 5 without
+sending additional input.
+
 ## Native inverse-bind evidence
 
 Read-only disassembly of official `halo3_tag_test.exe` (SHA-256

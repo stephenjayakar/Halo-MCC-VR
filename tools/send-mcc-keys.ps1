@@ -87,9 +87,10 @@ foreach ($key in $Keys) {
         $virtualKey = @{ Enter=0x0D; Escape=0x1B; Up=0x26; Down=0x28; Left=0x25; Right=0x27; Space=0x20; W=0x57; A=0x41; S=0x53; D=0x44; F8=0x77; F9=0x78 }[$key]
         $flags = [int64](1 -bor ($value[0] -shl 16))
         if ($value[1]) { $flags = $flags -bor 0x01000000 }
-        $down = [HaloMccVrVisibleInput]::PostMessage($mcc.MainWindowHandle, 0x100, [UIntPtr]$virtualKey, [IntPtr]$flags)
+        $keyParameter = [UIntPtr]::new([uint32]$virtualKey)
+        $down = [HaloMccVrVisibleInput]::PostMessage($mcc.MainWindowHandle, 0x100, $keyParameter, [IntPtr]$flags)
         try { Start-Sleep -Milliseconds $HoldMilliseconds }
-        finally { $up = [HaloMccVrVisibleInput]::PostMessage($mcc.MainWindowHandle, 0x101, [UIntPtr]$virtualKey, [IntPtr]($flags -bor 0xC0000000L)) }
+        finally { $up = [HaloMccVrVisibleInput]::PostMessage($mcc.MainWindowHandle, 0x101, $keyParameter, [IntPtr]($flags -bor 0xC0000000L)) }
         if (-not $down -or -not $up) { throw 'MCC rejected a background key message.' }
         Start-Sleep -Milliseconds $DelayMilliseconds
         continue
