@@ -6,6 +6,7 @@
 #include <iostream>
 #include <vector>
 #include "../src/common/physical_contact_logic.h"
+#include "h3-blade-mesh-prototype.h"
 
 int main(int argc, char** argv)
 {
@@ -115,6 +116,27 @@ int main(int argc, char** argv)
         }
     }
     sphere.children[0].radius = .003f;
+    PhysicalContactTransform inverseBind{};
+    inverseBind.position.x = -.117739f; // Verified official sword fixture.
+    const auto movingRoot = pose(.3f, 1.5f);
+    auto movingBlade = pose(.8f, 1.5f);
+    movingBlade.position = PhysicalContactTransformPoint(movingRoot, {.117739f,0,0});
+    static PhysicalContactTriangleMesh animated{};
+    if (!H3PrototypeBladeInRootFrame(mesh, inverseBind, movingBlade, movingRoot, animated)) return 7;
+    unsigned animatedHits = 0;
+    for (unsigned i = 0; i < count; ++i)
+    {
+        const auto& face = mesh.triangles[i];
+        const auto centre = (face.vertices[0]+face.vertices[1]+face.vertices[2])*(1.f/3.f);
+        target.position = PhysicalContactTransformPoint(movingBlade,
+            PhysicalContactTransformPoint(inverseBind, centre));
+        animatedHits += PhysicalContactTriangleMeshCompoundIntersect(
+            animated, movingRoot, sphere, target, 0).hit ? 1 : 0;
+    }
+    target.position = PhysicalContactTransformPoint(movingBlade,
+        PhysicalContactTransformPoint(inverseBind, {.25f,0,0}));
+    const bool animatedGap = PhysicalContactTriangleMeshCompoundIntersect(
+        animated, movingRoot, sphere, target, 0).hit;
     const auto& t = mesh.triangles[0];
     target.position = (t.vertices[0]+t.vertices[1]+t.vertices[2])*(1.f/3.f);
     auto previous = identity, current = identity;
@@ -143,10 +165,13 @@ int main(int argc, char** argv)
               << ",\"rotation_contacts\":" << rotationHits
               << ",\"rotation_samples\":" << rotationSamples
               << ",\"rotation_endpoint_contacts\":" << rotationEndpointHits
+              << ",\"animated_node_contacts\":" << animatedHits
+              << ",\"animated_node_gap_contact\":" << (animatedGap ? "true" : "false")
               << ",\"sweep_contacts\":" << sweepHits << ",\"sweep_samples\":500"
               << ",\"sweep_p95_us\":" << micros[474]
               << ",\"sweep_max_us\":" << micros.back() << "}\n";
     return centroidHits == count && !gapHit && sweepHits == 500 &&
         transformedHits == transformedSamples && !transformedGapHits &&
-        rotationHits == rotationSamples && !rotationEndpointHits ? 0 : 6;
+        rotationHits == rotationSamples && !rotationEndpointHits &&
+        animatedHits == count && !animatedGap ? 0 : 6;
 }

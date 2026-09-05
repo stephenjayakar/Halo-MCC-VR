@@ -85,6 +85,23 @@ the native contact kernel with authored geometry, not the engine's actual
 animation, render selection, inverse-bind application, wall solver or melee
 dispatch. No production behavior was enabled by these tests.
 
+`tools/h3-blade-mesh-prototype.h` now supplies an offline, fixed-capacity adapter
+from authored model-space triangles through inverse bind and animated node into
+the weapon root frame. It rebuilds every triangle and group bound after that
+conversion, preserves groups, rejects aliasing and invalid mesh/finite inputs,
+and publishes no valid output counts on a failed conversion. Like the existing
+inverse-transform helper, it expects orthonormal node/root bases from a verified
+pose source; it is not a general affine-matrix adapter.
+
+The Release benchmark uses a root rotation of 0.3 radians and a separately
+animated blade rotation of 0.8 radians at scale 1.5, with the blade pivot placed
+at the root-transformed authored rest translation. All 244 transformed blade
+probes contact and the transformed gap remains clear. Results are preserved in
+`node-adapter-benchmark.json`; all earlier rotation/scale/sweep checks also pass.
+The adapter is included only by the offline benchmark, not by the DLL. Live
+geometry identity, visibility and animation-transition policy remain required
+before promoting it into production contact code.
+
 ## Native inverse-bind evidence
 
 Read-only disassembly of official `halo3_tag_test.exe` (SHA-256
