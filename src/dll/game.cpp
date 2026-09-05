@@ -8683,6 +8683,7 @@ namespace
     }
 
     #include "halo3_npc_shove_probe.inl"
+    #include "halo3_clearance_probe.inl"
 
     bool Halo3ContactResolveBodyNodeIndex(
         int32_t objectHandle, int32_t bodyIndex,
@@ -15621,6 +15622,7 @@ namespace
             constexpr uint64_t kStructureCollisionFlags = 1ull | (1ull << 3);
             constexpr uint64_t kWallCollisionFlags =
                 kContactObjectFlags | kStructureCollisionFlags;
+            Halo3RunClearanceProbe(nowMs, weaponTransform.position, worldScale, unitHandle);
             int32_t cachedWallObjectHandle = -1;
             bool cachedWallObjectValid = false;
             bool cachedWallObjectBlocks = false;
@@ -18662,6 +18664,7 @@ namespace
             return;
         nextLogMs = nowMs + 2000;
         Halo3LogNpcShoveProbe();
+        Halo3LogClearanceProbe();
         for (size_t index = 0; index < kHalo3LargeWallCorrectionRecords; ++index)
         {
             uint32_t expected = 2;
@@ -25116,6 +25119,7 @@ namespace
                 cooperativeUnique && updateUnique)
             {
                 Halo3BindNpcShoveProbe(base, size);
+                Halo3BindClearanceProbe(base, size);
                 g_halo3ObjectSetVelocity =
                     reinterpret_cast<Halo3ObjectSetVelocityFn>(velocityHit);
                 g_halo3ObjectSetVelocities =

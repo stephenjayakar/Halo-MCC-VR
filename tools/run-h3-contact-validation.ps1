@@ -37,7 +37,8 @@ param(
     [string]$Scenario = 'Forge',
 
     [switch]$ExternalMenuControl,
-    [switch]$TestHandRecovery
+    [switch]$TestHandRecovery,
+    [switch]$ProbeClearance
 )
 
 # Runs one Halo 3 physical-contact transaction through SteamVR's null driver.
@@ -581,6 +582,7 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_HAND_RECOVERY',
     'HALOMCCVR_H3_CONTACT_DEBUG_ROTATING'
     'HALOMCCVR_H3_CONTACT_DEBUG_NPC_SHOVE'
+    'HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE'
 )
 $savedEnvironment = @{}
 foreach ($name in $debugVariables) {
@@ -631,6 +633,7 @@ try {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_RIG = '1'
     }
     if ($TestHandRecovery) { $env:HALOMCCVR_H3_CONTACT_DEBUG_HAND_RECOVERY = '1' }
+    if ($ProbeClearance) { $env:HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE = '1' }
     if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
         $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT = '1'
@@ -927,6 +930,8 @@ public static class HaloMccVrContactInput {
             throw 'Halo 3 visible-weapon-gap recorded an exact visible-geometry penetration.'
         }
         (Test-ValidationResult $text $Test) -and
+            (-not $ProbeClearance -or
+             $text -match 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0') -and
             (-not $TestHandRecovery -or
              $text -match 'H3 contact hand recovery: resets=[1-9][0-9]* checks=[1-9][0-9]* ')
     } $ValidationTimeoutSeconds "Halo 3 $Test did not reach its pass condition."
@@ -936,6 +941,10 @@ public static class HaloMccVrContactInput {
         Start-Sleep -Seconds $PostPassHoldSeconds
     }
     $text = Get-NewLogText $runtimeLog $startedUtc
+    if ($ProbeClearance -and ($text -match 'H3 clearance PROBE sample:.*(?:bounds=0|faulted=1)' -or
+        $text -notmatch 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0')) {
+        throw 'Clearance probe did not complete 32 bounded, fault-free observations.'
+    }
     $useSameFrameGapCounters = $Test -eq 'rotating-body-gap'
     if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
         (Test-VisibleWeaponGapFailure $text $useSameFrameGapCounters)) {

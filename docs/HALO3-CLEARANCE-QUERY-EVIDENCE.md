@@ -219,3 +219,17 @@ or render-policy change has been made. Before relying on this query, a probe
 must validate call/output shape and cost, and the intermediate collection and
 object filtering still need coverage review. The independent solid-interior
 and active-structure checks remain mandatory.
+
+### Opt-in clearance probe candidate
+
+The next candidate adds HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE=1, disabled in
+normal launches. It binds both uniquely matched query entries, samples only
+from the existing gated simulation contact worker, and records 32 queries
+at 200 ms spacing. Radii cycle 0.1-0.4 m; masks alternate structure+instances
+and that mask plus all object categories, with the player ignored. Only the
+verified three counts are read from oversized sentinel-filled storage; writes
+beyond the official C408 extent or counts above 256 fail the probe. A fault
+also disables the probe alone. Cold status logging drains immutable records.
+No result changes weapon collision, melee, or render approval. The harness
+-ProbeClearance option requires all 32 observations and no bound/fault failure.
+This is a query-call/output/cost probe, not whole-weapon clearance proof.
