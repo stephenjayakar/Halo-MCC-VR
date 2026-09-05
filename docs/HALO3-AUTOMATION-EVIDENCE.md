@@ -179,3 +179,22 @@ The original standalone snapshot position was also corrected from +0x20 to the
 already evidenced +0x50; earlier snapshot positions are not usable. The native
 motor probe always used kHalo3ObjectPositionOffset (+0x50), so its measurements
 are unaffected by the standalone snapshot bug.
+
+### Programmatic campaign control verified (2026-09-05)
+
+`tools/read-mcc-menu-text.ps1` uses local Windows OCR on actual MCC captures.
+`tools/resume-halo3-programmatically.ps1` recognizes each menu before sending
+addressed key messages. It progressed start -> main -> campaign titles -> Halo 3
+built-in -> Resume, and the 681eec0 runtime entered Sierra 117 gameplay.
+No computer-use actions or direct scenario-memory writes were required.
+`send-mcc-keys.ps1 -Background` also moved the player in gameplay: a held W
+changed the player's verified +0x50 position from (-11.570,172.767,4.772) to
+(-17.213,166.344,4.731). The bounded approach helper learns W/D directions from
+read-only snapshots; its own end-to-end approach test remains pending.
+
+Validation identity correction: the first 4a003b1 NPC-shove result JSON sampled
+its installed hash at report time, after MCC was already closed and 681eec0 was
+installed. Its source/log identify 4a003b1; the tested DLL was the independently
+verified 28A9BFE480391A2057192D0A77947C5D6484CB6A2E404300F6B9A4D2EC29CA87,
+not the later D417... DLL listed in that result. The validator now captures
+source-tool identity and installed hashes before launching MCC.
