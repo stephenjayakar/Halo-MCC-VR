@@ -200,6 +200,12 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
                     (Get-Number $pairs 'targetMass'))
             }
         }
+        elseif ($line -like '*H3 NPC contact shove:*') {
+            $pairs = Get-ContactPairs $line
+            foreach ($name in @('enabled', 'applied', 'rejected', 'faulted')) {
+                Update-Max $maximum "npc_shove_$name" (Get-Number $pairs $name)
+            }
+        }
         elseif ($line -like '*H3 left grab status:*') {
             ++$leftLines
             $pairs = Get-ContactPairs $line
@@ -269,6 +275,10 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
         enemy_melee_requested =
             Test-Positive $maximum 'enemyMeleeRequests'
         enemy_melee_applied = Test-Positive $maximum 'enemyMeleeApplied'
+        npc_shove_applied = Test-Positive $maximum 'npc_shove_applied'
+        npc_shove_no_recorded_fault =
+            (Test-Positive $maximum 'npc_shove_applied') -and
+            (-not (Test-Positive $maximum 'npc_shove_faulted'))
         native_melee = Test-Positive $maximum 'melees'
         render_collision_guard = Test-Positive $maximum 'bodyRenderSamples'
         render_guard_no_recorded_failure =
@@ -293,7 +303,7 @@ function Analyze-Halo3ContactText([string]$Text, [string]$SourcePath) {
     }
 
     return [pscustomobject]@{
-        schema_version = 3
+        schema_version = 4
         log_path = $SourcePath
         source_commit = $sourceCommit
         mcc_edition = $edition
