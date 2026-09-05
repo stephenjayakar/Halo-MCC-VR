@@ -32,8 +32,17 @@ public static class HaloMccVrCaptureWindow
 
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr window, out Rect rect);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
 }
 '@
+
+# GetWindowRect and CopyFromScreen must use the same physical pixel space.
+# The default DPI-unaware host cropped the 150%-scaled MCC window and captured
+# part of the app behind it instead of the complete game frame.
+$priorDpiContext = [HaloMccVrCaptureWindow]::SetThreadDpiAwarenessContext([IntPtr](-4))
+try {
 
 $resolvedOutput = [IO.Path]::GetFullPath($OutputRoot)
 [IO.Directory]::CreateDirectory($resolvedOutput) | Out-Null
@@ -135,3 +144,9 @@ $manifest = [ordered]@{
     ($manifest | ConvertTo-Json -Depth 6))
 
 Write-Output $sequenceRoot
+}
+finally {
+    if ($priorDpiContext -ne [IntPtr]::Zero) {
+        $null = [HaloMccVrCaptureWindow]::SetThreadDpiAwarenessContext($priorDpiContext)
+    }
+}
