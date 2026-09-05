@@ -65,6 +65,49 @@ coverage. The tested gap coordinate is in the exported mesh frame, not a retail
 world coordinate. Geometry totals fit the existing fixed 768-triangle capacity;
 that capacity alone is not permission to enable the feature.
 
+## Native inverse-bind evidence
+
+Read-only disassembly of official `halo3_tag_test.exe` (SHA-256
+`59A78F2C96034D7CEB5D710505B2B36813AA141FC81A083E3F952973DBCE4602`)
+establishes the following layout and consumer chain. RVAs below are evidence
+locations, not new runtime bindings or hooks.
+
+- The executable explicitly warns that the displayed inverse matrix fields
+  are incorrect: inverse scale belongs before the matrix, although the tag
+  display puts it after inverse position. Therefore the XML field labels must
+  not be used individually to construct an inverse matrix.
+- At `0x47588E`, the object/model/render-model chain reads object `+0x40`,
+  model `+0x0C`, and the render-model nodes block `+0x30`. Node stride is
+  `0x60`; its inverse matrix starts at `+0x28`. Subsequent validation names
+  that exact address `&render_model_node->default_inverse_matrix`.
+- The skinning builder at `0x7D2DC0` resolves a `mode` tag and, on its ordinary
+  branch at `0x7D2F61`, iterates the nodes. Each iteration passes a live
+  52-byte node matrix and the corresponding authored inverse at node `+0x28`
+  to `0x7D26E0`, producing a 48-byte shader matrix. Input nodes advance by
+  `0x34`, authored nodes by `0x60`, and output matrices by `0x30`.
+- `0x7D26E0` passes those two matrices to `0x41F5E0`, then folds the resulting
+  scale into the basis while packing the shader matrix. The product routine
+  writes the product of the two input scales at output offset zero. This
+  establishes a native inverse-bind consumer after the live palette stage;
+  the remaining runtime work must preserve its transform conventions.
+
+The pinned Steam retail module (SHA-256
+`B209D8454B12DC77E54CCD2C9924EC8D44B8619D21CF98E36FFAF601E67EFB63`)
+has exactly one match for the existing `kFpVisiblePaletteSig`, at `0x2C561C`.
+That function maps the source nodes through the bone map and copies or composes
+them with the supplied root; it does not itself apply the authored inverse.
+The retail downstream skinning homolog has not yet been established here.
+Nothing hooks the matrix-product routine.
+
+Disassemblies are preserved under `out/research/20260905-sword-contact/` as
+`h3ek-inverse-layout-disasm.txt`, `h3ek-inverse-consumer-disasm.txt`,
+`h3ek-skinning-matrices-disasm.txt`, `h3ek-skinning-compose-disasm.txt`,
+`h3ek-matrix-product-disasm.txt`, and `retail-final-palette-disasm.txt`.
+The earlier `h3ek-default-inverse-xrefs.txt` zero-reference result is invalid:
+its linear disassembler stopped early. Positive RIP-relative references and
+assert descriptors led to the functions above; do not cite that earlier zero
+as evidence of absence.
+
 ## Required runtime work
 
 1. Verify the equipped retail sword's exact render identity and node mapping.
