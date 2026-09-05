@@ -542,3 +542,15 @@ fallback behavior remains for submissions without capture provenance. The debug
 replay publishes its own applied correction after successful whole-palette
 replacement. No allocation, logging, locks, or new engine binding in the hot hook.
 This candidate needs live wall/prop comparison and headset verification.
+
+Installed provenance candidate: `affb3cb2b81a9f5eeb62fbe1a6521e51f5c0fb5e`.
+Package: `out/candidates/affb3cb-h3-physical-contact-20260905-224809003Z`.
+Release build/core tests and Reach consistency check passed. Independently
+verified installed DLL SHA:
+`E1AB1D04D23AF24D05C262BB2A7712AF9288DD999381D05EC3CEAA9A14B777C6`.
+Launcher remains `D489C5763E21FC339999DC734CED09A2068AAC6C035EA8B7BF4339B6810FA450`.
+Prior build preserved under `out/deploy-backups/9682736-steam-before-affb3cb-20260905-224810180Z`.
+Steam E: installed; N: Steam and Store paths absent and explicitly skipped by
+installer. Configuration and normal SteamVR settings hashes remain unchanged.
+MCC/vrserver are absent. No session has run on this candidate yet; the earlier
+recording proves only the earlier build's behavior. Accepted pointer unchanged.
