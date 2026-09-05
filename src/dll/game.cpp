@@ -10446,6 +10446,49 @@ namespace
         return resolvedAny;
     }
 
+    // Diagnostic placement only: select the authored body nearest the object's
+    // bounding center. The production sweep still tests every animated body.
+    bool Halo3ContactDebugAnimatedTargetShape(int32_t handle, const unsigned char* data,
+        PhysicalContactCompoundShape& output, PhysicalContactTransform& transform)
+    {
+        Halo3ContactPhysicsView physics{};
+        std::array<Halo3Matrix4x3, kHalo3MaximumRenderNodes> nodes{};
+        int count = 0;
+        bool interpolated = false;
+        if (!Halo3ContactPhysicsForObject(data, physics) ||
+            !Halo3ContactCopyVisibleNodes(handle, data, nodes, count, interpolated))
+            return false;
+        const auto* p = reinterpret_cast<const float*>(data + kHalo3ObjectBoundingCenterOffset);
+        const PhysicalContactVec3 center{p[0], p[1], p[2]};
+        if (!PhysicalContactFinite(center)) return false;
+        float best = FLT_MAX;
+        bool found = false;
+        for (int body = 0; body < physics.rigidBodyCount; ++body)
+        {
+            const auto* record = physics.rigidBodies + body * 0xC0;
+            const int node = *reinterpret_cast<const int16_t*>(record);
+            if (node < 0 || node >= count || !Halo3MatrixValid(nodes[node])) continue;
+            const auto* shape = *reinterpret_cast<const unsigned char* const*>(record + 0x58);
+            PhysicalContactCompoundShape compound{};
+            if (!shape || !Halo3ContactCompoundFromHavokShape(shape, compound)) continue;
+            const auto& matrix = nodes[node];
+            PhysicalContactTransform t{};
+            t.position = {matrix.position[0], matrix.position[1], matrix.position[2]};
+            t.forward = {matrix.forward[0], matrix.forward[1], matrix.forward[2]};
+            t.left = {matrix.left[0], matrix.left[1], matrix.left[2]};
+            t.up = {matrix.up[0], matrix.up[1], matrix.up[2]};
+            t.scale = matrix.scale;
+            if (!PhysicalContactTransformFinite(t)) continue;
+            const float score = PhysicalContactLengthSquared(PhysicalContactCompoundWorldCentroid(compound, t) - center);
+            if (!std::isfinite(score) || score >= best) continue;
+            best = score;
+            output = compound;
+            transform = t;
+            found = true;
+        }
+        return found;
+    }
+
     // Cache the selected node's default inverse once per concrete vehicle/seat,
     // then map the Blender point plus live vehicle-local trims through it. The
     // render-model tag stores that inverse directly at node+0x28, so no
@@ -14702,7 +14745,9 @@ namespace
                         std::memory_order_relaxed);
                 const bool haveDebugTargetShape =
                     detailedTargetHandle != -1 &&
-                    (Halo3ContactDetailedTargetShape(
+                    ((g_halo3ContactDebugRequestedKind.load(std::memory_order_relaxed) == 0 &&
+                      Halo3ContactDebugAnimatedTargetShape(detailedTargetHandle, debugAimData, debugTargetShape, debugTargetTransform)) ||
+                     Halo3ContactDetailedTargetShape(
                          detailedTargetHandle, debugAimData,
                          debugTargetShape, debugTargetTransform,
                          requiresNativeConfirmation,
