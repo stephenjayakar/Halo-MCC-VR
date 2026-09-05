@@ -3316,6 +3316,27 @@ this does not broaden the unverified renderer boundary. Pure coverage admits a
 large heuristic stream. The reported Campaign rock remains pending headset
 acceptance.
 
+### 2026-09-05 non-damaging slow NPC contact threshold
+
+The requested Halo 3 behavior is slow weapon contact without melee damage and
+deliberate swings admitted at the user's configured melee threshold, in both
+Forge and Campaign. Source inspection found `PhysicalContactTargetMeleeThreshold`
+returned a hardcoded `0.10 m/s` for bipeds, creatures, and giants regardless of
+configuration. That policy made a slow push eligible for native damage.
+
+The isolated change removes that override: every target now honors the
+configured threshold (default `1.50 m/s`). Native damage bindings, enemy geometry,
+fast-swing saturation, armed latch, cooldown, and rigid-object impulses are
+unchanged. Core tests exercise the production speed/threshold combination for
+all three enemy kinds: `0.10`, `0.40`, `0.75`, and `1.49 m/s` remain physics-only;
+`1.50`, `2.50`, and `13.75 m/s` admit a strike. Target velocity cannot promote
+a slow hand to damage. Release build and core tests passed on 2026-09-05.
+
+This is a damage-admission correction, **not proof of NPC displacement**.
+Living keyframed bodies still fail the existing dynamic-body impulse gate.
+NPC shoving needs its own native movement evidence and runtime test. Headset
+feel, Campaign/Forge runtime acceptance, and the accepted pointer remain open.
+
 ### 2026-08-13 visible-pose proof telemetry
 
 The real-headset report that sometimes only Master Chief's hands remained

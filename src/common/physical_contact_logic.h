@@ -3162,17 +3162,12 @@ inline PhysicalContactVec3 PhysicalContactEnemyMeleeFallbackNormal(
 inline float PhysicalContactTargetMeleeThreshold(
     float configuredThresholdMetersPerSecond, uint8_t targetKind)
 {
-    if (!std::isfinite(configuredThresholdMetersPerSecond))
-        return configuredThresholdMetersPerSecond;
-    if (!PhysicalContactEnemyMeleeKind(targetKind))
-        return configuredThresholdMetersPerSecond;
-
-    // A real-headset run proved every requested enemy melee reached native
-    // damage, but using the exact 0.05 m/s tracking-noise edge made incidental
-    // touches too easy to damage. Require twice that floor for living enemies.
-    // Props and vehicles retain the configured value, while the per-target
-    // armed latch and cooldown still limit continuous contact to one event.
-    return 0.10f;
+    // Gentle NPC contact must remain non-damaging. The former enemy-only
+    // 0.10 m/s override bypassed the user's melee threshold and treated slow
+    // pushes as strikes. All target kinds now honor the configured threshold;
+    // exact-contact admission, the armed latch, and cooldown remain separate.
+    (void)targetKind;
+    return configuredThresholdMetersPerSecond;
 }
 
 inline float PhysicalContactTargetMeleeImpactSpeed(

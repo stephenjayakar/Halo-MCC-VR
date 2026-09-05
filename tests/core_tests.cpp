@@ -10124,21 +10124,21 @@ int main()
               !PhysicalContactTargetMeleeSpeedEligible(false, 1, true) &&
               PhysicalContactTargetMeleeSpeedEligible(true, 1, true) &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 0) -
-                            0.10f) < 1.0e-6f &&
+                            1.50f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 12) -
-                            0.10f) < 1.0e-6f &&
+                            1.50f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(3.00f, 13) -
-                            0.10f) < 1.0e-6f &&
+                            3.00f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 1) -
                             1.50f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(1.50f, 2) -
                             1.50f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetMeleeThreshold(0.50f, 0) -
-                            0.10f) < 1.0e-6f &&
+                            0.50f) < 1.0e-6f &&
               PhysicalContactClassify(
                   0.10f, 0.10f,
                   PhysicalContactTargetMeleeThreshold(1.50f, 0)) ==
-                  PhysicalContactAction::ImpulseAndMelee &&
+                  PhysicalContactAction::ImpulseOnly &&
               std::fabs(PhysicalContactTargetActionSpeed(
                             0.01f, 0.40f, 0) - 0.40f) < 1.0e-6f &&
               std::fabs(PhysicalContactTargetActionSpeed(
@@ -10298,6 +10298,35 @@ int main()
             "A slow first enemy overlap may become one fast armed melee on a "
             "later sample, while the same overlap cannot repeat damage and a "
             "vehicle shove never gains sustained-contact melee admission");
+
+        // Exercise the production enemy-speed and threshold combination:
+        // approaching, sustained, and retreating slow contact cannot damage,
+        // while a deliberate strike crosses the configured boundary.
+        for (const uint8_t kind : {uint8_t{0}, uint8_t{12}, uint8_t{13}})
+        {
+            const float threshold = PhysicalContactTargetMeleeThreshold(1.50f, kind);
+            for (const float speed : {0.10f, 0.40f, 0.75f, 1.49f})
+            {
+                for (const bool firstContact : {false, true})
+                {
+                    const float impact = PhysicalContactTargetMeleeImpactSpeed(
+                        firstContact, true, kind, {-5.0f, 0, 0},
+                        {-speed, 0, 0}, {1, 0, 0});
+                    const auto action = PhysicalContactClassify(speed, impact, threshold);
+                    Check(action == PhysicalContactAction::ImpulseOnly &&
+                          !PhysicalContactMeleeReady(action, true, true, 2000, 0),
+                        "Slow NPC contact stays non-damaging despite target motion");
+                }
+            }
+            for (const float speed : {1.50f, 2.50f, 13.75f})
+            {
+                const float impact = PhysicalContactTargetMeleeImpactSpeed(
+                    true, true, kind, {-speed, 0, 0}, {-speed, 0, 0}, {1, 0, 0});
+                Check(PhysicalContactClassify(speed, impact, threshold) ==
+                          PhysicalContactAction::ImpulseAndMelee,
+                    "Deliberate NPC strike crosses configured melee threshold");
+            }
+        }
 
         Check(!PhysicalContactMeleeReady(
                   PhysicalContactAction::ImpulseOnly, true, true, 1000, 0) &&
