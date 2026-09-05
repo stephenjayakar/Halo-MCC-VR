@@ -182,3 +182,40 @@ structure assertion. Output: out/research/20260905-clearance-query/point-verific
 No runtime binding or invocation has been added. A valid point is not proof
 of clearance around the entire weapon; feature-gather coverage and freshness
 remain required before changing render approval behavior.
+
+## Retail feature-gather match and call-shape difference
+
+The official movement caller 64EC20 matches retail 1FFB64: both allocate
+C490 stack bytes, compute a center from position plus half motion and a
+vertical half-size, construct a bounding radius, and branch between a feature
+solver and unchanged position-plus-motion output. Official 64ED6A -> 64D6E0
+matches retail 1FFC58 -> 1FE800; solver calls match 64EDAD -> 64EE60 and
+1FFC9B -> 1FEF30. These call edges and the retail radius/call/branch sequence
+are checked by tools/verify-h3-clearance-gather.py.
+
+Retail 1FE800 zeroes the three output counts at 1FE855/1FE859, enumerates
+active structures using the same mask consumed by the matched point core,
+and returns whether any output count is nonzero at 1FEEE4. That 26-byte
+count sequence is unique in executable sections. The direct BSP collection
+and append calls are 1FE967 -> 25583C and 1FE9AC -> 24BC10. The object-feature
+call is 1FEE13 -> 1FE64C. Both official and retail add exactly 0.0625 world
+units to the requested gather radius; the verifier checks both RIP-relative
+float constants. This inflation is native behavior, not a mod tuning value.
+
+The retail routine differs from the official two-ignore-argument narrative:
+its object path reads the first ignore argument at original entry RSP+28
+(1FEDB4), while the second argument's entry RSP+30 slot is overwritten with
+an instance index at 1FEB90 and reused as local storage. The retail movement
+caller explicitly supplies -1 for the first and does not initialize the
+second. Never assume the retail gather excludes two objects just because
+the official call does. Output remains the eighth argument, entry RSP+40.
+The full retail body has no counterparts of the two official debug switches
+that clear instance/object category flags. Its object-cache path can broaden
+flags by OR at 1FEA63-1FEA89; complete cache/filter coverage remains unproven.
+
+Verification output: out/research/20260905-clearance-query/gather-verification.json.
+Both pinned inputs passed. No runtime invocation, hook, clearance certificate,
+or render-policy change has been made. Before relying on this query, a probe
+must validate call/output shape and cost, and the intermediate collection and
+object filtering still need coverage review. The independent solid-interior
+and active-structure checks remain mandatory.
