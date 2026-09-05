@@ -554,3 +554,38 @@ Steam E: installed; N: Steam and Store paths absent and explicitly skipped by
 installer. Configuration and normal SteamVR settings hashes remain unchanged.
 MCC/vrserver are absent. No session has run on this candidate yet; the earlier
 recording proves only the earlier build's behavior. Accepted pointer unchanged.
+
+## Provenance candidate live movement result (September 5, 22:48 UTC)
+
+Run `out/debug-openxr/20260905-224851586Z-controller-contact-result.json`:
+Steam Construct Forge / SteamVR null driver / Null Model Number,
+22:48:57-22:53:31 UTC, runtime affb3cb, validator 7694cbe.
+Log SHA `6D7224775332B0A5C68345C6D971FCE35369AC716FB4ECD48CB5EE1C655F8D35`.
+Controller-contact admission passed, but three attempted approaches registered
+zero wall blocks; they do not validate the provenance change under collision.
+Spawn was on a lower ramp under a bridge, unlike the previous corridor test.
+
+A new useful reproduction occurred during A movement near the ramp:
+`out/demos/20260905-225138-provenance-pillar-pressure-retreat/raw.mp4`.
+The 5-second frame visibly shows the rifle raised away from the hand; by seven
+seconds it has returned. The recovery event at 15:51:44.706 has proposal=16995,
+displayed=16994, proof=1, corrected=0, finalGuard=0/1, target=FFFFFFFF,
+consumedOffset=(0,0,0), scale=.33. Tracked root=(7.768620,3.084090,7.173397),
+final root=(7.735178,3.102943,7.276415), about .333 m apart, predominantly
+vertical. This demonstrates an old uncorrected approved palette can visibly
+lag the current tracked root during movement without any collision correction.
+It is not evidence that affb3cb introduced it: the approval-selection behavior
+predates that candidate. No repeated reset loop followed; total resets remained
+one, nativeSamples=93, awaitingMotion=0 through 15:53:07.542.
+
+The other two clips (`20260905-225042-provenance-wall-pressure-retreat` and
+`20260905-225247-provenance-ramp-wall-retreat`) also failed to reach a registered
+wall contact. All three have explicit diagnostic-only result.json classifications.
+Do not present them as successful physical-interaction demos. Next investigation
+must distinguish stale uncorrected approval from actual collision displacement;
+the pose-correction provenance fix does not solve the former.
+
+MCC and VR processes absent after cleanup. Independently verified normal settings:
+null=false, forcedDriver empty, requireHmd=true; SHA
+`175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
+No headset acceptance or accepted-pointer advance.
