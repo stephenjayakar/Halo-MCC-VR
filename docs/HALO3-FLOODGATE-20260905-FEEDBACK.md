@@ -114,8 +114,8 @@ The controlled Forge `visible-weapon-gap -TestHandRecovery` null-driver run
 passed on September 5, 21:02-21:04 UTC. Its result is
 `out/debug-openxr/20260905-210237359Z-visible-weapon-gap-result.json`; the adjacent
 log has SHA-256 `11652FE9BA743B7402DE77B5D397D5036B66C2ADE2A9225D3A00B1C81D72353D`.
-At 14:04:42 local time, it recorded 8,201 valid leash checks, four recoveries,
-two missing-reference samples, worker reset reason 32, and 2,696 exact geometry
+At 14:04:40 local time, the preserved log recorded 8,093 valid leash checks, four recoveries,
+two missing-reference samples, worker reset reason 32, and 2,660 exact geometry
 separations with zero recorded geometry or solid overlaps. One excessive
 separation was injected; the additional three recoveries were not injected
 directly and have not been individually attributed. The diagnostic establishes
