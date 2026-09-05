@@ -394,7 +394,10 @@ namespace
     // actual visible-weapon and firing paths be exercised without adding work
     // to their hot callbacks.
     bool g_halo3AimDebugPose = false;
-    constexpr float kHalo3AimDebugPosition[3]{0.28f, 1.25f, -0.45f};
+    // Null-driver LOCAL space does not supply the assumed standing floor
+    // height. The +1.25 m fixture put the weapon above the camera (verified
+    // by the upward-view test). Keep the diagnostic hand in the view instead.
+    constexpr float kHalo3AimDebugPosition[3]{0.18f, -0.18f, -0.65f};
     struct ControllerMotionPublication
     {
         std::atomic<uint32_t> sequence{0};
@@ -10360,7 +10363,7 @@ bool VR_GetAimPose(float outQuat[4], float outPos[3])
     if (g_halo3AimDebugPose)
     {
         // OpenXR LOCAL-space pose: a steady right hand in front of the null
-        // driver's standing head.  Identity points the controller along -Z.
+        // driver's local head. Identity points the controller along -Z.
         outQuat[0] = 0.0f;
         outQuat[1] = 0.0f;
         outQuat[2] = 0.0f;
