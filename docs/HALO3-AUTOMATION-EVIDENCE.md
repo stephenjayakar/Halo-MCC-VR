@@ -96,6 +96,20 @@ health/shield loss and disables only the probe if either falls or a native call
 faults. This is an experiment to establish motor behavior; no production NPC
 weapon shove is enabled by this scaffolding.
 
+Candidate `995fca7`'s sparse-pulse experiment completed without a fault. Target
+`E466008C` had character mode 1 (ground), health 1, shield 0; twelve native calls
+each changed projected velocity from approximately zero to 0.06839 m/s. Baseline
+drift was 0.00074 m and total measured pulse displacement was 0.01143 m, below
+the diagnostic's 0.02 m movement requirement. Health and shield loss remained
+zero. The sparse-pulse behavior is disabled before changing the cadence.
+
+Its real recording is
+`out/debug-openxr/20260905-090938315Z-995fca7-campaign-npc-motor/recording.mp4`,
+92 frames over 24.913963 seconds, SHA-256
+`A4B74EA2F256FE9623B6A0A2EC2FF26C7F5FC1EA1F2591704639DA250B3A2CCC`.
+The native velocity response is useful evidence, but this is not a useful
+weapon shove or a headset acceptance result.
+
 ## Local runtime evidence and limits
 
 The null-driver harness now keeps the stationary compositor awake during its

@@ -4,6 +4,7 @@
 // and one vector, set the character-physics acceleration flag, then enter the
 // native object acceleration path. No damage entry point is called here.
 using Halo3BipedAccelerateFn = void (__fastcall*)(int32_t, const float*);
+constexpr bool kEnableHalo3NpcShoveProbeCandidate = false;
 Halo3BipedAccelerateFn g_halo3NpcProbeAccelerate = nullptr;
 std::atomic<bool> g_halo3NpcProbeEnabled{false};
 std::atomic<uint32_t> g_halo3NpcProbeStage{0}, g_halo3NpcProbeCalls{0};
@@ -21,7 +22,7 @@ void Halo3BindNpcShoveProbe(uintptr_t base, size_t size)
     wchar_t value[8]{};
     const DWORD length = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_DEBUG_NPC_SHOVE", value, 8);
-    if (length != 1 || value[0] != L'1')
+    if (!kEnableHalo3NpcShoveProbeCandidate || length != 1 || value[0] != L'1')
         return;
     const char* signature =
         "48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 55 "

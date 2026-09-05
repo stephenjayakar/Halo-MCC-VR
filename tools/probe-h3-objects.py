@@ -136,7 +136,7 @@ def main():
             address = struct.unpack_from("<Q", entry, 0x10)[0]
             if salt < 0x8000 or not address or kind != args.kind:
                 continue
-            data = read(address, 0x280 if kind == 0 else 0x100)
+            data = read(address, 0x4E0 if kind == 0 else 0x100)
             position = struct.unpack_from("<3f", data, 0x20)
             velocity = struct.unpack_from("<3f", data, 0x74)
             if not all(math.isfinite(v) for v in position + velocity):
@@ -147,7 +147,11 @@ def main():
                    "position": position, "velocity": velocity}
             if kind == 0:
                 obj.update(weapon_slot=struct.unpack_from("<b", data, 0x262)[0],
-                           weapon_handles=[hex(v) for v in struct.unpack_from("<4I", data, 0x268)])
+                           weapon_handles=[hex(v) for v in struct.unpack_from("<4I", data, 0x268)],
+                           health=struct.unpack_from("<f", data, 0xF4)[0],
+                           shield=struct.unpack_from("<f", data, 0xF8)[0],
+                           damage_dead=bool(struct.unpack_from("<I", data, 0x110)[0] & 4),
+                           character_mode=data[0x4DE])
             objects.append(obj)
         print(json.dumps({"pid": proc.pid, "table": hex(table),
                           "local_player_units": [hex(v) for v in sorted(player_units.get(table, set()))],
