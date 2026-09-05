@@ -19082,7 +19082,10 @@ namespace
         // Opt-in filming camera for live contact replays. The simulation and
         // controller publications above retain their ordinary world frame.
         // Only this camera copy observes the scripted weapon and its target.
-        if (debugRig && src && g_halo3ContactDemoCamera.load(std::memory_order_relaxed) &&
+        // Disabled: the scoped observer camera did not produce aligned,
+        // convincing contact footage. Retain the experiment for diagnosis.
+        constexpr bool kEnableContactObserverCameraCandidate = false;
+        if (kEnableContactObserverCameraCandidate && debugRig && src && g_halo3ContactDemoCamera.load(std::memory_order_relaxed) &&
             g_halo3ContactDebugTarget.load(std::memory_order_relaxed) != -1)
         {
             const float scale = g_worldScale.load(std::memory_order_relaxed);
