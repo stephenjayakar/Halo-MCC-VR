@@ -233,3 +233,24 @@ DEBUG_VISIBLE_EXACT to exercise that helper and measure the proposed/visible
 surfaces. The motor result above is valid, but does not prove visual separation
 or headset quality. The saved video shows the NPC, with the replayed gun poorly
 framed relative to the fixed null-headset view.
+
+The 1b2a43c exact replay also passed the slow motor criterion (0.25 m/s
+trajectory, zero melee); target health/shield remained 1/0 in the follow-up
+snapshot. Log 20260905-100341144Z-npc-shove.log SHA-256
+0B93745CCC27B915DAD96275C8C56603845DA41C85436BF05447836C190A5982.
+Video 20260905-100548691Z-1b2a43c-campaign-npc-exact/recording.mp4,
+133 frames / 34.785076 s, SHA-256
+8C1F0557FB440D11D81B28B6B93F08A3AD71536211FD931F1BAD6454BB35691F.
+There were render separation fallback holds; this is not a clean visual
+separation claim. The fixed null-headset view still frames the NPC's lower body.
+
+The separate 2.25 m/s exact replay passed native NPC melee: 14 applied melee
+calls, zero rejections/faults/no-damage results. The approach helper stopped
+when its target died. Slow phases of the oscillation also produced six motor
+calls; shove and melee were not combined in one command.
+Log 20260905-100858311Z-npc-melee.log SHA-256
+2BF5FFB26563B89107DB2C31BF2853EEF7F4072E37DD722766E5F6F2C1C745EE.
+Video 20260905-101134526Z-1b2a43c-campaign-npc-melee/recording.mp4,
+68 frames / 17.838799 s, SHA-256
+0DCF2CC9F0D7C2625750CCF280C62632B6518F9824CE196DD207A1727C209B02.
+All video/log paths in these two paragraphs are beneath out/debug-openxr.
