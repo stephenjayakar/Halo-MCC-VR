@@ -11,6 +11,7 @@ param(
         'rotating-body-gap',
         'wall',
         'decorator-wall',
+        'npc-contact',
         'melee')]
     [string]$Test = 'equipment-scoop',
 
@@ -25,6 +26,9 @@ param(
 
     [ValidateSet('Auto', 'Construct', 'HighGround', 'Valhalla')]
     [string]$ForgeMap = 'Auto',
+
+    [ValidateSet('Forge', 'Campaign')]
+    [string]$Scenario = 'Forge',
 
     [switch]$ExternalMenuControl
 )
@@ -417,6 +421,13 @@ function Test-VisibleWeaponGapFailure(
 
 function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
+        'npc-contact' {
+            # Contact admission only: this does not claim NPC movement.
+            $status = Get-LatestContactStatusLine $Text
+            return $status -and $status -match 'hits=([1-9][0-9]{2,}) ' -and
+                $status -match 'melees=0 ' -and
+                $status -match 'target=0x(?!FFFFFFFF)[0-9A-F]+ kind=0 '
+        }
         'weapon-scoop' {
             return (Test-DetailedTargetGeometrySeen $Text) -and
                 (Test-DynamicBodyConstraintSeen $Text) -and
@@ -611,6 +622,9 @@ try {
             $env:HALOMCCVR_H3_CONTACT_DEBUG_MELEE = '1'
             $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '2'
         }
+        'npc-contact' {
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
+        }
     }
 
     $startedUtc = [DateTime]::UtcNow
@@ -781,14 +795,14 @@ public static class HaloMccVrContactInput {
         }
     }
     else {
-        Write-Host 'MCC is ready for visible external Forge menu control.'
+        Write-Host "MCC is ready for external Halo 3 $Scenario menu control."
     }
 
         Wait-Until {
             $text = Get-NewLogText $runtimeLog $startedUtc
             $wrongTitle = Get-WrongSupportedTitle $text
             if ($wrongTitle) {
-                throw "Menu control launched $wrongTitle; only Halo 3 Forge is allowed."
+                throw "Menu control launched $wrongTitle; only Halo 3 is allowed."
             }
             $text -match 'Title adapter: detected supported title Halo 3'
         } $MenuControlTimeoutSeconds 'Menu control did not start Halo 3.'
@@ -837,7 +851,7 @@ public static class HaloMccVrContactInput {
     } $ValidationTimeoutSeconds "Halo 3 $Test did not reach its pass condition."
 
     if ($PostPassHoldSeconds -gt 0) {
-        Write-Host "Holding the validated Forge process for $PostPassHoldSeconds seconds."
+        Write-Host "Holding the validated $Scenario process for $PostPassHoldSeconds seconds."
         Start-Sleep -Seconds $PostPassHoldSeconds
     }
     $text = Get-NewLogText $runtimeLog $startedUtc
@@ -912,6 +926,7 @@ if (Test-Path -LiteralPath $savedLogPath -PathType Leaf) {
 $result = [ordered]@{
     schema_version = 1
     test = $Test
+    requested_scenario = $Scenario
     passed = $passed
     source_commit = $runtimeSourceCommit
     validator_source_commit = (& git -C $repoRoot rev-parse HEAD).Trim()
