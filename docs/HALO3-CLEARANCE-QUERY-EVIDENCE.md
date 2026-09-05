@@ -61,3 +61,40 @@ A possible conservative certificate would bound the entire weapon and permitted
 motion, not just its root. Zero features cannot be treated as that certificate
 until the preceding conditions are proven. No production behavior changed in
 this investigation, and the earlier floating-gun reproduction remains unresolved.
+
+## Coverage audit and instance flag correction
+
+The lower BSP query 7CF010 initializes four collection counts at offsets 0,
+804, 1008, and 180C. Its return at 7CF126 considers only the first three.
+The standard tree walker 7CB590 records reached non-sentinel leaves in the
+fourth list when its mode bit 1 is enabled; the negative sentinel -1 exits at
+7CB79F. Therefore an empty returned surface-feature set does not by itself
+certify free space. A solid-interior check remains necessary. Dynamic object
+features are also separately gated by high object flag bit 0 in 64D6E0, then
+filtered by 6547D0, so their coverage cannot be inferred from BSP results.
+
+This audit exposed a separate verified production bug in the existing vector
+query. H3EK 651790 receives packed query flags in R8; 6517BA shifts its low
+32 bits by three and 6517D2 skips the instanced-geometry path when that bit is
+clear. The enabled path includes the structure instance list at +1C0 through
+its cluster records, and also the newer representation through 800E00.
+The public vector core calls this routine at 65364D.
+
+Pinned retail has the matching branch at 1FE3D8-1FE3F0 in routine 1FE3B8:
+R8D is shifted by three and the zero case branches to 1FE5BE, skipping both
+instance representations. Verified callers from the existing vector core are
+1FDD33 and 1FDE05. The 30-byte gate sequence is unique across executable
+sections. `tools/verify-h3-instance-query-flag.py` checks both module hashes,
+these call edges, the official extraction, and that unique retail gate.
+Result: `out/research/20260905-clearance-query/instance-flag-verification.json`.
+
+Production previously used low flags 1, high flags 7FFF. Low 1 enables BSP
+but does not enable this instance path. The candidate changes low flags to 9
+(BSP plus instances) for the wall solver, normal native contact samples, and
+its opt-in structure test. The object-only debug isolation remains object-only.
+No new hook or guessed binding is installed. This corrects prior documentation
+that described low 1 rays as covering instanced geometry; that claim was too
+broad. It does not prove that the user's particular Floodgate rock is an
+instance, nor does it provide collision for render-only decorators.
+The proposed clearance certificate and uncorrected-palette lag remain separate,
+unresolved work.

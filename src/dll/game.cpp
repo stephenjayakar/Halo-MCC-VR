@@ -15582,8 +15582,12 @@ namespace
             // query master enable. Ask for exact structure and every object.
             constexpr uint64_t kContactObjectFlags =
                 uint64_t{0x7FFF} << 32;
+            // BSP and instanced geometry are separate enables. H3EK 651790
+            // and pinned retail 1FE3B8 skip the instance path unless low bit 3
+            // is set; low bit 0 alone does not cover instanced map collision.
+            constexpr uint64_t kStructureCollisionFlags = 1ull | (1ull << 3);
             constexpr uint64_t kWallCollisionFlags =
-                kContactObjectFlags | 1ull;
+                kContactObjectFlags | kStructureCollisionFlags;
             int32_t cachedWallObjectHandle = -1;
             bool cachedWallObjectValid = false;
             bool cachedWallObjectBlocks = false;
@@ -15719,7 +15723,7 @@ namespace
                         native.fraction = 1.0f;
                         native.objectHandle = -1;
                         if (g_halo3CollisionTestVector(
-                                1ull, false, point, delta, unitHandle,
+                                kStructureCollisionFlags, false, point, delta, unitHandle,
                                 weaponHandle, -1, &native) &&
                             native.type >= 0 && native.type < 4)
                             considerNativeHit(
@@ -16609,9 +16613,9 @@ namespace
             // The validation target is normally resting on map structure. Its
             // opt-in headless probe isolates the object branch so a coplanar
             // floor cannot win the closest-hit race. Production retains the
-            // structure bit and therefore still blocks contact through walls.
+            // BSP and instance bits and therefore blocks contact through both.
             const uint64_t contactCollisionFlags = kContactObjectFlags |
-                (debugRig ? 0ull : 1ull);
+                (debugRig ? 0ull : kStructureCollisionFlags);
             for (size_t sampleIndex = 0;
                  sampleIndex < nativeLocalSampleCount; ++sampleIndex)
             {

@@ -3358,3 +3358,14 @@ occurred. The final-palette callback still performs no logging,
 allocation, file I/O, locking, or scanning, and this diagnostic does not change
 collision, rendering, impulse, melee, aiming, or pickup behavior. Visual
 acceptance remains a real-headset result.
+
+### 2026-09-05 correction: instanced-geometry query enable
+
+Earlier descriptions of the low collision flag `1` as covering both BSP and
+instanced geometry were incorrect. Official 651790 and pinned retail 1FE3B8
+explicitly require low bit 3 for the instance path. See
+`HALO3-CLEARANCE-QUERY-EVIDENCE.md` and the reproducible
+`tools/verify-h3-instance-query-flag.py`. The new candidate enables low flags
+`9` in production wall and native contact queries, retaining high `7FFF`.
+This is a query coverage correction, pending runtime/headset validation; it
+is not proof that every reported rock uses instanced collision.
