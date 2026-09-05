@@ -14105,6 +14105,12 @@ namespace
             g_engineTlsIndex &&
             (debugRig || g_enabled.load(std::memory_order_relaxed)) &&
             (debugRig || g_vrAim.load(std::memory_order_relaxed)) &&
+            // A finite zero camera is not a valid gameplay origin. Startup
+            // telemetry caught a 1 m correction from that origin before the
+            // first camera publication. Gate contact only, never VR ownership.
+            g_baseCamValid.load(std::memory_order_acquire) &&
+            ((debugRig && !debugWall) ||
+             g_camValid.load(std::memory_order_acquire)) &&
             // The opt-in validation rig runs from this live Halo 3 camera
             // callback even when a headless OpenXR runtime cannot arm stereo.
             // Production contact still requires the authoritative gameplay
@@ -14214,6 +14220,17 @@ namespace
                 visibleScale = paletteScale;
                 visiblePoseMs = palettePoseMs;
             }
+        }
+        if (!debugRig && (!proposalConsumedOffsetValid ||
+                         !PhysicalContactFinite(proposalConsumedOffset)))
+        {
+            // A stock palette can arrive before controller reconstruction.
+            // Do not approve or constrain it as a tracked weapon submission.
+            Halo3ResetPhysicalContact(33);
+            g_halo3ContactStage.store(
+                static_cast<uint32_t>(Halo3PhysicalContactStage::VisiblePose),
+                std::memory_order_relaxed);
+            return;
         }
         if (!haveVisiblePose || nowMs < visiblePoseMs ||
             nowMs - visiblePoseMs > 100 || !std::isfinite(visibleScale) ||

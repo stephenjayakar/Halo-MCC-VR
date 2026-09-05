@@ -650,3 +650,39 @@ Cleanup restored normal mode (null=false, forcedDriver empty, requireHmd=true),
 exact settings SHA 175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E.
 MCC and VR processes absent. Installed runtime remains b0426fe; this turn added
 only evidence and verifier checks, with no further production change.
+
+## Oversized wall-input diagnostic (September 5, 23:22 UTC)
+
+Candidate e6196c3c3b06f854d626a58dd4608454477f8365 preserves the first eight
+wall solver requests of at least .30 m. Records pair worker camera/root, actual
+consumed correction, proposal serial/time, plane count, first plane, and final
+requested offset. Unique immutable slots publish with release/acquire; only the
+existing cold status logger performs I/O. The solver, thresholds, and runtime
+collision behavior are unchanged. The exact one-metre startup correction in
+prior runs equals the solver's configured maximum, but its cause is not inferred
+from that numerical equality.
+
+Package: out/candidates/e6196c3-h3-physical-contact-20260905-232214341Z.
+Release/core tests and Reach consistency passed. Independent installed DLL SHA:
+2F54A9744C742CBE944B90CFFAADFE9B4C2938B171999B3E5F3B0E0F81B4A533.
+Launcher unchanged D489C5763E21FC339999DC734CED09A2068AAC6C035EA8B7BF4339B6810FA450.
+Prior install: out/deploy-backups/72bb611-steam-before-e6196c3-20260905-232215417Z.
+Steam E: installed, N: Steam/Store absent and skipped. No accepted pointer change.
+
+### Confirmed invalid-camera startup correction; readiness candidate
+
+The e6196c3 controller-contact run (20260905-232238825Z) captured a one-metre
+wall correction at 16:23:52.243 with cameraValid=0, camera=(0,0,0),
+consumedValid=0, root=(-0.743859,-20.764055,11.151296), 64 planes,
+and first hit near z=0.5. The following tracked palette consumed (0,0,-0.33)
+and triggered the hand recovery. This proves an invalid startup query origin,
+not a headset tracking error. Preserved log SHA-256:
+E18DC3444FE6C19582B64A055FBEAA60EDD37956930ABA3E1464729F88A2FB7A.
+
+The next candidate gates physical contact on valid base/camera publications
+(the object-only debug fixture retains its camera-independent exception), and
+requires production proposals to carry the finite offset provenance published
+by controller reconstruction. Missing readiness resets contact alone; it does
+not disable the camera or OpenXR. Runtime validation remains pending.
+SteamVR settings restored byte-identically after the diagnostic run, SHA-256
+175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E.
