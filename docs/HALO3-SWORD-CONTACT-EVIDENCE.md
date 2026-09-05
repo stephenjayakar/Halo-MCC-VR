@@ -147,6 +147,21 @@ directly to UIntPtr. The same session navigated successfully under PowerShell 7.
 the Enter value 13 conversion was verified under Windows PowerShell 5 without
 sending additional input.
 
+Follow-up inspection of the same native renderer establishes that its counters
+are transactional: `0x2956D4` and `0x2956E8` save the earlier allocation counts,
+and `0x295D98`-`0x295DA4` restore them when the submission-success flag is false.
+This does not prove that rollback caused the observed absence; external reads
+also lack a render-pass boundary. It rules out treating one stable external
+snapshot as a definitive list of every weapon mesh rendered that frame.
+
+The probe now accepts `--sample-seconds` from 0 through 30. It keeps one
+read-only process handle, refreshes palette identities and the bounded record
+array each iteration, and records distinct matching region selections with
+observation counts and elapsed timestamps. Every observation remains explicitly
+non-atomic. No match still cannot establish blade-off state. Syntax validation
+and rejection of an out-of-range duration pass; the sampling mode has not yet
+been run against a live session.
+
 ## Native inverse-bind evidence
 
 Read-only disassembly of official `halo3_tag_test.exe` (SHA-256

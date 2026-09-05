@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import struct
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "out/python-deps"))
 
@@ -24,7 +25,11 @@ def load(name, file):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--sample-seconds", type=float, default=0,
+                        help="observe transient matching records for up to 30 seconds")
     args = parser.parse_args()
+    if not 0 <= args.sample_seconds <= 30:
+        parser.error("sample-seconds must be between 0 and 30")
     engine = load("engine", "mcc-engine-control.py")
     verifier = load("skinning", "verify-h3-sword-skinning.py")
     proc = engine.only((p for p in engine.enumerate_items(2, 0, engine.Process, "Process32")
@@ -98,6 +103,37 @@ def main():
                   count == struct.unpack("<I", read(base + 0xA7AC24, 4))[0] and
                   draws == read(base + 0x91AC60, len(draws)) and
                   draw_count == struct.unpack("<H", read(base + draw_count_rva, 2))[0])
+        observations = {}
+        attempts = 0
+        start = time.monotonic()
+        while time.monotonic() - start < args.sample_seconds:
+            attempts += 1
+            current_count = struct.unpack("<I", read(base + 0xA7AC24, 4))[0]
+            if current_count > 4:
+                raise ValueError("palette count changed outside native capacity")
+            current_palette = read(base + 0xA7AC28, current_count * 0xD0C)
+            identities = {struct.unpack_from("<II", current_palette, i*0xD0C)
+                          for i in range(current_count)}
+            current_draw_count = struct.unpack("<H", read(base + draw_count_rva, 2))[0]
+            if current_draw_count > 1024:
+                raise ValueError("draw count changed outside diagnostic bound")
+            current_draws = read(base + 0x91AC60, current_draw_count * 96)
+            for i in range(current_draw_count):
+                row = current_draws[i*96:(i+1)*96]
+                tag = struct.unpack_from("<I", row, 4)[0]
+                obj = struct.unpack_from("<I", row, 0x48)[0]
+                regions = struct.unpack_from("<I", row)[0]
+                if (tag, obj) not in identities or regions > 16:
+                    continue
+                meshes = struct.unpack_from(f"<{regions}H", row, 14)
+                key = (tag, obj, meshes, row[0x58])
+                if key not in observations:
+                    observations[key] = {"render_tag": tag, "object_handle": obj,
+                                         "region_mesh_indices": meshes, "flags": row[0x58],
+                                         "first_observed_seconds": time.monotonic()-start,
+                                         "observations": 0}
+                observations[key]["observations"] += 1
+            time.sleep(.001)
         result = {"scope": __doc__, "module_identity": identity, "pid": proc.pid,
                   "unchanged_on_reread": stable, "atomic_snapshot": False,
                   "draw_count": draw_count,
@@ -110,8 +146,13 @@ def main():
                   "draw_record_prefixes": [draws[i*96:i*96+16].hex()
                                            for i in range(min(draw_count, 8))],
                   "palette": entries, "matching_draw_records": records}
+        result["sampling"] = {"requested_seconds": args.sample_seconds,
+                              "attempts": attempts, "matches": list(observations.values()),
+                              "atomic_snapshot": False}
         args.output.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8")
-        print(json.dumps({"palette_entries": len(entries), "draw_records": len(records), "unchanged_on_reread": stable}))
+        print(json.dumps({"palette_entries": len(entries), "draw_records": len(records),
+                          "unchanged_on_reread": stable, "sampling_attempts": attempts,
+                          "sampled_distinct_matches": len(observations)}))
     finally:
         engine.close(handle)
 
