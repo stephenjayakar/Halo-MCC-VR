@@ -394,9 +394,9 @@ namespace
     // actual visible-weapon and firing paths be exercised without adding work
     // to their hot callbacks.
     bool g_halo3AimDebugPose = false;
-    // Null-driver LOCAL space does not supply the assumed standing floor
-    // height. The +1.25 m fixture put the weapon above the camera (verified
-    // by the upward-view test). Keep the diagnostic hand in the view instead.
+    // The +1.25 m fixture was outside the normal view; an upward-view test
+    // revealed weapon geometry above the camera. Do not assume a standing
+    // floor height for the null driver's LOCAL-space diagnostic hand.
     constexpr float kHalo3AimDebugPosition[3]{0.18f, -0.18f, -0.65f};
     struct ControllerMotionPublication
     {
