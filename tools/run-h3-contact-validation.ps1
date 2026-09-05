@@ -423,7 +423,7 @@ function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
         'npc-contact' {
             # Contact admission only: this does not claim NPC movement.
-            $status = Get-LatestContactStatusLine $Text
+            $status = ($Text -split "`r?`n" | Where-Object { $_ -like '*H3 physical contact status:*' } | Select-Object -Last 1)
             return $status -and $status -match 'hits=([1-9][0-9]{2,}) ' -and
                 $status -match 'melees=0 ' -and
                 $status -match 'target=0x(?!FFFFFFFF)[0-9A-F]+ kind=0 '
@@ -844,7 +844,7 @@ public static class HaloMccVrContactInput {
     # cinematic. Start the contact-test clock only after its base gate opens.
     Wait-Until {
         $text = Get-NewLogText $runtimeLog $startedUtc
-        $status = Get-LatestContactStatusLine $text
+        $status = ($text -split "`r?`n" | Where-Object { $_ -like '*H3 physical contact status:*' } | Select-Object -Last 1)
         $status -and $status -notmatch 'stage=(base-gate|disabled) '
     } 600 'Halo 3 did not reach player-controlled contact sampling.'
 

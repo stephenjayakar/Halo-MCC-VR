@@ -77,6 +77,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--script", help="Explicitly enqueue one HaloScript expression (diagnostic session only)")
     args = parser.parse_args()
+    # The 2026-09-05 Campaign dump traces an object_set_velocity/list_get
+    # evaluation to a missing native thread allocation context. Keep external
+    # expressions limited to the verified scalar toggle while simulation-bound
+    # object control is investigated. Do not retry the failed list evaluator.
+    if args.script is not None and not re.fullmatch(
+            r"\(cinematic_show_letterbox_immediate (true|false)\)", args.script):
+        raise ValueError("Only the verified cinematic_show_letterbox_immediate toggle is admitted; object scripts require simulation-context validation")
     if args.script is not None and (not args.script or len(args.script.encode("ascii")) > 512 or
                                     any(c in args.script for c in "\x00\r\n")):
         raise ValueError("Supply a single ASCII expression of 1..512 bytes")
@@ -91,7 +98,8 @@ def main():
     digest = hashlib.sha256(raw).hexdigest().upper()
     if digest != PIN:
         raise ValueError("Halo 3 file identity differs from the evidence pin")
-    pe = pefile.PE(data=raw)
+    pe = pefile.PE(data=raw, fast_load=True)
+    pe.parse_data_directories(directories=[0])
     factory = only((e.address for e in pe.DIRECTORY_ENTRY_EXPORT.symbols
                     if e.name == b"CreateGameEngine"), "engine factory export")
     factory_bytes = pe.get_data(factory, 0xD7)
