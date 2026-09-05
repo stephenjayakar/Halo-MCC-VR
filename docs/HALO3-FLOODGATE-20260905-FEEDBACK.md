@@ -18,16 +18,18 @@ feedback, not acceptance of the cumulative candidate. CURRENT-STATE is unchanged
 - Seven native enemy melee applications, zero rejected/faulted/no-damage requests.
 - 330 prop impulses recorded. This supports nudging being active, not proof that
   every visual contact is aligned.
-- Body displacement reached 0.998 m. Render code can retain compatible old
+- Body displacement reached approximately 1 m. Render code can retain compatible old
   palettes without an age limit; refreshing an approval does not prove that its
   position remains close to the current hand. These are concrete reasons to
   bound final presentation, including render-time target following.
 - Gameplay renderWindow p95 is usually about 12–18 ms, with one 35.65 ms window,
   above the 8.33 ms deadline at 120 Hz. The old deployment backup is a null-driver
   session, not a comparable real-headset performance baseline. No specific
-  optimization is proven by this comparison.
-- Decorator instance/plane counters stayed zero. Some decorator draw counters
-  were nonzero. This does not identify which reported rocks are decorators;
+  optimization is proven by this comparison. One contact-render check peaked
+  at 13.994 ms; this identifies an outlier to investigate, not its cause or
+  typical cost (six of the first 190 samples exceeded 250 microseconds).
+- Decorator instances peaked at three; plane counters stayed zero. Some decorator
+  draw counters were nonzero. This does not identify which reported rocks are decorators;
   Floodgate geometry coverage remains unproved.
 - Official H3EK energy-blade collision XML contains one region named `handle`,
   one BSP, and a small box with eight vertices. There is no blade region in that
@@ -59,3 +61,11 @@ scales and invalid inputs. Headset behavior is unaccepted. Rock coverage, sword
 blade geometry, remaining flicker below the leash and performance remain open.
 Keep this behavioral candidate separate for the next headset result before
 stacking changes to collision geometry or scheduling.
+
+Packaged and installed source `6ea7e86ba2465a32fc08c69a4f8994c584823617`,
+package `out/candidates/6ea7e86-h3-physical-contact-20260905-194613384Z`,
+DLL `90FB7305ADE7D56EA9B8E707E15420D38059794D91058044CB2C914170EAFB9D`.
+Release build, core tests and Reach consistency check passed. Steam on E: was
+the only present installation; other Steam/Store locations were absent.
+The package preserved the previous runtime and headset log. No headset result
+exists for the reset candidate yet.
