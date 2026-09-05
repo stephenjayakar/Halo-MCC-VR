@@ -272,3 +272,21 @@ sample. No render I/O, allocation, scan, or lock is added. The worker logs the
 renderRaw counter to distinguish exercised fallback from speculation. Native
 interpolated-bank successes retain their existing path. Runtime validation is
 pending; the accepted pointer remains unchanged.
+
+The f4ebd9e comparison passed the slow-shove criterion but **did not exercise
+the render fallback**: renderRaw remained zero while gameplay raw-node reads
+and exact render-body checks increased. Separation fallback holds remained.
+This disproves the proposed missing-render-bank explanation for this replay;
+it does not prove the fallback useful. Commit 0d4b487 disables the experiment,
+and the manifest-verified 1b2a43c package was reinstalled after MCC closed.
+Original Campaign saves and normal SteamVR settings were restored again.
+
+Comparison log: out/debug-openxr/20260905-104036851Z-npc-shove.log, SHA-256
+6028347E4529AC9697267A16760DC719DD524292DDB07A2B782335ACBA4A8907.
+Tested DLL: 8995507409895B4D2DE17350C46A6CF929C98200A0193216781F55AC547F44AB.
+Video: out/debug-openxr/20260905-104316599Z-f4ebd9e-campaign-render-guard/recording.mp4,
+116 frames / 29.903626 s, SHA-256
+BA94AA1501645F164294E7B8175574BFBEA68E43800088340F127144FBF56F77.
+The follow-up read-only target snapshot retained health 1/shield 0, with zero
+melee in the runtime log. F9 pitch trim was used during this comparison, so it
+is not a controlled frame-for-frame comparison of separation counts.
