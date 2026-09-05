@@ -7,6 +7,7 @@ using Halo3BipedAccelerateFn = void (__fastcall*)(int32_t, const float*);
 constexpr bool kEnableHalo3NpcShoveProbeCandidate = true;
 Halo3BipedAccelerateFn g_halo3NpcProbeAccelerate = nullptr;
 std::atomic<bool> g_halo3NpcContactEnabled{false};
+constexpr bool kEnableHalo3NpcContactCandidate = false;
 std::atomic<uint32_t> g_halo3NpcContactApplied{0}, g_halo3NpcContactRejected{0}, g_halo3NpcContactFaulted{0};
 std::atomic<bool> g_halo3NpcProbeEnabled{false};
 std::atomic<uint32_t> g_halo3NpcProbeStage{0}, g_halo3NpcProbeCalls{0};
@@ -39,7 +40,7 @@ void Halo3BindNpcShoveProbe(uintptr_t base, size_t size)
         return;
     }
     g_halo3NpcProbeAccelerate = reinterpret_cast<Halo3BipedAccelerateFn>(hit);
-    g_halo3NpcContactEnabled.store(true, std::memory_order_release);
+    g_halo3NpcContactEnabled.store(kEnableHalo3NpcContactCandidate, std::memory_order_release);
     LOG("H3 NPC shove: native biped motor +0x%llX installed for slow exact contact; independent of damage", static_cast<unsigned long long>(hit - base));
     if (!probeRequested)
         return;

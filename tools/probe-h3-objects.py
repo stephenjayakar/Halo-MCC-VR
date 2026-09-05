@@ -33,6 +33,7 @@ class ThreadBasic(C.Structure):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kind", type=int, default=0)
+    parser.add_argument("--physics", action="store_true", help="Read evidenced object/model/physics tag chain")
     parser.add_argument("--table", type=lambda value: int(value, 0),
                         help="Explicit table from a previous ambiguous-table report")
     args = parser.parse_args()
@@ -152,6 +153,35 @@ def main():
                            shield=struct.unpack_from("<f", data, 0xF8)[0],
                            damage_dead=bool(struct.unpack_from("<I", data, 0x110)[0] & 4),
                            character_mode=data[0x4DE])
+            if args.physics:
+                # Same pinned H3 tag globals and chain as Halo3LoadedTagDefinition
+                # and Halo3ContactPhysicsForObject; bounded read-only snapshot.
+                try:
+                    instances = qword(module.base + 0xA49018)
+                    tag_base = qword(module.base + 0x1FCF4C8)
+                    def definition(datum):
+                        index = datum & 0xFFFF
+                        if index == 0xFFFF:
+                            raise ValueError("null tag datum")
+                        packed = struct.unpack("<I", read(instances + index * 8 + 4, 4))[0]
+                        if not packed:
+                            raise ValueError("null tag address")
+                        return tag_base + packed * 4
+                    object_tag = definition(struct.unpack_from("<I", data)[0])
+                    model_tag = definition(struct.unpack("<I", read(object_tag + 0x40, 4))[0])
+                    physics_tag = definition(struct.unpack("<I", read(model_tag + 0x3C, 4))[0])
+                    count, packed = struct.unpack("<iI", read(physics_tag + 0x58, 8))
+                    bodies = []
+                    if 0 < count <= 32 and packed:
+                        for body in range(count):
+                            record = read(tag_base + packed * 4 + body * 0xC0, 0x60)
+                            shape = struct.unpack_from("<Q", record, 0x58)[0]
+                            bodies.append({"node": struct.unpack_from("<h", record)[0],
+                                           "shape": hex(shape),
+                                           "shape_type": struct.unpack("<i", read(shape + 0x18, 4))[0] if shape else None})
+                    obj["physics"] = {"tag": hex(physics_tag), "body_count": count, "bodies": bodies}
+                except (OSError, ValueError) as error:
+                    obj["physics_error"] = str(error)
             objects.append(obj)
         print(json.dumps({"pid": proc.pid, "table": hex(table),
                           "local_player_units": [hex(v) for v in sorted(player_units.get(table, set()))],

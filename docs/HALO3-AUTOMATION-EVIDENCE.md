@@ -160,3 +160,12 @@ melee-speed swings, attached/dead objects, and stale commands. Motor input is
 horizontal and bounded by the tested 0.15 m/s input and 0.60 m/s target speed.
 Native calls run after objects_update, with an independent fault latch; damage
 and camera ownership are untouched. This integration remains untested.
+
+The 4a003b1 armed Sierra 117 run did not exercise the new motor: 196 native
+biped fallback hits, zero animated geometry resolutions, zero NPC motor calls,
+and zero melee calls. Disable the contact candidate pending geometry diagnosis.
+Read-only live snapshot out/research/h3-4a003b1-npc-physics.json confirms nearby
+living bipeds have ten authored bodies, predominantly capsule type 7. This is
+not evidence that those bodies are absent. The animated sweep requires an
+interpolated bank, unlike the existing renderer-proven visible-node helper,
+which also supports the raw bank. The provider return still needs measurement.
