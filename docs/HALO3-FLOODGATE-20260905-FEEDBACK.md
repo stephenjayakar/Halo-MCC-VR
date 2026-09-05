@@ -321,3 +321,48 @@ No video recorded. Normal settings independently restored (null=false, empty
 forcedDriver, requireHmd=true), MCC/vrserver absent, hash
 `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
 Accepted-build pointer unchanged.
+
+## Movement-gated recovery candidate (September 5, 21:56 UTC)
+
+Candidate `0bf98d08f3f6920e35fceacc98cd4662492fc162` changes recovery rearming:
+the existing 500 ms minimum remains, but elapsed time alone no longer releases
+recovery. The uncorrected authored weapon root must translate at least .10 m or
+turn at least 20 degrees (forward or up basis comparison). A valid weapon/tag
+or runtime-generation change releases the hold. Invalid poses do not release
+it. During the hold the contact worker remains reset and reconstruction does
+not consume contact offsets; the gun follows the uncorrected pose. This is the
+user-requested return-to-hand behavior, not proof of nonpenetration during the
+recovery hold. Controller/headset feel, animation effects on the root comparison,
+wall-contact release and same-prop retreat still require testing.
+
+The reference uses the existing atomic pose publication with one root and the
+runtime generation in its serial. Both publisher and rearm decision are in the
+existing render path; the contact worker consumes the hold flag. Pure tests
+cover supported world scales, stationary/subthreshold and above-threshold
+translation/rotation, invalid input, roll and scaled basis vectors. Build/core
+tests and Reach consistency passed. Package:
+`out/candidates/0bf98d0-h3-physical-contact-20260905-215605159Z`.
+Installed DLL independently verified:
+`E9F1D3113F4166C6BB8879001C0A447C84241BDA98D44469EC5CAC493D34E4CE`.
+
+Runtime test used the fixed-controller normal contact path, not the prop replay:
+`run-h3-contact-validation.ps1 -Test controller-contact -TestHandRecovery`.
+Result: `out/debug-openxr/20260905-215620874Z-controller-contact-result.json`.
+Preserved log SHA: `ECA31443B4CD6D87464F224A711DB32B916B40F4B645BE250A9F42089981F880`.
+Steam Construct Forge / SteamVR null driver / Null Model Number,
+21:56:26-21:59:05 UTC. The one .40 m injection caused exactly one recovery.
+From 14:57:48.113 through at least 14:58:00.233, `awaitingMotion=1`, resets=1,
+checks=1 while the 500 ms cooldown was already inactive. Thus timeout alone
+no longer rearms. Normal background W input held 600 ms, ending at 14:58:15.379,
+then `awaitingMotion=0` by 14:58:16.394 and normal native sampling resumed.
+At the preserved cutoff 14:58:46.692, resets remained one, checks=5,799,
+missingPose=2, awaitingMotion=0. No contact-loop recurrence was observed in this
+controlled hold/release test. It did not press against the previously failing
+prop and does not supersede that failed gap result. The harness pass itself
+checks admission plus recovery; the held-then-released sequence is established
+by the separately inspected status lines and recorded normal input.
+
+MCC/vrserver absent after cleanup; null=false, forcedDriver empty,
+requireHmd=true, exact settings SHA
+`175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E` restored.
+No headset acceptance, useful demo video or accepted-pointer advance.
