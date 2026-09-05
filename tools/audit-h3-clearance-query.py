@@ -67,6 +67,9 @@ def audit(path, output):
             raise ValueError(f'Coverage/capacity instruction mismatch at {site:#x}')
     ranges = {'point_spawn_caller': (0x5AEC60, 0x5AED1B),
               'point_wrapper': (0x652090, 0x652144),
+              'point_core': (0x6520B0, 0x652660),
+              'point_leaf': (0x4AB6F0, 0x4AB880),
+              'bsp_active': (0x2D36C0, 0x2D36D6),
               'feature_gather': (0x64D6E0, 0x64DE5C),
               'feature_initialize': (0x71B590, 0x71B59B),
               'sphere_adjustment': (0x64DE60, 0x64EC20),

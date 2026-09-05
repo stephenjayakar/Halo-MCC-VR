@@ -149,3 +149,36 @@ Next binding work must establish intermediate-query completeness, interior
 solid treatment, category coverage, and dynamic freshness. This evidence
 changes no production collision or rendering policy. The stale-palette
 movement reproduction remains unresolved.
+
+## Solid-interior classification and retail match
+
+The named official point-test core 6520B0 asserts the structure flag at
+652138, iterates structure indices 0..15, and calls 2D36C0 to test each active
+bit. Its leaf traversal call 6521AA -> 4AB6F0 distinguishes the -1 sentinel
+from a valid leaf index. The -1 branch sets hit=true and result type 1;
+a non-sentinel leaf clears that hit before instance/object classification.
+The traversal handles both packed 23-bit and ordinary 31-bit leaf indices.
+If no structure is active and no separately requested boundary test hits,
+the initial false hit value is returned. Thus point-test false also requires
+an independent active-structure readiness check before it can mean clear.
+
+Matched pinned retail traversal 16A4C4 has the same two representations:
+packed children shift by 8, leaf classification tests bit 23 and preserves
+-1; ordinary children test the sign bit and clear bit 31 only for a real leaf.
+The 27-byte packed classification sequence at 16A53F is unique in executable
+sections. Retail point core 1FCAC0 tests the active mask at 1FCB20, calls this
+traversal at 1FCB65, and sets hit=true/result type 1 for its -1 result. This
+19-byte call/result sequence is also unique. The instance path calls 1FC79C
+at 1FCCA5; that transforms the point to instance-local coordinates before
+calling the same leaf traversal at 1FC8B2. The object path calls 1FC8E0 at
+1FCDC1. These are matches of official constructs, not retail-first guesses.
+
+The full retail core examined here does not contain the two official global
+flag-clearing switches described above. That is a difference in this point
+core, not evidence that the still-unmatched retail feature gather has no such
+exclusions. `tools/verify-h3-clearance-point.py` pins both file hashes, checks
+these call edges, both unique retail sequences, and the official named
+structure assertion. Output: out/research/20260905-clearance-query/point-verification.json.
+No runtime binding or invocation has been added. A valid point is not proof
+of clearance around the entire weapon; feature-gather coverage and freshness
+remain required before changing render approval behavior.
