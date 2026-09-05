@@ -949,6 +949,8 @@ namespace
         std::atomic<uint32_t> renderTag{0xFFFFu};
         std::atomic<uint32_t> nodeCount{0};
         std::atomic<uint32_t> corrected{0};
+        std::atomic<uint32_t> consumedOffsetValid{0};
+        std::atomic<float> consumedOffset[3]{};
         std::atomic<float> scale{1.0f};
         std::atomic<float> basis[9]{};
         std::atomic<float> position[3]{};
@@ -1280,7 +1282,7 @@ namespace
         Halo3VisibleWeaponPosePublication& published,
         const BoneMatrix* nodes, uint32_t nodeCount, uint16_t renderTag,
         int32_t weaponHandle, uint64_t proposalSerial, uint64_t sampleMs,
-        bool corrected)
+        bool corrected, const PhysicalContactVec3* consumedOffset = nullptr)
     {
         if (!nodes || !nodeCount ||
             nodeCount > Halo3VisibleWeaponPosePublication::kMaximumNodes)
@@ -1295,6 +1297,11 @@ namespace
         published.nodeCount.store(nodeCount, std::memory_order_relaxed);
         published.corrected.store(
             corrected ? 1u : 0u, std::memory_order_relaxed);
+        const bool validOffset = consumedOffset && PhysicalContactFinite(*consumedOffset);
+        published.consumedOffsetValid.store(validOffset ? 1u : 0u, std::memory_order_relaxed);
+        published.consumedOffset[0].store(validOffset ? consumedOffset->x : 0.0f, std::memory_order_relaxed);
+        published.consumedOffset[1].store(validOffset ? consumedOffset->y : 0.0f, std::memory_order_relaxed);
+        published.consumedOffset[2].store(validOffset ? consumedOffset->z : 0.0f, std::memory_order_relaxed);
         published.scale.store(root.scale, std::memory_order_relaxed);
         for (int i = 0; i < 9; ++i)
             published.basis[i].store(
@@ -1321,6 +1328,7 @@ namespace
         published.renderTag.store(0xFFFFu, std::memory_order_relaxed);
         published.nodeCount.store(0, std::memory_order_relaxed);
         published.corrected.store(0, std::memory_order_relaxed);
+        published.consumedOffsetValid.store(0, std::memory_order_relaxed);
         published.sequence.fetch_add(1, std::memory_order_release);
     }
 
@@ -1348,7 +1356,8 @@ namespace
         float basis[9], float position[3], float& scale, uint64_t& sampleMs,
         BoneMatrix* nodes = nullptr, uint32_t* nodeCount = nullptr,
         uint16_t* renderTag = nullptr, int32_t* weaponHandle = nullptr,
-        uint64_t* proposalSerial = nullptr, bool* corrected = nullptr)
+        uint64_t* proposalSerial = nullptr, bool* corrected = nullptr,
+        PhysicalContactVec3* consumedOffset = nullptr, bool* consumedOffsetValid = nullptr)
     {
         for (int attempt = 0; attempt < 2; ++attempt)
         {
@@ -1395,6 +1404,13 @@ namespace
                 *proposalSerial = serial;
             if (corrected)
                 *corrected = wasCorrected;
+            if (consumedOffset)
+                *consumedOffset = {
+                    published.consumedOffset[0].load(std::memory_order_relaxed),
+                    published.consumedOffset[1].load(std::memory_order_relaxed),
+                    published.consumedOffset[2].load(std::memory_order_relaxed)};
+            if (consumedOffsetValid)
+                *consumedOffsetValid = published.consumedOffsetValid.load(std::memory_order_relaxed) != 0;
             if (published.sequence.load(std::memory_order_acquire) == before)
                 return sampleMs != 0;
         }
@@ -5809,6 +5825,8 @@ namespace
                     }
                 }
                 bool candidateCorrectionApplied = false;
+                PhysicalContactVec3 proposalConsumedOffset = g_halo3CapturedHandOffset;
+                bool proposalConsumedOffsetValid = haveTrackedNodes;
                 if (g_halo3ContactDebugVisibleReplay.load(
                         std::memory_order_acquire))
                 {
@@ -5857,6 +5875,13 @@ namespace
                         }
                         if (movedFinite)
                         {
+                            // The replay replaces the full pose; only its own
+                            // translation correction is present in this proposal.
+                            proposalConsumedOffset = {
+                                desiredRoot.translation[0] - replayReferenceRoot.translation[0],
+                                desiredRoot.translation[1] - replayReferenceRoot.translation[1],
+                                desiredRoot.translation[2] - replayReferenceRoot.translation[2]};
+                            proposalConsumedOffsetValid = true;
                             // Explicit null-driver recovery diagnostic only:
                             // use the fixture's uncorrected requested pose as
                             // its hand reference, preserving every node.
@@ -5898,7 +5923,8 @@ namespace
                     g_halo3ProposedWeaponPose, destination,
                     static_cast<uint32_t>(renderNodeCount), tag,
                     activeWeaponHandle, proposalSerial, nowMs,
-                    candidateCorrectionApplied);
+                    candidateCorrectionApplied,
+                    proposalConsumedOffsetValid ? &proposalConsumedOffset : nullptr);
 
                 std::array<BoneMatrix,
                            Halo3VisibleWeaponPosePublication::kMaximumNodes>
@@ -14121,11 +14147,14 @@ namespace
         int32_t proposalWeaponHandle = -1;
         uint64_t proposalSerial = 0;
         bool proposalCorrected = false;
+        PhysicalContactVec3 proposalConsumedOffset{};
+        bool proposalConsumedOffsetValid = false;
         const bool haveVisiblePalette = Halo3ReadWeaponPose(
             g_halo3ProposedWeaponPose,
             paletteBasis, palettePosition, paletteScale, palettePoseMs,
             visibleNodes.data(), &visibleNodeCount, &proposalRenderTag,
-            &proposalWeaponHandle, &proposalSerial, &proposalCorrected);
+            &proposalWeaponHandle, &proposalSerial, &proposalCorrected,
+            &proposalConsumedOffset, &proposalConsumedOffsetValid);
         std::array<BoneMatrix,
             Halo3VisibleWeaponPosePublication::kMaximumNodes> displayedNodes{};
         uint32_t displayedNodeCount = 0;
@@ -15798,14 +15827,14 @@ namespace
 
             // Constrain the final rendered weapon against native BSP,
             // instanced structure, and exact static object collision. The
-            // palette publication already includes the prior
-            // frame's rigid wall translation, so remove that translation before
-            // querying. This prevents the filter from alternately treating its
-            // own correction as the unconstrained controller pose.
-            const PhysicalContactVec3 previouslyAppliedWallOffset =
-                g_halo3ContactWallOffset;
-            const PhysicalContactVec3 previouslyAppliedBodyOffset =
-                g_halo3ContactBodyOffset;
+            // Remove the correction atomically paired with this proposal.
+            // The worker may have published a newer offset since rendering
+            // consumed this one; current worker state is not pose provenance.
+            // Retain the existing fallback for submissions without provenance.
+            const PhysicalContactVec3 previouslyAppliedOffset =
+                proposalConsumedOffsetValid && PhysicalContactFinite(proposalConsumedOffset)
+                    ? proposalConsumedOffset
+                    : g_halo3ContactWallOffset + g_halo3ContactBodyOffset;
             if (!debugRig || debugWall)
             {
                 const PhysicalContactVec3 camera{
@@ -15817,8 +15846,7 @@ namespace
                 if (!debugWall)
                 {
                     unconstrainedWeaponTransform.position =
-                        weaponTransform.position - previouslyAppliedWallOffset -
-                        previouslyAppliedBodyOffset;
+                        weaponTransform.position - previouslyAppliedOffset;
                 }
                 const bool previousWallPoseValid =
                     g_halo3ContactPreviousWallPoseValid &&
@@ -16315,8 +16343,7 @@ namespace
                 // then apply only this frame's static-wall result. Exact body
                 // contact below decides the new dynamic correction.
                 intendedWeaponTransform.position =
-                    weaponTransform.position - previouslyAppliedWallOffset -
-                    previouslyAppliedBodyOffset + g_halo3ContactWallOffset;
+                    weaponTransform.position - previouslyAppliedOffset + g_halo3ContactWallOffset;
                 const PhysicalContactVec3 intendedDelta =
                     intendedWeaponTransform.position - weaponTransform.position;
                 intendedGrip = grip + intendedDelta;
@@ -16332,8 +16359,7 @@ namespace
                         Halo3VisibleWeaponPosePublication::kMaximumNodes)
                     return;
                 const PhysicalContactVec3 previousOffset =
-                    previouslyAppliedWallOffset +
-                    previouslyAppliedBodyOffset;
+                    previouslyAppliedOffset;
                 const PhysicalContactVec3 approvedOffset =
                     g_halo3ContactWallOffset + g_halo3ContactBodyOffset;
                 const PhysicalContactVec3 delta =

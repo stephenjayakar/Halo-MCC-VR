@@ -523,3 +523,22 @@ null=false, forcedDriver empty, requireHmd=true, MCC/VR processes absent.
 This admission pass plus the recorded phase evidence does not constitute
 headset acceptance. Installed runtime is still 13da6c4; subsequent commits
 change only recording tooling and documentation.
+
+## Proposal correction provenance candidate (September 5)
+
+Source inspection found that the worker subtracted its current wall/body offset
+from an asynchronously published render proposal. Those values are not necessarily
+the translation consumed while building that proposal. For example, a proposal
+at tracked position + 0.10 m followed by a worker offset of 0.05 m was treated
+as tracked position + 0.05 m on the next solve. This is an input reconstruction
+error even though both offsets are individually valid. It is not yet established
+as the cause of every reported flicker or of the last wall-test recovery.
+
+The proposal now publishes the captured consumed translation and its validity
+inside the existing atomic sequence, alongside the exact node palette. The worker
+uses that matching translation for wall reconstruction, intended body contact,
+and the approved-palette delta. Zero is a valid consumed correction. Existing
+fallback behavior remains for submissions without capture provenance. The debug
+replay publishes its own applied correction after successful whole-palette
+replacement. No allocation, logging, locks, or new engine binding in the hot hook.
+This candidate needs live wall/prop comparison and headset verification.
