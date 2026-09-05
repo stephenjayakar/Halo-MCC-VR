@@ -686,3 +686,26 @@ by controller reconstruction. Missing readiness resets contact alone; it does
 not disable the camera or OpenXR. Runtime validation remains pending.
 SteamVR settings restored byte-identically after the diagnostic run, SHA-256
 175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E.
+
+Readiness candidate d8f10b620f09d4b8b68371659b53572d266734db built, passed core
+tests and Reach consistency, and installed through the normal package installer.
+Package: out/candidates/d8f10b6-h3-physical-contact-20260905-232953434Z.
+Installed DLL independently verified:
+781D5767EB03E39CF329A47D7C8B476752CA385E9930CE0312A0B0C79B984167.
+
+The controller-contact run 20260905-233014627Z passed without movement input:
+first active sample 16:31:33.796, nativeSamples=93, wallBlocks=0; final recovery
+status 16:32:00.056 had resets=0, checks=4761, missingPose=0, awaitingMotion=0.
+No large-wall-correction record occurred. This supports the startup fix on
+Steam / SteamVR null driver / Null Model Number; it is not headset acceptance
+or evidence of complete world nonpenetration. Log SHA-256:
+0E0275242D6FB3A77B7192D2A1CDF1A4C95A7C219C7F4826E0DA053FE8733391.
+
+The same installed candidate passed the Forge wall fixture:
+out/debug-openxr/20260905-233231629Z-wall-result.json, log SHA-256
+51FDF091394E62B5D31882A55B328DA742E34F756B4FB87D491CAFF5B5AEAC80.
+16:33:45.103 validated structure contact (type 1); 16:33:47.123 validated
+fixed-object contact (type 4, handle E2FE008F). Steam / SteamVR null driver /
+Null Model Number. This checks the worker constraint path after the readiness
+gate; it does not establish exact rendered nonpenetration or headset acceptance.
+Both validation processes exited normally. No new showcase video was claimed.
