@@ -128,3 +128,21 @@ settings hash was restored to
 Null driver is disabled; forcedDriver is empty; requireHmd is true. The private
 recovery environment switch is not enabled for a normal launcher session.
 The accepted-build pointer remains unchanged.
+
+Recovery timeline analysis of that preserved log finds increases at telemetry
+windows 14:03:53.697, 14:03:55.717, 14:03:57.737 and 14:04:05.817. The last
+window at 14:04:40.155 still reports four recoveries, while checks rose from
+1,911 to 8,093: 6,182 subsequent checks over 34.338 seconds without another
+reported recovery. These are two-second observation windows, not exact event
+times. Target identity stays `0xE2900021` across the increases, but the logs lack
+the per-event reference/displayed roots needed to attribute the extra resets.
+Do not claim that target switching caused them, or that the test was a persistent
+reset loop. The extracted timeline is
+`out/research/20260905-sword-contact/hand-recovery-timeline.json`.
+
+The saved success frame was visually inspected: it looks above the contact
+area and does not show the requested interaction clearly. It is diagnostic
+evidence only, not a demo. Existing F8/F9 controls adjust process-local pitch by
+0.035 radians per press (clamped to +/-0.8); using those controls to frame a
+future recording needs visual confirmation and does not require another camera
+hook. No new demo video was created during this analysis.
