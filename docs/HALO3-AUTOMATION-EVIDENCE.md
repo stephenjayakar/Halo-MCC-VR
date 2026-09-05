@@ -21,6 +21,16 @@ and the original campaign files, with the intervening profile preserved locally.
 The restored UI showed UNSC / 0-of-11 rather than the test profile's meow /
 11-of-11. Preserve both versions; do not claim the profile displays unchanged.
 
+Read-only follow-up decoded both ACC files' zlib payload at byte 44 into JSON.
+The complete structural comparison found exactly one differing value:
+GameData[halo3]/DifficultySelectedHash, original 2 versus test 1. Completion
+records and customization/interface data are identical. This rules out erased
+progress in the restored file; selected difficulty differed between the UI
+observations. The original binary remains installed without reconstruction.
+Comparison record: out/test-runs/20260905-campaign-save-after-testing/profile-comparison.json.
+Original file SHA-256 ADC232E030689EB2FEDE46BAB2CCE0422E965AF778392C17C741B9819278F33B;
+test file SHA-256 A3C9D84A78DD489E0F2885D12A3010570DE1DB013FB3FCDFFECAEAFB7D86A803.
+
 An interrupted menu wait did not execute its restoration finally block. With
 all MCC/SteamVR processes confirmed absent, the hash-verified normal settings
 backup was restored explicitly. The harness now detects MCC closure during

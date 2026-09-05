@@ -90,10 +90,14 @@ Restoring only deepSave/header initially left Resume absent. Restoring the
 matching pre-test AceSettings/data snapshot made Resume return and successfully
 loaded Floodgate. After that test, the original save/profile pair was restored
 together and hash-verified; see final-restored-save-profile.json in that folder.
-The prior test profile is retained as AceSettings-before-restore.dat. The
-restored profile UI showed UNSC / 0-of-11, whereas the later test profile showed
-meow / 11-of-11; no claim of unchanged displayed profile statistics is made.
-The full pre-test and test profile copies remain available for investigation.
+The prior test profile is retained as AceSettings-before-restore.dat. The UI
+initially showed differing tag/completion displays. Read-only decoding of the
+two ACC files (zlib JSON at byte 44) found exactly one differing JSON value:
+GameData[halo3]/DifficultySelectedHash was 2 before testing and 1 during testing
+(Heroic versus Normal). All completion records and customization values are
+identical. The comparison is preserved as profile-comparison.json in that
+folder. No profile progress was removed from the saved data. Both original
+binary snapshots remain available; neither was reconstructed or re-encoded.
 Steam is the only present MCC edition; no Store installation was found.
 
 The next headset session can be preserved with
