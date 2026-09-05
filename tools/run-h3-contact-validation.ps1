@@ -945,6 +945,10 @@ public static class HaloMccVrContactInput {
         $text -notmatch 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0')) {
         throw 'Clearance probe did not complete 32 bounded, fault-free observations.'
     }
+    if ($ProbeClearance -and $Test -eq 'wall' -and
+        $text -notmatch 'H3 clearance PROBE sample:.*gathered=1.*bounds=1 faulted=0') {
+        throw 'Clearance probe missed the known native wall surface positive control.'
+    }
     $useSameFrameGapCounters = $Test -eq 'rotating-body-gap'
     if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
         (Test-VisibleWeaponGapFailure $text $useSameFrameGapCounters)) {

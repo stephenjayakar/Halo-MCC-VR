@@ -15622,7 +15622,8 @@ namespace
             constexpr uint64_t kStructureCollisionFlags = 1ull | (1ull << 3);
             constexpr uint64_t kWallCollisionFlags =
                 kContactObjectFlags | kStructureCollisionFlags;
-            Halo3RunClearanceProbe(nowMs, weaponTransform.position, worldScale, unitHandle);
+            if (!debugWall)
+                Halo3RunClearanceProbe(nowMs, weaponTransform.position, worldScale, unitHandle);
             int32_t cachedWallObjectHandle = -1;
             bool cachedWallObjectValid = false;
             bool cachedWallObjectBlocks = false;
@@ -15832,6 +15833,9 @@ namespace
                            ? structureCandidate : objectCandidate);
                 if (selected.valid)
                 {
+                    // A positive control must query the native hit surface,
+                    // not the pre-fixture weapon position in open space.
+                    Halo3RunClearanceProbe(nowMs, selected.surface, worldScale, unitHandle);
                     const PhysicalContactVec3 direction =
                         PhysicalContactNormalize(
                             selected.surface - camera,

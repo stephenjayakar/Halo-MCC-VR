@@ -233,3 +233,25 @@ also disables the probe alone. Cold status logging drains immutable records.
 No result changes weapon collision, melee, or render approval. The harness
 -ProbeClearance option requires all 32 observations and no bound/fault failure.
 This is a query-call/output/cost probe, not whole-weapon clearance proof.
+
+Probe candidate b6ecdd647969a963b7e14ff10b906bcaf4158fc3 passed compilation,
+core tests and Reach consistency. Installed DLL SHA-256 was independently
+verified: F51644368DFE1E13B68E9C2B79CA02FF977980873A0491F6DD104C4B12824574.
+Package: out/candidates/b6ecdd6-h3-physical-contact-20260905-235027873Z.
+The first live run out/debug-openxr/20260905-235048764Z-controller-contact-result.json
+passed on Steam / SteamVR null driver / Null Model Number. All 32 samples had
+bounds=1, faulted=0, pointHit=0 and gathered=0. Median combined query/bounds-check
+cost was 37.45 us, observed p95 47.2 us and maximum 53.3 us. This is an
+open-space observation, not a positive-contact test or a performance guarantee.
+The final hand-recovery status had resets=0. Preserved log SHA-256:
+42025C768CCDAE632A8480A5853ADB2778BCA748F3815A16DE26F2B7BFE09D9A.
+
+The b6ecdd6 wall run 20260905-235251028Z also completed 32 fault-free bounded
+samples and passed its separate wall fixture, but every gather remained zero.
+Code inspection showed the probe ran before the wall fixture moved its weapon:
+it sampled the original open-space pose, not the known native hit surface.
+This is insufficient positive-control evidence. Log SHA-256:
+51256A4337084F8A5630231F8765E609F33567FAA08901A904750C97FD99F34D.
+The next diagnostic candidate queries selected.surface in the wall fixture,
+retains the original pose sampling for controller-contact, and makes the wall
+probe require at least one positive gather. Normal rendering is unchanged.
