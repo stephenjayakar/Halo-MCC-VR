@@ -60,6 +60,61 @@ int main(int argc, char** argv)
     target.position = {.25f, 0, 0};
     const bool gapHit = PhysicalContactTriangleMeshCompoundIntersect(
         mesh, identity, sphere, target, 0).hit;
+    // The authored fixture remains in model space. Exercise the same kernel
+    // under nontrivial world transforms, including a swing whose endpoints
+    // both miss. This is not an engine animation/visibility acceptance test.
+    const auto pose = [](float angle, float scale) {
+        PhysicalContactTransform result{};
+        result.position = {13.25f, -4.5f, 2.75f};
+        result.forward = {std::cos(angle), 0, std::sin(angle)};
+        result.up = {-std::sin(angle), 0, std::cos(angle)};
+        result.scale = scale;
+        return result;
+    };
+    unsigned transformedHits = 0, transformedSamples = 0, transformedGapHits = 0;
+    unsigned rotationHits = 0, rotationSamples = 0, rotationEndpointHits = 0;
+    unsigned distal = 0;
+    float distalX = -FLT_MAX;
+    for (unsigned i = 0; i < count; ++i)
+    {
+        const auto& face = mesh.triangles[i];
+        const auto centre = (face.vertices[0]+face.vertices[1]+face.vertices[2])*(1.f/3.f);
+        if (centre.x > distalX) { distalX = centre.x; distal = i; }
+    }
+    const auto& distalFace = mesh.triangles[distal];
+    const auto distalPoint = (distalFace.vertices[0]+distalFace.vertices[1]+
+                             distalFace.vertices[2])*(1.f/3.f);
+    for (float scale : {.5f, 1.f, 1.5f})
+    {
+        sphere.children[0].radius = .003f * scale;
+        for (float angle : {-.7f, .3f, 1.2f})
+        {
+            const auto middle = pose(angle, scale);
+            for (unsigned i = 0; i < count; ++i)
+            {
+                const auto& face = mesh.triangles[i];
+                const auto centre = (face.vertices[0]+face.vertices[1]+face.vertices[2])*(1.f/3.f);
+                target.position = PhysicalContactTransformPoint(middle, centre);
+                transformedHits += PhysicalContactTriangleMeshCompoundIntersect(
+                    mesh, middle, sphere, target, 0).hit ? 1 : 0;
+                ++transformedSamples;
+            }
+            target.position = PhysicalContactTransformPoint(middle, {.25f, 0, 0});
+            transformedGapHits += PhysicalContactTriangleMeshCompoundIntersect(
+                mesh, middle, sphere, target, 0).hit ? 1 : 0;
+            target.position = PhysicalContactTransformPoint(middle, distalPoint);
+            const auto before = pose(angle - .2f, scale);
+            const auto after = pose(angle + .2f, scale);
+            rotationEndpointHits += PhysicalContactTriangleMeshCompoundIntersect(
+                mesh, before, sphere, target, 0).hit ? 1 : 0;
+            rotationEndpointHits += PhysicalContactTriangleMeshCompoundIntersect(
+                mesh, after, sphere, target, 0).hit ? 1 : 0;
+            rotationHits += PhysicalContactSweepTriangleMeshCompound(
+                mesh, before, after, sphere, target, .001f * scale, 0).hit ? 1 : 0;
+            ++rotationSamples;
+        }
+    }
+    sphere.children[0].radius = .003f;
     const auto& t = mesh.triangles[0];
     target.position = (t.vertices[0]+t.vertices[1]+t.vertices[2])*(1.f/3.f);
     auto previous = identity, current = identity;
@@ -82,8 +137,16 @@ int main(int argc, char** argv)
     std::sort(micros.begin(), micros.end());
     std::cout << "{\"triangles\":" << count << ",\"centroid_contacts\":" << centroidHits
               << ",\"gap_contact\":" << (gapHit ? "true" : "false")
+              << ",\"transformed_contacts\":" << transformedHits
+              << ",\"transformed_samples\":" << transformedSamples
+              << ",\"transformed_gap_contacts\":" << transformedGapHits
+              << ",\"rotation_contacts\":" << rotationHits
+              << ",\"rotation_samples\":" << rotationSamples
+              << ",\"rotation_endpoint_contacts\":" << rotationEndpointHits
               << ",\"sweep_contacts\":" << sweepHits << ",\"sweep_samples\":500"
               << ",\"sweep_p95_us\":" << micros[474]
               << ",\"sweep_max_us\":" << micros.back() << "}\n";
-    return centroidHits == count && !gapHit && sweepHits == 500 ? 0 : 6;
+    return centroidHits == count && !gapHit && sweepHits == 500 &&
+        transformedHits == transformedSamples && !transformedGapHits &&
+        rotationHits == rotationSamples && !rotationEndpointHits ? 0 : 6;
 }

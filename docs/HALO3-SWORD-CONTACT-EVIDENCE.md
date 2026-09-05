@@ -65,6 +65,26 @@ coverage. The tested gap coordinate is in the exported mesh frame, not a retail
 world coordinate. Geometry totals fit the existing fixed 768-triangle capacity;
 that capacity alone is not permission to enable the feature.
 
+The extended Release benchmark additionally exercises the authored mesh at
+world translation `(13.25, -4.5, 2.75)`, rotations `-0.7`, `0.3`, `1.2` radians
+about its Y axis, and scales `0.5`, `1.0`, `1.5`. Probe radii and sweep step
+scale with the weapon so this tests transform consistency, not changing target
+size. Results in `animated-kernel-benchmark.json`:
+
+- All 2,196 transformed triangle-centroid probes contact.
+- All nine transformed gap probes remain clear.
+- All nine rotational sweeps contact a probe at the most distal triangle's
+  midpoint pose. Neither endpoint contacts (zero of 18), proving these hits
+  came from the intervening sweep rather than endpoint overlap.
+- The original translation checks still pass: 244 centroid probes, clear gap,
+  and 500/500 sweeps. This run measured translation sweep p95 22.1 microseconds,
+  max 42.7 microseconds; it does not measure rotational sweep performance.
+
+The rotational sweeps span 0.4 radians with fixed root translation. They test
+the native contact kernel with authored geometry, not the engine's actual
+animation, render selection, inverse-bind application, wall solver or melee
+dispatch. No production behavior was enabled by these tests.
+
 ## Native inverse-bind evidence
 
 Read-only disassembly of official `halo3_tag_test.exe` (SHA-256
