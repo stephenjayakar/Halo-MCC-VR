@@ -167,3 +167,18 @@ settings hash `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`
 was verified after cleanup. The pitch adjustment is process-local and expired
 with MCC. This test is not a failed production collision candidate; it is an
 unsuccessful demo framing attempt with passing diagnostic contact checks.
+
+Follow-up source inspection found a concrete diagnostic selection defect:
+`PhysicalContactRankDebugTarget` applied the acquisition minimum squared camera
+distance (`0.25` world units squared) even to an already anchored target. Its
+caller excludes every other handle while an anchor exists, then drops the
+anchor when that target fails selection. Thus approaching a live, otherwise
+valid anchored prop can discard it. The previous run does not record camera
+distance at the transition, so this is not asserted as its proven cause.
+
+The next diagnostic candidate restricts that minimum distance to unanchored
+selection. Negative/non-finite distances, invalid mass/speed, native liveness,
+parent, dynamic-body and generation checks remain intact. A new core regression
+check covers a near anchored target versus near unanchored acquisition, plus
+negative and NaN distances. Only the diagnostic rig calls this helper; normal
+contact and NPC targeting do not. Runtime framing validation is pending.

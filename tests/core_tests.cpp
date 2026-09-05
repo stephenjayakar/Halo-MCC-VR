@@ -10439,6 +10439,13 @@ int main()
             PhysicalContactRankDebugTarget(
                 2, 2.0f, std::numeric_limits<float>::quiet_NaN(), 1.0f,
                 false);
+        Check(PhysicalContactRankDebugTarget(2, 2.f, .02f, .01f, true).valid &&
+              !PhysicalContactRankDebugTarget(2, 2.f, .02f, .01f, false).valid &&
+              !PhysicalContactRankDebugTarget(2, 2.f, .02f, -.01f, true).valid &&
+              !PhysicalContactRankDebugTarget(2, 2.f, .02f,
+                  std::numeric_limits<float>::quiet_NaN(), true).valid,
+              "Approaching an anchored Forge prop retains it while acquisition "
+              "distance and invalid-distance guards remain enforced");
         Check(settledWeapon.valid && settledWeapon.priority == 3 &&
               fallingHeavyWeapon.valid && fallingHeavyWeapon.priority == 1 &&
               constrainedLightWeapon.valid &&

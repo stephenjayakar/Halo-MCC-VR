@@ -3349,7 +3349,8 @@ inline PhysicalContactDebugTargetRank PhysicalContactRankDebugTarget(
     if (!std::isfinite(massKilograms) || massKilograms <= 0.001f ||
         !std::isfinite(speedMetersPerSecond) || speedMetersPerSecond < 0.0f ||
         !std::isfinite(distanceSquaredWorldUnits) ||
-        distanceSquaredWorldUnits < 0.25f)
+        distanceSquaredWorldUnits < 0.0f ||
+        (!anchored && distanceSquaredWorldUnits < 0.25f))
         return result;
     const bool stableLightWeapon = kind == 2 && massKilograms <= 5.0f &&
         speedMetersPerSecond <= 0.25f;
