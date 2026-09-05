@@ -191,7 +191,9 @@ Result: `out/debug-openxr/20260905-212551749Z-controller-pose-result.json`.
 Preserved log SHA-256:
 `7388A4D42D0DFD257752B6BFF8E2A9407380F3BA4A99509643CE1DE1F14AEBD9`.
 The fixed aim pose reaches normal right-hand reconstruction without a left
-controller: 16,703 checks, zero resets and zero missing poses at 14:28:49.090.
+controller: 16,367 checks, zero resets and zero missing poses at the preserved
+log cutoff of 14:28:47.070. A later live tail reached 16,703 checks before close,
+but that later line is outside the preserved log cited here.
 No synthetic prop replay was enabled. Native contact remained at `stage=motion`
 with zero samples: `VR_GetRightControllerMotion` still reads the absent real
 controller publication, while the fixed pose only overrides `VR_GetAimPose`.
@@ -207,3 +209,24 @@ not proof of impact, nudging, melee, or headset acceptance. The baseline mode
 remains available for comparison. The harness restored the exact normal SteamVR
 settings hash `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`
 and closed MCC/SteamVR. The accepted-build pointer is unchanged.
+
+Follow-up `65cbdcd` passed the separate controller-contact admission test in
+Construct Forge. Package:
+`out/candidates/65cbdcd-h3-physical-contact-20260905-213018516Z`.
+Installed DLL independently verified:
+`211135C5706481D6EDCADEAC83334897AD03DEEA02B391C9EEF15AFCC0EE9FB8`.
+Release build/core tests and Reach consistency check passed.
+Result: `out/debug-openxr/20260905-213027986Z-controller-contact-result.json`.
+Log SHA-256: `796070C3FD3C64DB7D04AD014285ADF25F68115D1F629FBCB3A334AF5D9DACF2`.
+Steam / SteamVR null driver / Null Model Number, 21:30:33-21:33:00 UTC.
+At the preserved cutoff 14:32:40.692: 2,782 sweeps, 93 native geometry samples,
+36 weapon triangles, 178,048 wall rays, 8,334 approved render submissions;
+zero prop hits, impulses, or melee. One wall block and one recovery were already
+present at the first published status. Recovery stayed at one through 8,336
+checks; missingPose stayed at six. The log does not capture that first recovery's
+input/output coordinates, so its cause is unresolved. This is evidence of
+normal contact-path admission, not a successful impact or a clean startup.
+The inspected `out/debug-openxr/20260905-213216208Z-controller-contact-framing/`
+still shows only partial weapon geometry near the bottom. No demo was recorded.
+Both processes closed; null=false, forcedDriver empty, requireHmd=true and the
+exact pre-test settings hash restored. No headset result or accepted pointer change.
