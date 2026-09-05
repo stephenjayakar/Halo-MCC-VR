@@ -1,7 +1,8 @@
 # Halo 3 clearance-query investigation
 
 September 5, 2026. Offline official H3EK evidence only. No new retail binding,
-runtime hook, or headset acceptance. Installed candidate remains affb3cb.
+runtime hook, or headset acceptance. This investigation began on affb3cb;
+the separately validated startup-readiness candidate d8f10b6 is now installed.
 
 ## Problem and intended behavior
 
@@ -21,8 +22,9 @@ not an implemented or verified clearance guarantee.
 Pinned `halo3_tag_test.exe` SHA-256:
 `59A78F2C96034D7CEB5D710505B2B36813AA141FC81A083E3F952973DBCE4602`.
 Reproduce with `tools/audit-h3-clearance-query.py`; local output is under
-`out/research/20260905-clearance-query`. The auditor checks identity, six direct
-call targets, and three assertion expressions before writing disassembly.
+`out/research/20260905-clearance-query`. The auditor checks identity, nine direct
+call targets, three assertion expressions, and coverage/capacity instructions
+before writing disassembly.
 It also rejects an unrelated input file before interpreting any address.
 
 - The spawn diagnostic explicitly naming `collision_test_point()` has a call
@@ -117,3 +119,33 @@ candidate exercised instance contact and fixed-object contact in the fixture.
 It does not prove an exact rendered controller-path nonpenetration result.
 No video from that fixture was represented as a functionality demonstration.
 Cleanup restored the byte-exact normal SteamVR settings before the next test.
+
+## Output capacity and engine exclusions (September 5 follow-up)
+
+Official base append paths were traced through their callers:
+719F90 -> 71AF10 (vertex), 7196E0 -> 71A950 (edge), and
+719CF0 -> 71B0E0 (surface). For the base append operation each reads its
+16-bit count at output offsets 0, 2, or 4, respectively; it appends only
+below 256 and increments that count. When full it skips the append and
+retains the nonzero count. These base paths cannot wrap a full output set
+into an empty one. This is not a proof of intermediate BSP collection,
+auxiliary extrusion paths, or all exclusions.
+
+The corresponding base arrays start at output +8 (36-byte vertex records),
++2408 (48-byte edge records), and +5408 (112-byte surface records).
+The surface path at 71B155 increments count +4 and 71B15A multiplies the
+old index by 70 hex; 256 records end at C408. Layout observations are
+for this official executable only, not a retail ABI authorization.
+
+Two global byte tests at 64D702 and 64D770 can clear requested categories
+before collection: 64D760 clears low flag bit 3 (instances), and 64D779
+clears high flag bit 0 (objects). Their retail identity/state and purpose
+have not been established. A requested mask alone therefore cannot certify
+coverage. The auditor now verifies these exact instructions and the three
+base capacity branches, retaining complete append disassembly. It passed
+against the pinned H3EK and rejected CLAUDE.md as an unverified module.
+
+Next binding work must establish intermediate-query completeness, interior
+solid treatment, category coverage, and dynamic freshness. This evidence
+changes no production collision or rendering policy. The stale-palette
+movement reproduction remains unresolved.
