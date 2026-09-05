@@ -513,3 +513,13 @@ rifle visible. They are not an exact geometric nonpenetration proof. This is a
 bounded wall-recovery demonstration, not a complete interaction showcase or
 headset acceptance. No evidence here resolves the Floodgate rocks, sword blade
 coverage, headset flicker, or performance report. Runtime remains 13da6c4.
+
+Final controller-contact admission passed after the 240-second hold:
+`out/debug-openxr/20260905-223836874Z-controller-contact-result.json`.
+Preserved log SHA `1074A9D93A816E3461F01963F8CCBED4018B8DD54327CA004ABCC0E0EF971A18`.
+Steam / SteamVR null driver / Null Model Number, 22:38:42-22:44:38 UTC.
+Cleanup restored the exact normal SteamVR settings hash recorded above;
+null=false, forcedDriver empty, requireHmd=true, MCC/VR processes absent.
+This admission pass plus the recorded phase evidence does not constitute
+headset acceptance. Installed runtime is still 13da6c4; subsequent commits
+change only recording tooling and documentation.
