@@ -7376,6 +7376,7 @@ namespace
     std::atomic<uint32_t> g_halo3ContactDebugObjectKinds{0};
     std::atomic<float> g_halo3ContactDebugInitialPosition[3]{};
     std::atomic<float> g_halo3ContactDebugCurrentPosition[3]{};
+    std::atomic<bool> g_halo3ContactDemoCamera{false};
     std::atomic<float> g_halo3ContactDebugVelocity[3]{};
     std::atomic<float> g_halo3ContactDebugPeakLiftMeters{0.0f};
     std::atomic<float> g_halo3ContactDebugPeakCarryMeters{0.0f};
@@ -19078,6 +19079,46 @@ namespace
             g_baseCamValid.store(false);
         }
 
+        // Opt-in filming camera for live contact replays. The simulation and
+        // controller publications above retain their ordinary world frame.
+        // Only this camera copy observes the scripted weapon and its target.
+        if (debugRig && src && g_halo3ContactDemoCamera.load(std::memory_order_relaxed) &&
+            g_halo3ContactDebugTarget.load(std::memory_order_relaxed) != -1)
+        {
+            const float scale = g_worldScale.load(std::memory_order_relaxed);
+            PhysicalContactVec3 target{
+                g_halo3ContactDebugCurrentPosition[0].load(std::memory_order_relaxed),
+                g_halo3ContactDebugCurrentPosition[1].load(std::memory_order_relaxed),
+                g_halo3ContactDebugCurrentPosition[2].load(std::memory_order_relaxed)};
+            auto* p = reinterpret_cast<float*>(static_cast<char*>(src) + kSrcPos);
+            auto* f = reinterpret_cast<float*>(static_cast<char*>(src) + kSrcFwd);
+            auto* u = reinterpret_cast<float*>(static_cast<char*>(src) + kSrcUp);
+            const PhysicalContactVec3 horizontal = PhysicalContactNormalize({f[0], f[1], 0}, {});
+            const PhysicalContactVec3 side{-horizontal.y, horizontal.x, 0};
+            if (PhysicalContactFinite(target) && std::isfinite(scale) &&
+                scale >= 0.05f && scale <= 2.0f &&
+                PhysicalContactLengthSquared(horizontal) > 0.5f)
+            {
+                const bool npc = g_halo3ContactDebugRequestedKind.load(std::memory_order_relaxed) == 0;
+                target.z += (npc ? 0.9f : 0.1f) * scale;
+                const PhysicalContactVec3 eye = target - horizontal * (2.2f * scale) +
+                    side * (1.3f * scale) + PhysicalContactVec3{0, 0, 0.6f * scale};
+                const PhysicalContactVec3 forward = PhysicalContactNormalize(target - eye, {});
+                const PhysicalContactVec3 left = PhysicalContactNormalize({-forward.y, forward.x, 0}, {});
+                const PhysicalContactVec3 up{
+                    forward.y * left.z - forward.z * left.y,
+                    forward.z * left.x - forward.x * left.z,
+                    forward.x * left.y - forward.y * left.x};
+                float saved[9];
+                std::memcpy(saved, p, 12); std::memcpy(saved + 3, f, 12); std::memcpy(saved + 6, u, 12);
+                p[0]=eye.x; p[1]=eye.y; p[2]=eye.z;
+                f[0]=forward.x; f[1]=forward.y; f[2]=forward.z;
+                u[0]=up.x; u[1]=up.y; u[2]=up.z;
+                void* result = g_origCamCopy(dst, src);
+                std::memcpy(p, saved, 12); std::memcpy(f, saved + 3, 12); std::memcpy(u, saved + 6, 12);
+                return result;
+            }
+        }
         return g_origCamCopy(dst, src);
     }
 
@@ -23658,6 +23699,10 @@ namespace
                 std::size(contactDebugLeftGrabValue) &&
             contactDebugLeftGrabValue[0] != L'0';
         wchar_t contactDebugWallValue[8]{};
+        wchar_t demoCameraValue[2]{};
+        g_halo3ContactDemoCamera.store(
+            GetEnvironmentVariableW(L"HALOMCCVR_H3_CONTACT_DEMO_CAMERA", demoCameraValue, 2) == 1 &&
+            demoCameraValue[0] == L'1', std::memory_order_relaxed);
         const DWORD contactDebugWallLength = GetEnvironmentVariableW(
             L"HALOMCCVR_H3_CONTACT_DEBUG_WALL", contactDebugWallValue,
             static_cast<DWORD>(std::size(contactDebugWallValue)));
