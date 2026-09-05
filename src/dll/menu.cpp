@@ -418,6 +418,8 @@ namespace
             case VK_F6: Game_TogglePositional(); return 0;
             case VK_F8: Game_PitchTrim(-1); return 0;
             case VK_F9: Game_PitchTrim(+1); return 0;
+            case VK_OEM_4: if (Game_RequestNullControllerTurn(-1)) return 0; break;
+            case VK_OEM_6: if (Game_RequestNullControllerTurn(+1)) return 0; break;
             case VK_F10: VR_ToggleScreenFollow(); return 0;
             case VK_F11:
                 if (Game_CanToggleImmersiveView()) VR_ToggleStereo();

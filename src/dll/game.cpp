@@ -143,6 +143,7 @@ namespace
     std::atomic<float> g_yawSign{-1.0f};       // F4  (default matches PSVR2 mapping)
     std::atomic<float> g_pitchSign{1.0f};      // F5
     std::atomic<float> g_pitchTrim{0.0f};      // F8/F9, radians
+    std::atomic<int> g_nullControllerTurnSteps{0};
     std::atomic<bool> g_writeUp{true};         // F7
     std::atomic<bool> g_positional{true};      // M2: 6DOF head translation on by default; F6 toggles
     std::atomic<int> g_stereoEye{-1};           // M2: -1 mono, 0 left, 1 right
@@ -7075,6 +7076,14 @@ namespace
     {
         if (!g_vrAim.load())
             return;
+        // The null driver has no turn stick. Consume addressed diagnostic
+        // input on the same camera thread that owns ordinary VR turning.
+        if (VR_UsesFixedControllerDebugPose())
+        {
+            const int steps = std::clamp(g_nullControllerTurnSteps.exchange(
+                0, std::memory_order_acq_rel), -12, 12);
+            g_gameYawRef = WrapPi(g_gameYawRef - steps * (15.0f / 57.2958f));
+        }
         if (!pad.valid)
             return;
         // Smooth turn needs a sub-frame timebase. GetTickCount only updates on
@@ -42565,6 +42574,15 @@ void Game_ForcePositional()
     g_positional = true;
     g_needPosRecenter = true;
     LOG("positional 6DOF forced ON for stereo VR");
+}
+
+bool Game_RequestNullControllerTurn(int dir)
+{
+    if (!VR_UsesFixedControllerDebugPose() || !g_enabled.load() ||
+        !g_vrAim.load() || !g_halo3RuntimeGeneration.load(std::memory_order_acquire))
+        return false;
+    g_nullControllerTurnSteps.fetch_add(dir < 0 ? -1 : 1, std::memory_order_release);
+    return true;
 }
 
 void Game_PitchTrim(int dir)

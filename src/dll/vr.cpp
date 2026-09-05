@@ -9835,6 +9835,11 @@ bool VR_GetHeadPose(float outQuat[4], float outPos[3])
     return ok;
 }
 
+bool VR_UsesFixedControllerDebugPose() noexcept
+{
+    return g_halo3AimDebugPose;
+}
+
 void VR_GetPadState(VrPadState& out)
 {
     if (!g_headCsInit)
