@@ -102,6 +102,26 @@ The adapter is included only by the offline benchmark, not by the DLL. Live
 geometry identity, visibility and animation-transition policy remain required
 before promoting it into production contact code.
 
+## Read-only live observation tool
+
+`tools/probe-h3-weapon-render.py --output <snapshot.json>` can observe a loaded
+Halo 3 diagnostic session without process-memory writes, remote threads, game
+hooks, game-file changes or SteamVR configuration changes. It first runs the
+pinned skinning verifier. The renderer at `0x295956`-`0x2959E8` constructs
+96-byte records in array `0x91AC60`: render tag `+4`, object handle `+0x48`,
+region count `+0`, region-selected mesh indices `+0x0E`, and flags `+0x58`.
+The running allocation count is loaded at `0x29591E`; the tool derives its
+address from that instruction. The byte at `+0x0C` is recorded separately as
+the skinning count field, not confused with the region count.
+
+The tool correlates records with the verified first-person palette by both
+render tag and object handle, reads their live matrices and loaded inverse
+binds, bounds every array, and compares the buffers/counts on reread. Even an
+unchanged reread is not an atomic or per-eye rendering guarantee. Schema fields
+state that limitation explicitly. This is a diagnostic candidate: syntax/help
+checks pass, but live observation is still untested. Its first run found zero
+MCC processes and exited before opening a process or creating a snapshot.
+
 ## Native inverse-bind evidence
 
 Read-only disassembly of official `halo3_tag_test.exe` (SHA-256
