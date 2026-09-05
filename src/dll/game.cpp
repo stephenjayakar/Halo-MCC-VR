@@ -975,7 +975,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactHandLeashMissingPose{0};
     std::atomic<bool> g_halo3ContactDebugHandRecovery{false};
     std::atomic<bool> g_halo3ContactDebugHandRecoveryInjected{false};
-    struct Halo3FirstHandRecovery
+    struct Halo3HandRecoveryRecord
     {
         uint64_t ms = 0, proposalSerial = 0, displayedSerial = 0;
         int32_t weapon = -1, target = -1;
@@ -984,10 +984,15 @@ namespace
         PhysicalContactVec3 tracked{}, final{}, consumedOffset{};
         bool corrected = false, finalGuardRequired = false, finalGuardProved = false;
     };
-    // One immutable record per DLL lifetime: 0 empty, 1 writer owns it,
+    // First 16 immutable records per DLL lifetime. Unique reservations avoid
+    // overwriting data the logger is reading. States: 0 not published,
     // 2 published, 3 logged. No render-thread logging, allocation or waiting.
-    std::atomic<uint32_t> g_halo3FirstHandRecoveryState{0};
-    Halo3FirstHandRecovery g_halo3FirstHandRecovery;
+    constexpr size_t kHalo3HandRecoveryRecordCount = 16;
+    std::atomic<uint64_t> g_halo3HandRecoveryRecordReservations{0};
+    std::array<std::atomic<uint32_t>, kHalo3HandRecoveryRecordCount>
+        g_halo3HandRecoveryRecordStates{};
+    std::array<Halo3HandRecoveryRecord, kHalo3HandRecoveryRecordCount>
+        g_halo3HandRecoveryRecords{};
     // Capture the exact offset consumed while reconstructing this submission.
     // Reading the worker publication again afterward can observe a new sample.
     thread_local bool g_halo3CaptureHandOffset = false;
@@ -6164,11 +6169,12 @@ namespace
                          destination[0].translation[2]},
                         g_worldScale.load(std::memory_order_relaxed)))
                 {
-                    uint32_t empty = 0;
-                    if (g_halo3FirstHandRecoveryState.compare_exchange_strong(
-                            empty, 1, std::memory_order_relaxed))
+                    const uint64_t recordIndex =
+                        g_halo3HandRecoveryRecordReservations.fetch_add(
+                            1, std::memory_order_relaxed);
+                    if (recordIndex < kHalo3HandRecoveryRecordCount)
                     {
-                        auto& record = g_halo3FirstHandRecovery;
+                        auto& record = g_halo3HandRecoveryRecords[recordIndex];
                         record.ms = nowMs;
                         record.proposalSerial = proposalSerial;
                         record.displayedSerial = displayedSerial;
@@ -6184,7 +6190,8 @@ namespace
                         record.corrected = displayedCorrected;
                         record.finalGuardRequired = finalGuardRequired;
                         record.finalGuardProved = finalGuardProved;
-                        g_halo3FirstHandRecoveryState.store(2, std::memory_order_release);
+                        g_halo3HandRecoveryRecordStates[recordIndex].store(
+                            2, std::memory_order_release);
                     }
                     memcpy(destination, trackedNodes.data(),
                            static_cast<size_t>(renderNodeCount) * sizeof(BoneMatrix));
@@ -18513,13 +18520,15 @@ namespace
             return;
         nextLogMs = nowMs + 2000;
         Halo3LogNpcShoveProbe();
-        uint32_t published = 2;
-        if (g_halo3FirstHandRecoveryState.compare_exchange_strong(
-                published, 3, std::memory_order_acquire))
+        for (size_t index = 0; index < kHalo3HandRecoveryRecordCount; ++index)
         {
-            const auto& r = g_halo3FirstHandRecovery;
-            LOG("H3 contact first hand recovery: ms=%llu weapon=0x%08X target=0x%08X proposal=%llu displayed=%llu proof=%u corrected=%d finalGuard=%d/%d scale=%.6f tracked=(%.6f %.6f %.6f) final=(%.6f %.6f %.6f) consumedOffset=(%.6f %.6f %.6f)",
-                (unsigned long long)r.ms, (unsigned)r.weapon, (unsigned)r.target,
+            uint32_t published = 2;
+            if (!g_halo3HandRecoveryRecordStates[index].compare_exchange_strong(
+                    published, 3, std::memory_order_acquire))
+                continue;
+            const auto& r = g_halo3HandRecoveryRecords[index];
+            LOG("H3 contact hand recovery event: index=%u ms=%llu weapon=0x%08X target=0x%08X proposal=%llu displayed=%llu proof=%u corrected=%d finalGuard=%d/%d scale=%.6f tracked=(%.6f %.6f %.6f) final=(%.6f %.6f %.6f) consumedOffset=(%.6f %.6f %.6f)",
+                (unsigned)index, (unsigned long long)r.ms, (unsigned)r.weapon, (unsigned)r.target,
                 (unsigned long long)r.proposalSerial, (unsigned long long)r.displayedSerial,
                 r.proof, r.corrected, r.finalGuardRequired, r.finalGuardProved, r.scale,
                 r.tracked.x, r.tracked.y, r.tracked.z, r.final.x, r.final.y, r.final.z,
