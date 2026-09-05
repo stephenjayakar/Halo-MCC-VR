@@ -14,6 +14,7 @@ param(
         'npc-contact',
         'npc-shove',
         'npc-geometry',
+        'npc-melee',
         'npc-motor',
         'melee')]
     [string]$Test = 'equipment-scoop',
@@ -424,6 +425,10 @@ function Test-VisibleWeaponGapFailure(
 
 function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
+        'npc-melee' {
+            $status = ($Text -split "`r?`n" | Where-Object { $_ -like '*H3 physical contact status:*' } | Select-Object -Last 1)
+            return $status -match 'enemyMeleeApplied=([1-9][0-9]*) ' -and $status -match 'enemyMeleeFaulted=0 '
+        }
         'npc-geometry' {
             $status = ($Text -split "`r?`n" | Where-Object { $_ -like '*H3 physical contact status:*' } | Select-Object -Last 1)
             return $status -match 'enemyGeometry=([1-9][0-9]*) ' -and $status -match 'enemyExactHits=([1-9][0-9]*) ' -and $status -match 'melees=0 '
@@ -597,10 +602,11 @@ try {
             $name, $null, [EnvironmentVariableTarget]::Process)
     }
     $env:HALOMCCVR_H3_CONTACT_DEBUG_RIG = '1'
-    if ($Test -in @('npc-shove', 'npc-geometry')) {
+    if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
         $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT = '1'
     }
+    if ($Test -eq 'npc-melee') { $env:HALOMCCVR_H3_CONTACT_DEBUG_MELEE = '1' }
     switch ($Test) {
         'npc-motor' {
             $env:HALOMCCVR_H3_CONTACT_DEBUG_NPC_SHOVE = '1'
