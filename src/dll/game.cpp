@@ -972,7 +972,8 @@ namespace
     std::atomic<uint64_t> g_halo3ContactHandRecoveryUntilMs{0};
     std::atomic<bool> g_halo3ContactHandRecoveryAwaitingMotion{false};
     // Only the render publisher writes this reference. Its serial stores the
-    // runtime generation; it contains one uncorrected root, not an approval.
+    // runtime generation; its two roots are the uncorrected and displaced
+    // recovery poses, not an approval. Their difference is the release side.
     Halo3VisibleWeaponPosePublication g_halo3ContactHandRecoveryReference;
     std::atomic<uint64_t> g_halo3ContactHandRecoveries{0};
     std::atomic<uint64_t> g_halo3ContactHandLeashChecks{0};
@@ -5924,9 +5925,13 @@ namespace
                     uint64_t recoveryMs = 0, recoveryGeneration = 0;
                     int32_t recoveryWeapon = -1;
                     uint16_t recoveryTag = 0xFFFFu;
+                    std::array<BoneMatrix,
+                        Halo3VisibleWeaponPosePublication::kMaximumNodes> recoveryNodes{};
+                    uint32_t recoveryNodeCount = 0;
                     if (Halo3ReadWeaponPose(g_halo3ContactHandRecoveryReference,
                             recoveryBasis, recoveryPosition, recoveryScale, recoveryMs,
-                            nullptr, nullptr, &recoveryTag, &recoveryWeapon, &recoveryGeneration))
+                            recoveryNodes.data(), &recoveryNodeCount, &recoveryTag,
+                            &recoveryWeapon, &recoveryGeneration) && recoveryNodeCount == 2)
                     {
                         const auto& currentRoot = trackedNodes[0];
                         const bool identityChanged = recoveryGeneration != contactGeneration ||
@@ -5939,7 +5944,10 @@ namespace
                             {currentRoot.rotation[0], currentRoot.rotation[1], currentRoot.rotation[2]},
                             {recoveryBasis[6], recoveryBasis[7], recoveryBasis[8]},
                             {currentRoot.rotation[6], currentRoot.rotation[7], currentRoot.rotation[8]},
-                            g_worldScale.load(std::memory_order_relaxed));
+                            g_worldScale.load(std::memory_order_relaxed),
+                            {recoveryNodes[1].translation[0] - recoveryPosition[0],
+                             recoveryNodes[1].translation[1] - recoveryPosition[1],
+                             recoveryNodes[1].translation[2] - recoveryPosition[2]});
                         if (identityChanged || (moved && nowMs >=
                                 g_halo3ContactHandRecoveryUntilMs.load(std::memory_order_acquire)))
                             g_halo3ContactHandRecoveryAwaitingMotion.store(false, std::memory_order_release);
@@ -6226,11 +6234,12 @@ namespace
                         g_halo3HandRecoveryRecordStates[recordIndex].store(
                             2, std::memory_order_release);
                     }
+                    const BoneMatrix recoveryReference[2]{trackedNodes[0], destination[0]};
+                    Halo3PublishWeaponPose(g_halo3ContactHandRecoveryReference,
+                        recoveryReference, 2, tag, activeWeaponHandle,
+                        contactGeneration, nowMs, false);
                     memcpy(destination, trackedNodes.data(),
                            static_cast<size_t>(renderNodeCount) * sizeof(BoneMatrix));
-                    Halo3PublishWeaponPose(g_halo3ContactHandRecoveryReference,
-                        trackedNodes.data(), 1, tag, activeWeaponHandle,
-                        contactGeneration, nowMs, false);
                     g_halo3ContactHandRecoveryAwaitingMotion.store(true, std::memory_order_release);
                     g_halo3ContactHandRecoveryUntilMs.store(
                         nowMs + 500, std::memory_order_release);

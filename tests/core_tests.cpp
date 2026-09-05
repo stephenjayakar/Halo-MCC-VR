@@ -9146,6 +9146,22 @@ int main()
               PhysicalContactRecoveryPoseMoved({}, {},
                   {2, 0, 0}, {2, 0, 0}, {0, 0, 2}, {0, 1, 1}, 1),
               "Recovery rejects invalid poses and recognizes roll with scaled basis vectors");
+        for (float scale : {.05f, .33f, 1.0f, 2.0f})
+        {
+            const auto retreat = [&](PhysicalContactVec3 movement, PhysicalContactVec3 correction) {
+                return PhysicalContactRecoveryPoseMoved({}, movement * scale,
+                    {1, 0, 0}, {1, 0, 0}, {0, 0, 1}, {0, 0, 1}, scale, correction);
+            };
+            Check(!retreat({0, -1, 0}, {0, .18f, 0}) &&
+                  !retreat({1, 0, 0}, {0, .18f, 0}) &&
+                  !retreat({0, .09f, 0}, {0, .18f, 0}) &&
+                  retreat({0, .11f, 0}, {0, .18f, 0}),
+                  "Wall recovery ignores deeper and tangential movement but releases after a 10 cm outward retreat");
+            Check(retreat({-.08f, .08f, 0}, {-2, 2, 0}) &&
+                  !retreat({.08f, -.08f, 0}, {-2, 2, 0}) &&
+                  retreat({.11f, 0, 0}, {NAN, 0, 0}),
+                  "Recovery follows diagonal correction direction and retains an escape for invalid correction data");
+        }
         Check(PhysicalContactApprovedPaletteCompatible(
                   kActiveWeaponRenderTag, kActiveWeaponRenderTag,
                   0x12340001, 0x12340001, 5, 5, 30, 11, 1000, 5000) &&

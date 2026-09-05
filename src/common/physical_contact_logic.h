@@ -224,7 +224,8 @@ inline bool PhysicalContactTransformFinite(const PhysicalContactTransform& t)
 inline bool PhysicalContactRecoveryPoseMoved(
     PhysicalContactVec3 referencePosition, PhysicalContactVec3 position,
     PhysicalContactVec3 referenceForward, PhysicalContactVec3 forward,
-    PhysicalContactVec3 referenceUp, PhysicalContactVec3 up, float worldScale)
+    PhysicalContactVec3 referenceUp, PhysicalContactVec3 up, float worldScale,
+    PhysicalContactVec3 recoveryCorrection = {})
 {
     if (!PhysicalContactFinite(referencePosition) || !PhysicalContactFinite(position) ||
         !PhysicalContactFinite(referenceForward) || !PhysicalContactFinite(forward) ||
@@ -237,7 +238,16 @@ inline bool PhysicalContactRecoveryPoseMoved(
         return false;
     const float distance = .10f * worldScale;
     constexpr float cosineTwentyDegrees = .9396926208f;
-    return PhysicalContactLengthSquared(position - referencePosition) >= distance * distance ||
+    // Moving farther into the obstruction must not rearm the same correction.
+    // With no trustworthy direction (e.g. recovery from a non-finite output),
+    // retain the distance-only escape rather than stranding a valid hand pose.
+    const bool haveDirection = PhysicalContactFinite(recoveryCorrection) &&
+        PhysicalContactLengthSquared(recoveryCorrection) > 1.0e-10f;
+    const bool translated = haveDirection
+        ? PhysicalContactDot(position - referencePosition,
+              PhysicalContactNormalize(recoveryCorrection)) >= distance
+        : PhysicalContactLengthSquared(position - referencePosition) >= distance * distance;
+    return translated ||
         PhysicalContactDot(PhysicalContactNormalize(referenceForward),
                            PhysicalContactNormalize(forward)) <= cosineTwentyDegrees ||
         PhysicalContactDot(PhysicalContactNormalize(referenceUp),
