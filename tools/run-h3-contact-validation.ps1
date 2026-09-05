@@ -521,6 +521,9 @@ if (-not $installRoot) {
 }
 $modRoot = Join-Path $installRoot 'Halo_MCC_VR'
 $launcher = Join-Path $modRoot 'halo3xr_launcher.exe'
+$testedDllHash = Get-Sha256 (Join-Path $modRoot 'halo3xr.dll')
+$testedLauncherHash = Get-Sha256 $launcher
+$validatorCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
 $runtimeLog = Join-Path $modRoot 'halo3xr.log'
 if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
     throw "The installed MCC VR launcher was not found: $launcher"
@@ -967,10 +970,9 @@ $result = [ordered]@{
     requested_scenario = $Scenario
     passed = $passed
     source_commit = $runtimeSourceCommit
-    validator_source_commit = (& git -C $repoRoot rev-parse HEAD).Trim()
-    installed_dll_sha256 = Get-Sha256 (Join-Path $modRoot 'halo3xr.dll')
-    installed_launcher_sha256 =
-        Get-Sha256 (Join-Path $modRoot 'halo3xr_launcher.exe')
+    validator_source_commit = $validatorCommit
+    installed_dll_sha256 = $testedDllHash
+    installed_launcher_sha256 = $testedLauncherHash
     mcc_edition = 'Steam'
     menu_control = $(if ($ExternalMenuControl) {
         'external-visible-state'
