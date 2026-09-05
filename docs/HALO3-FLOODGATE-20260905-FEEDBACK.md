@@ -146,3 +146,24 @@ evidence only, not a demo. Existing F8/F9 controls adjust process-local pitch by
 0.035 radians per press (clamped to +/-0.8); using those controls to frame a
 future recording needs visual confirmation and does not require another camera
 hook. No new demo video was created during this analysis.
+
+### Framing experiment, September 5 21:08-21:12 UTC
+
+The normal gap fixture (recovery injection disabled) passed on `096f7cb` while
+testing view framing. Result: `out/debug-openxr/20260905-210826281Z-visible-weapon-gap-result.json`;
+preserved log SHA-256 `DE45A84F148F5242E8B432AEC5118730122A13A0A170D3AED947483D196F53E4`.
+Fifteen F8 presses, then eight more and a 600 ms backward input, changed the
+view to the floor. Frames in `20260905-211000469Z-contact-framing` and
+`20260905-211034572Z-contact-framing-back` were visually inspected: partial
+weapon/hand silhouettes appear at the bottom, but no clear contact point.
+The logged target also changed from `0xE2740005` to `0xE2900021` during the
+session. That correlation does not establish the precise retargeting cause.
+The fixture's anchored target, most recent contacted object and camera framing
+need to be distinguished before recording a demonstration.
+
+No video was recorded because the still frames did not meet the user's request
+for visible functionality. MCC and SteamVR closed normally; the original normal
+settings hash `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`
+was verified after cleanup. The pitch adjustment is process-local and expired
+with MCC. This test is not a failed production collision candidate; it is an
+unsuccessful demo framing attempt with passing diagnostic contact checks.
