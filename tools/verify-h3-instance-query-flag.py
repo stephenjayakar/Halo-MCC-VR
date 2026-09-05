@@ -37,15 +37,23 @@ def verify(official, retail):
         raise ValueError(f'Instance gate is not uniquely verified: {matches}')
     for label, site, target in (
         ('official', 0x65364D, 0x651790),
+        ('official', 0x65194F, 0x654590),
         ('retail', 0x1FDD33, 0x1FE3B8),
-        ('retail', 0x1FDE05, 0x1FE3B8)):
+        ('retail', 0x1FDE05, 0x1FE3B8),
+        ('retail', 0x1FE53C, 0x1FCF3C)):
         code = sources[label].get_data(site, 5)
         if code[0] != 0xE8 or site + 5 + struct.unpack('<i', code[1:])[0] != target:
             raise ValueError(f'{label}: caller mismatch at {site:#x}')
     official_gate = sources['official'].get_data(0x6517BA, 3)
     if official_gate != bytes.fromhex('c1 e8 03'):
         raise ValueError('Official low-bit-three extraction differs')
+    for label, site, pattern in (
+        ('official', 0x65474D, 'c7 07 03 00 00 00'),
+        ('retail', 0x1FD0F2, 'c7 06 03 00 00 00')):
+        if sources[label].get_data(site, 6) != bytes.fromhex(pattern):
+            raise ValueError(f'{label}: instance result-type write differs')
     return {'retail_gate_rva': hex(matches[0]), 'required_low_flag': '0x8',
+            'verified_instance_result_type': 3,
             'bsp_and_instance_flags': '0x9', 'all_object_flags_unchanged': '0x7fff00000000',
             'headset_acceptance': False}
 

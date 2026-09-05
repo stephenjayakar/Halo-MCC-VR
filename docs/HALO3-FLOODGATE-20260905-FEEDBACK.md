@@ -614,3 +614,39 @@ Normal SteamVR settings SHA remains
 No runtime session on this candidate yet, no headset acceptance, and no accepted
 pointer advance. The stale uncorrected approval and clearance-query investigation
 remain unresolved; this candidate changes only instance query coverage.
+
+## Instance fixture pass and controller-path recording (September 5)
+
+The b0426fe wall fixture passed both structure and fixed-object validation:
+`out/debug-openxr/20260905-231135817Z-wall-result.json`, log SHA
+`818B5B23C13B236F8F9CE8C07D371E3A69C73911BACC262065D00496836D260E`.
+The selected structure hit was type 3. Additional official/retail tracing proves
+that this is specifically instanced geometry: official 65474D and retail
+1FD0F2 write type 3 on the matching instance-query success path. The verifier
+now includes these writes and their caller edges. This is live fixture coverage,
+not an exact controller-rendering or headset result.
+
+The following controller-contact run recorded
+`out/demos/20260905-231614-instance-railing-contact-retreat/raw.mp4`.
+W1500 started 23:16:17.523 UTC, another W1500 at 23:16:22.767, and S2500 at
+23:16:27.664. Frames 5, 10, and 18 were inspected. The player passed through the
+railing opening and dropped to a lower level, so this is not a clean wall demo.
+Its result.json explicitly records that limitation.
+
+A startup recovery before the recording consumed (0,0,-.33) world units at
+worldScale .33 (one metre), restoring the tracked pose. During recorded motion,
+wallBlocks increased from one to four and one additional recovery occurred at
+16:16:24.794, with final delta about .326 m and consumed offset (-.044432,0,0).
+The recovery stayed held through 16:16:28.834, then released by 16:16:30.855;
+nativeSamples returned to 93 with no further reset in the observed sequence.
+The provenance fix and instance flag do not eliminate large corrections or
+stale-palette displacement. Full rendered collision remains unaccepted.
+
+Final controller admission passed:
+`out/debug-openxr/20260905-231428893Z-controller-contact-result.json`,
+log SHA `5E3F0B2B75A4B081988757039DD08D044960EE706476AEF0BC01D7576353668F`.
+Steam / SteamVR null driver / Null Model Number, 23:14:34-23:19:10 UTC.
+Cleanup restored normal mode (null=false, forcedDriver empty, requireHmd=true),
+exact settings SHA 175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E.
+MCC and VR processes absent. Installed runtime remains b0426fe; this turn added
+only evidence and verifier checks, with no further production change.

@@ -98,3 +98,22 @@ broad. It does not prove that the user's particular Floodgate rock is an
 instance, nor does it provide collision for render-only decorators.
 The proposed clearance certificate and uncorrected-palette lag remain separate,
 unresolved work.
+
+## Result-type proof and first live instance result
+
+The instance path calls H3EK 654590 at 65194F. After its exact geometry query
+succeeds, 65474D writes result.type=3, and 654798 writes objectHandle=-1.
+The matched retail path calls 1FCF3C at 1FE53C; 1FD0F2 writes the same type 3.
+The verifier now checks both call edges and both type writes in pinned modules.
+Thus type 3 in the wall-fixture result is specifically instance collision.
+
+The b0426fe Forge wall fixture passed at 23:11:41-23:13:04 UTC:
+`out/debug-openxr/20260905-231135817Z-wall-result.json`.
+Log SHA `818B5B23C13B236F8F9CE8C07D371E3A69C73911BACC262065D00496836D260E`.
+At 16:12:52.114 and 16:12:54.134, nativeType=3, object handle FFFFFFFF,
+structureValidated=1, objectValidated=1, requested penetration .083-.105 m.
+Steam / SteamVR null driver / Null Model Number. This proves the installed
+candidate exercised instance contact and fixed-object contact in the fixture.
+It does not prove an exact rendered controller-path nonpenetration result.
+No video from that fixture was represented as a functionality demonstration.
+Cleanup restored the byte-exact normal SteamVR settings before the next test.
