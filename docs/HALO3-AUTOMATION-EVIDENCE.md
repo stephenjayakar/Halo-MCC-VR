@@ -1,5 +1,32 @@
 # Halo 3 autonomous test control
 
+## 2026-09-05 Floodgate coverage and save/profile restoration
+
+The installed 1b2a43c candidate passed Campaign loose-weapon nudging on the
+restored Floodgate checkpoint: 2860 impulses, zero melee, 759 body constraints,
+2631 final render samples, zero recorded separation failures, zero target-bound
+unproved palettes. This closes the Sierra 117 starting-scene coverage gap; it
+does not establish headset visual quality.
+Log out/debug-openxr/20260905-104944313Z-visible-weapon-nudge.log SHA-256:
+C16A4518F6D28D7A4993666A5C6873FDF63449150A4EDC3DE66B9CA6D3CA8E62.
+Video out/debug-openxr/20260905-105412484Z-1b2a43c-floodgate-nudge/recording.mp4:
+113 frames / 29.962118 s, SHA-256
+86F282EA0E9CDEDD5B695931AACC11A5E9F635AE1FCF503F8461434B0761A921.
+
+Original campaign deepSave/header hashes alone were insufficient: Halo 3's menu
+had no Resume. The matching pre-test AceSettings/data snapshot restored Resume
+and loaded Floodgate. The final restoration includes that original profile
+snapshot (ADC232E030689EB2FEDE46BAB2CCE0422E965AF778392C17C741B9819278F33B)
+and the original campaign files, with the intervening profile preserved locally.
+The restored UI showed UNSC / 0-of-11 rather than the test profile's meow /
+11-of-11. Preserve both versions; do not claim the profile displays unchanged.
+
+An interrupted menu wait did not execute its restoration finally block. With
+all MCC/SteamVR processes confirmed absent, the hash-verified normal settings
+backup was restored explicitly. The harness now detects MCC closure during
+menu control and exits through ordinary error cleanup instead of waiting for
+the menu timeout. Normal settings and installed candidate verification passed.
+
 ## 2026-09-05 retail native command queue
 
 `tools/mcc-engine-control.py` is read-only by default. With `--script`, it

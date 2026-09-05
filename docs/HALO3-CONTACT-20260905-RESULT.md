@@ -28,7 +28,8 @@ their reversions are in HALO3-AUTOMATION-EVIDENCE.md.
 | Forge walls | Structure and fixed-object wall constraints validated | `20260905-101326640Z-wall-result.json` |
 | Forge loose weapon | Authored geometry, dynamic constraint and native impulses observed; zero melee | `20260905-102319222Z-visible-weapon-nudge-result.json` |
 | Campaign walls | Structure and fixed-object wall constraints validated | `20260905-102616203Z-wall-result.json` |
-| Campaign loose weapon | **Not exercised**: no eligible target at the checkpoint; timed out, not a pass | `20260905-103000713Z-visible-weapon-nudge-result.json` |
+| Campaign loose weapon, Sierra 117 | **Not exercised**: no eligible target at the checkpoint; timed out, not a pass | `20260905-103000713Z-visible-weapon-nudge-result.json` |
+| Campaign loose weapon, Floodgate | Passed: native impulses and body constraints, zero melee, zero recorded render separation failures | `20260905-104944313Z-visible-weapon-nudge-result.json` |
 
 The NPC motor-only experiment separately measured 0.17294 m movement against
 0.00043 m baseline drift without health/shield loss. Its result is supporting
@@ -48,13 +49,14 @@ Each directory contains the MP4, original frames, timestamps, and SHA-256 JSON.
 | `20260905-100026603Z-1b2a43c-campaign-npc-shove` | 29.99 s | Slow NPC contact; fixed null view poorly frames the gun |
 | `20260905-100548691Z-1b2a43c-campaign-npc-exact` | 34.79 s | Exact slow NPC replay; lower-body framing |
 | `20260905-101134526Z-1b2a43c-campaign-npc-melee` | 17.84 s | Fast NPC melee diagnostic |
+| `20260905-105412484Z-1b2a43c-floodgate-nudge` | 29.96 s | Campaign loose-weapon nudge diagnostic |
 
 Open `recording.mp4` inside each directory. The recordings do not establish
 polished headset visuals. Exact NPC replay recorded render separation fallback
 holds; Forge nudge also recorded a few unproved target fallbacks. No claim of
 universal zero clipping or Alyx-equivalent feel is warranted from these tests.
-Campaign loose-prop coverage, real controller tracking, haptic feel, and visual
-collision acceptance remain open. Creature/giant shoving is not implemented.
+Real controller tracking, haptic feel, and visual collision acceptance remain
+open. Creature/giant shoving is not implemented.
 
 ## Programmatic MCC control
 
@@ -84,8 +86,15 @@ The installed config remains unchanged, physical contact enabled, threshold
 The original Floodgate Campaign deepSave and header were restored from the
 pre-test backup, with their original hashes verified. Test save copies and the
 restoration record are in `out/test-runs/20260905-campaign-save-after-testing/`.
-Unrelated profile/settings files were not restored. Steam is the only present
-MCC edition on this machine; no Store installation was found.
+Restoring only deepSave/header initially left Resume absent. Restoring the
+matching pre-test AceSettings/data snapshot made Resume return and successfully
+loaded Floodgate. After that test, the original save/profile pair was restored
+together and hash-verified; see final-restored-save-profile.json in that folder.
+The prior test profile is retained as AceSettings-before-restore.dat. The
+restored profile UI showed UNSC / 0-of-11, whereas the later test profile showed
+meow / 11-of-11; no claim of unchanged displayed profile statistics is made.
+The full pre-test and test profile copies remain available for investigation.
+Steam is the only present MCC edition; no Store installation was found.
 
 The next headset session can be preserved with
 `tools/run-h3-contact-headset-session.ps1`; its analyzer now includes native NPC

@@ -836,6 +836,9 @@ public static class HaloMccVrContactInput {
     }
 
         Wait-Until {
+            if (-not (Get-UniqueMccWindowProcess)) {
+                throw 'MCC closed during external menu control.'
+            }
             $text = Get-NewLogText $runtimeLog $startedUtc
             $wrongTitle = Get-WrongSupportedTitle $text
             if ($wrongTitle) {
