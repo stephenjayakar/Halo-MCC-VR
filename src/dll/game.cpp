@@ -9181,6 +9181,7 @@ namespace
         bool meleeAssist = false;
     };
 
+    std::atomic<uint64_t> g_halo3RenderRawNodeReads{0};
     bool Halo3ContactReadInterpolatedNodes(
         int32_t objectHandle, Halo3Matrix4x3** matrices, int* count)
     {
@@ -9189,6 +9190,7 @@ namespace
         *matrices = nullptr;
         *count = 0;
         bool returned = false;
+        bool faulted = false;
         __try
         {
             returned = g_halo3InterpolatedNodes(
@@ -9196,7 +9198,55 @@ namespace
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            returned = false;
+            faulted = true;
+        }
+        if (faulted)
+            return false;
+        // The renderer uses the bounded raw bank when this provider reports
+        // no interpolated bank. Gameplay contact already mirrors that choice;
+        // the final palette guard must see the same valid animated geometry.
+        // Keep a per-thread copy so a later native update cannot change the
+        // matrix while the caller resolves its authored body node.
+        constexpr bool kEnableHalo3RenderRawNodeCandidate = true;
+        if (!returned && kEnableHalo3RenderRawNodeCandidate &&
+            g_halo3NodeBinding.load(std::memory_order_acquire) ==
+                static_cast<uint8_t>(Halo3NodeBindingState::Installed))
+        {
+            static thread_local std::array<Halo3Matrix4x3,
+                                           kHalo3MaximumRenderNodes> raw{};
+            __try
+            {
+                unsigned char* data = nullptr;
+                if (!Halo3ContactObjectDataForHandle(objectHandle, data))
+                    return false;
+                const int bytes = *reinterpret_cast<const int16_t*>(
+                    data + kHalo3ObjectNodeByteSizeOffset);
+                const int offset = *reinterpret_cast<const int16_t*>(
+                    data + kHalo3ObjectNodeMatricesOffset);
+                const int nodes = bytes > 0
+                    ? Halo3MatrixCountFromByteSize(
+                          static_cast<uint16_t>(bytes),
+                          kHalo3MaximumRenderNodes)
+                    : 0;
+                if (nodes <= 0 || offset == 0)
+                    return false;
+                std::memcpy(raw.data(), data + offset,
+                            static_cast<size_t>(nodes) * sizeof(raw[0]));
+                unsigned char* current = nullptr;
+                if (!Halo3ContactObjectDataForHandle(objectHandle, current) ||
+                    current != data || !Halo3MatrixValid(raw[0]))
+                    return false;
+                *matrices = raw.data();
+                *count = nodes;
+                g_halo3RenderRawNodeReads.fetch_add(1, std::memory_order_relaxed);
+                returned = true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                *matrices = nullptr;
+                *count = 0;
+                returned = false;
+            }
         }
         return returned;
     }
@@ -18305,10 +18355,11 @@ namespace
             return;
         nextLogMs = nowMs + 2000;
         Halo3LogNpcShoveProbe();
-        LOG("H3 animated contact nodes: raw=%u interpolated=%u missing=%u",
+        LOG("H3 animated contact nodes: raw=%u interpolated=%u missing=%u renderRaw=%llu",
             g_halo3AnimatedRawNodes.load(std::memory_order_relaxed),
             g_halo3AnimatedInterpolatedNodes.load(std::memory_order_relaxed),
-            g_halo3AnimatedMissingNodes.load(std::memory_order_relaxed));
+            g_halo3AnimatedMissingNodes.load(std::memory_order_relaxed),
+            static_cast<unsigned long long>(g_halo3RenderRawNodeReads.load(std::memory_order_relaxed)));
         static constexpr const char* kStageNames[] = {
             "disabled", "base-gate", "motion", "visible-pose", "game-mode",
             "object-table", "held-weapon", "sweeping", "static-block",

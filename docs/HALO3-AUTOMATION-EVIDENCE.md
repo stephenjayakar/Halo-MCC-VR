@@ -254,3 +254,21 @@ Video 20260905-101134526Z-1b2a43c-campaign-npc-melee/recording.mp4,
 68 frames / 17.838799 s, SHA-256
 0DCF2CC9F0D7C2625750CCF280C62632B6518F9824CE196DD207A1727C209B02.
 All video/log paths in these two paragraphs are beneath out/debug-openxr.
+
+### Render node-bank coverage follow-up
+
+Source inspection after 1b2a43c found that the gameplay animated-body reader
+used the renderer-proven raw-bank fallback, but both the final palette guard
+and exact body follow still called Halo3ContactReadInterpolatedNodes, which
+returned false when the provider had no interpolated bank. Thus valid raw NPC
+geometry could be unavailable to those render checks. The observed fallback
+holds are a reason to test this path, not proof that this explains every hold.
+
+The next isolated candidate adds that same bounded raw-bank choice after a
+non-faulting false provider result. It validates the object handle before and
+after copying, bounds the bank to 256 nodes, retains per-body matrix validation,
+and copies into fixed thread-local storage. Provider faults still reject the
+sample. No render I/O, allocation, scan, or lock is added. The worker logs the
+renderRaw counter to distinguish exercised fallback from speculation. Native
+interpolated-bank successes retain their existing path. Runtime validation is
+pending; the accepted pointer remains unchanged.
