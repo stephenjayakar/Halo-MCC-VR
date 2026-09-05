@@ -102,3 +102,29 @@ sets that process-only variable, restores its prior environment in cleanup, and
 requires nonzero recovery and valid-check counters in addition to the gap pass.
 Release build, core tests and Reach consistency pass. Runtime validation of this
 diagnostic is pending; it does not replace headset acceptance of the reset.
+
+### Recovery diagnostic runtime result
+
+Source `096f7cb20ab632b01595afe62e4d0583409c14fa` was packaged as
+`out/candidates/096f7cb-h3-physical-contact-20260905-210215800Z` and installed
+to the only present edition, Steam. Installed DLL SHA-256:
+`34CEA629D7BB32D552D0424B2F21E3D554E7F792F617BF9F35B78DDDE7BD2D71`.
+
+The controlled Forge `visible-weapon-gap -TestHandRecovery` null-driver run
+passed on September 5, 21:02-21:04 UTC. Its result is
+`out/debug-openxr/20260905-210237359Z-visible-weapon-gap-result.json`; the adjacent
+log has SHA-256 `11652FE9BA743B7402DE77B5D397D5036B66C2ADE2A9225D3A00B1C81D72353D`.
+At 14:04:42 local time, it recorded 8,201 valid leash checks, four recoveries,
+two missing-reference samples, worker reset reason 32, and 2,696 exact geometry
+separations with zero recorded geometry or solid overlaps. One excessive
+separation was injected; the additional three recoveries were not injected
+directly and have not been individually attributed. The diagnostic establishes
+that the production recovery path runs and the fixture regains sustained gap
+validation, not clean single-event behavior or headset acceptance.
+
+The harness completed and closed MCC/SteamVR. The original normal-headset
+settings hash was restored to
+`175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
+Null driver is disabled; forcedDriver is empty; requireHmd is true. The private
+recovery environment switch is not enabled for a normal launcher session.
+The accepted-build pointer remains unchanged.
