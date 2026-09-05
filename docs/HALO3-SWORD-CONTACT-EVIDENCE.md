@@ -96,8 +96,8 @@ The pinned Steam retail module (SHA-256
 has exactly one match for the existing `kFpVisiblePaletteSig`, at `0x2C561C`.
 That function maps the source nodes through the bone map and copies or composes
 them with the supplied root; it does not itself apply the authored inverse.
-The retail downstream skinning homolog has not yet been established here.
-Nothing hooks the matrix-product routine.
+The downstream retail consumer is now verified below. Nothing hooks the
+matrix-product routine.
 
 Disassemblies are preserved under `out/research/20260905-sword-contact/` as
 `h3ek-inverse-layout-disasm.txt`, `h3ek-inverse-consumer-disasm.txt`,
@@ -118,6 +118,38 @@ correctly fails the audit. Rotated rest skeletons are explicitly rejected by
 this narrow audit rather than interpreted using unverified quaternion rules.
 The fixture remains in export space; this result does not change its contract
 or demonstrate an animated retail collision solve.
+
+## Verified retail palette-to-skinning chain
+
+`tools/verify-h3-sword-skinning.py` verifies the exact pinned module hash, two
+unique executable-code sequences, five direct call targets, and both references
+to the same first-person palette array. Its successful output is preserved as
+`out/research/20260905-sword-contact/retail-skinning-verification.json`.
+
+The producer at `0x28AE4C` passes array `0xA7AC28` to `0x2C0D20`. That producer
+uses `0x2C5A38`, whose call at `0x2C5A74` invokes the existing visible-palette
+function `0x2C561C` with destination entry `+0x0C`. Each entry begins with the
+render tag, object handle and a third metadata word, before its node matrices.
+
+The renderer at `0x2958A7` addresses the same array. At `0x295BA9` it passes the
+entry's render tag in EDX, node matrices at entry `+0x0C` in R8, object handle
+in ECX, and selected mesh indices in R9 to `0x266838`. It sets the sixth
+argument to true; this takes the branch at `0x26689A` that preserves the supplied
+palette instead of asking the object subsystem for another node bank.
+
+Within `0x266838`, the loop starting at `0x266990` calculates the live matrix
+address as `palette + index*0x34` and the inverse address as
+`renderNodes + index*0x60 + 0x28`. At `0x2669AD`, those are respectively RCX and
+RDX for the existing native matrix product. The following stores fold scale
+into the basis and pack 48-byte shader matrices, matching the official H3EK
+consumer. This proves which palette and authored inverse drive the visible
+weapon's skinning; it does not yet establish the sword's live tag identity,
+permutation selection or blade-off state.
+
+Read-only disassemblies are in `retail-palette-consumer.txt` and
+`retail-skinning-builder.txt` beside the verification JSON. No additional hook
+is needed merely to obtain this transform: the existing palette capture already
+sees its live-node input, and the loaded render tag supplies its inverse.
 
 ## Required runtime work
 
