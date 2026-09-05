@@ -107,7 +107,7 @@ before promoting it into production contact code.
 `tools/probe-h3-weapon-render.py --output <snapshot.json>` can observe a loaded
 Halo 3 diagnostic session without process-memory writes, remote threads, game
 hooks, game-file changes or SteamVR configuration changes. It first runs the
-pinned skinning verifier. The renderer at `0x295956`-`0x2959E8` constructs
+pinned skinning verifier. The renderer at `0x29594A`-`0x2959E8` constructs
 96-byte records in array `0x91AC60`: render tag `+4`, object handle `+0x48`,
 region count `+0`, region-selected mesh indices `+0x0E`, and flags `+0x58`.
 The running allocation count is loaded at `0x29591E`; the tool derives its
