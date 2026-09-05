@@ -230,3 +230,51 @@ The inspected `out/debug-openxr/20260905-213216208Z-controller-contact-framing/`
 still shows only partial weapon geometry near the bottom. No demo was recorded.
 Both processes closed; null=false, forcedDriver empty, requireHmd=true and the
 exact pre-test settings hash restored. No headset result or accepted pointer change.
+
+## Recovery input capture (September 5, 21:35-21:43 UTC)
+
+Candidate `eab25617a1fb95e03ae93a70c607bb27b05138d9` adds one immutable
+first-recovery record per DLL lifetime. A render-side CAS reserves it; the
+existing background status logger consumes the release-published record once.
+No render logging, allocation, waiting or new lock. This is telemetry only.
+Package: `out/candidates/eab2561-h3-physical-contact-20260905-213538542Z`.
+Installed DLL SHA-256 independently verified:
+`3979D40177D86789814B36007720B8E0D2A327D9B2A3F91874AFE5D7990E9891`.
+Build/core tests and Reach consistency check passed.
+
+The fixed-controller repeat passed normal contact admission, with 5,850 checks,
+zero resets and zero missing poses at preserved cutoff 14:37:47.034. Thus the
+previous startup reset is not deterministic across these launches/spawn points.
+Result: `out/debug-openxr/20260905-213548533Z-controller-contact-result.json`.
+Log SHA: `566B7E1E0118E1E915A57E1F266EC5EFAE55F21C1B1F83D695A9DCF71DDDBB5D`.
+
+The first controlled-injection attempt crashed at the shell before a title
+adapter startup was logged. Result:
+`out/debug-openxr/20260905-213813969Z-visible-weapon-gap-result.json` (failed).
+Log SHA: `7EA3B5A0C1007931D819A5778541C44F4905CF694B0CEEFE548C2756277FC45F`.
+Original Windows dump remains at
+`C:/Users/aj12a/AppData/Local/CrashDumps/MCC-Win64-Shipping.exe.20912.dmp`,
+SHA `CEF909040936B27A41190E6429097AAAA9D8DD13A251E385FF874FEE02E83C2A`.
+Read-only minidump parsing: exception execute-access violation at address zero,
+exception RSP `0x9feb2ff5e8`, stack top `chrome_elf.dll+0x247cb`; additional raw
+stack candidates at +0x110/+0x190 map to chrome_elf +0x24e95/+0x24f09.
+These are stack contents, not a fully unwound stack or a proven crash cause.
+No recovery capture execution is evidenced by that launch.
+
+After terminal cleanup, the fresh controlled attempt passed exact visible gap
+plus hand recovery. Result:
+`out/debug-openxr/20260905-214110129Z-visible-weapon-gap-result.json`.
+Log SHA: `24F8039A236D7BB10A7784D04E9D3CBB0FB17D22F99E1FC1F78B5E89830D1F9C`.
+At 14:42:41.492 the first record has tracked=(-6.482758,-6.624856,12.511784),
+final=(-6.350758,-6.624856,12.511784), scale=.33: .132/.33=.40 m,
+matching the injected separation. Proposal/displayed serial=2, proof=3 (raw),
+corrected=0, no target, consumed offset zero. This validates the capture against
+a known event. The preserved final line at 14:43:27.952 has five resets and
+8,002 checks, missingPose=5. The other four resets are unresolved: this first-only
+record does not describe them. Do not call this a single-reset or fully stable run.
+
+All runs were Steam / SteamVR null driver / Null Model Number, not headset
+acceptance. No useful video was produced. Final cleanup independently verified
+MCC/vrserver absent, null=false, forcedDriver empty, requireHmd=true, settings
+SHA `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
+The accepted pointer is unchanged.
