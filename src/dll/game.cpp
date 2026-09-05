@@ -14253,10 +14253,14 @@ namespace
                     int32_t debugBodyIndex = -1;
                     float debugMass = 0.0f;
                     uint8_t debugMotionType = 0;
-                    if (!Halo3ContactMassForObjectData(
+                    const bool debugLivingBiped = requestedKind == 0 && kind == 0 &&
+                        !(*reinterpret_cast<uint32_t*>(data + 0x110) & 4u) &&
+                        std::isfinite(*reinterpret_cast<float*>(data + 0xF4)) &&
+                        *reinterpret_cast<float*>(data + 0xF4) > 0;
+                    if (!debugLivingBiped && (!Halo3ContactMassForObjectData(
                             data, debugComponent, debugBodyIndex, debugMass,
                             &debugMotionType) ||
-                        !PhysicalContactMotionTypeIsDynamic(debugMotionType))
+                        !PhysicalContactMotionTypeIsDynamic(debugMotionType)))
                         continue;
                     float debugLinear[3]{};
                     float debugAngular[3]{};
@@ -14286,7 +14290,12 @@ namespace
                     // kind 2 and use another movable root only when the map has
                     // no weapon datum at all.
                     const PhysicalContactDebugTargetRank rank =
-                        PhysicalContactRankDebugTarget(
+                        debugLivingBiped
+                        ? PhysicalContactDebugTargetRank{
+                              distanceSquared > 0.01f * worldScale * worldScale &&
+                                  distanceSquared < 36.0f * worldScale * worldScale,
+                              anchoredHandle != -1 ? 4 : 0, distanceSquared}
+                        : PhysicalContactRankDebugTarget(
                             kind, debugMass, debugSpeed, distanceSquared,
                             anchoredHandle != -1);
                     if (!rank.valid || rank.priority < targetPriority ||
