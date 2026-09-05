@@ -589,3 +589,28 @@ MCC and VR processes absent after cleanup. Independently verified normal setting
 null=false, forcedDriver empty, requireHmd=true; SHA
 `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
 No headset acceptance or accepted-pointer advance.
+
+## Instanced-geometry query correction installed (September 5, 23:10 UTC)
+
+Candidate `b0426fe834cf11082808254f20a66076ca1c18ba` adds the verified low
+instance-enable bit (8) alongside the existing BSP bit (1), retaining the high
+all-object mask. It applies to wall solving and normal native contact samples;
+the object-only debug fixture remains isolated. See the official/retail branch
+proof in `HALO3-CLEARANCE-QUERY-EVIDENCE.md`. This corrects an actual query
+coverage omission, but no attribution to a particular Floodgate rock is proven.
+
+Release/core tests and Reach consistency passed. The hash-pinned instance-gate
+auditor found exactly one retail gate and verified the official and retail call
+edges; unrelated-input rejection passed. Package:
+`out/candidates/b0426fe-h3-physical-contact-20260905-231038730Z`.
+Independent installed DLL SHA:
+`72BB611DAEE5A8183E62D9ECC8037E12EE536F1DFEC62D8FBC24ACC12927217F`.
+Launcher unchanged `D489C5763E21FC339999DC734CED09A2068AAC6C035EA8B7BF4339B6810FA450`.
+Prior install: `out/deploy-backups/e1ab1d0-steam-before-b0426fe-20260905-231039871Z`.
+E: Steam installed; N: Steam and Store absent and skipped by the installer.
+Config SHA remains C570089F47A17AE8645310C02688CA1454E1A02C9239BC24C5CC316E4DA94946.
+Normal SteamVR settings SHA remains
+175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E.
+No runtime session on this candidate yet, no headset acceptance, and no accepted
+pointer advance. The stale uncorrected approval and clearance-query investigation
+remain unresolved; this candidate changes only instance query coverage.
