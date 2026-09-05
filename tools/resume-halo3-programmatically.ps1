@@ -17,7 +17,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     elseif ($text -match 'CAMPAIGNS' -and $text -match 'MULTIPLAYER' -and $text -match 'CREATIVE') {
         $state='main'; $keys=@('Up','Up','Up','Up','Up','Up','Up','Enter')
     }
-    elseif ($text -match 'CAMPAIGNS' -and $text -match 'HALO.*REACH' -and $text -match 'HALO.*CE.*ANNIVERSARY' -and $text -match 'HALO.*ODST') {
+    elseif ($text -match 'CAMPAIGNS' -and $text -match 'HALO.*REACH' -and $text -match 'HALO.*CE.*ANNIVERSARY' -and $text -match 'HALO.*O[DO]ST') {
         $state='campaign-titles'; $keys=@('Up','Up','Up','Up','Up','Up','Up','Down','Down','Down','Enter')
     }
     elseif ($text -match 'HALO 3' -and $text -match 'BUILT IN') {
