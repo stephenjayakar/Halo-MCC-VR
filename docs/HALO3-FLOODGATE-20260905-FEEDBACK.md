@@ -461,3 +461,55 @@ Normal settings independently restored: null=false, forcedDriver empty,
 requireHmd=true, MCC/vrserver absent, SHA
 `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
 No headset acceptance or accepted-pointer advance.
+
+## Steered wall-pressure test (September 5, 22:27 UTC)
+
+Installed candidate `13da6c4b377bc78591596828c74a87e66d59560c` adds bracket-key
+15-degree camera turns only while the opt-in fixed-controller debug pose is
+active. Normal headset input is unchanged. Build/core tests/Reach gate passed.
+DLL SHA: `9682736EEBECD3F778E954660B8FD6D02680E39749D772B2FBFEFFECB76E4221`.
+The live Forge view visibly responded to six right turns and two left turns.
+W700ms and successive D movement reached a wall. At 15:31:49.538 the log
+reported static-block, wallBlocks=3, hits=2, resets=1, checks=25194,
+awaitingMotion=1. Additional D1500ms ended 15:31:53.369. Through 15:32:21.858,
+the same recovery remained held with no additional reset despite inward pressure.
+This supports the directional hold behavior, but does not establish retreat
+release: A2200ms was attempted during shutdown and key delivery failed.
+
+Result: `out/debug-openxr/20260905-222750311Z-controller-contact-result.json`.
+Log SHA: `E8908D68B3968C733C0B22BBD67FE9CF6B7C9C38227EE256B49E4774D6BC4031`.
+Steam / SteamVR null driver / Null Model Number. The admission harness failed
+its final native-sampling check while recovery intentionally suspended sampling.
+That failure is retained; this is not a passing complete contact test.
+The 30-second `out/demos/20260905-223055-forge-steered-wall-retreat-test/raw.mp4`
+ended before the later contact and retreat attempt and is not a functionality
+demo. Normal SteamVR configuration was independently hash-verified after cleanup:
+`175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
+MCC and VR processes were absent. No headset acceptance or pointer advance.
+
+## Synchronized wall approach and retreat (September 5, 22:41 UTC)
+
+`tools/record-mcc-contact-sequence.ps1` now starts the bounded live recorder in
+a background PowerShell job, waits for a nonempty recording file, verifies the
+same MCC PID before movement, and timestamps approach/pressure/retreat. It lets
+the recorder finish normally so window-state restoration runs. No game memory
+writes or new runtime behavior. PowerShell parser and diff whitespace checks pass.
+
+The first W/S sequence moved along the wall despite the diagnostic camera turn;
+keyboard movement is not automatically aligned with that camera heading. It
+added no wall blocks and is not a contact demo. The second D/A sequence did:
+`out/demos/20260905-224128-forge-synchronized-side-wall-retreat/raw.mp4`.
+Its adjacent sequence.json records D2500 at 22:41:30.965, D1500 at 22:41:37.214,
+and A3500 retreat at 22:41:42.099 UTC. Recording completed successfully.
+At 15:41:32.321-38.382, wallBlocks increased 39 to 400 and wallSetback stayed
+0.098-0.109 m. At 15:41:40.404, one new leash recovery raised total resets from
+one to two, awaitingMotion=1 and nativeSamples=0. At 15:41:42.424, immediately
+after retreat began, awaitingMotion=0 and nativeSamples=93; no further resets
+through 15:41:58.584. Thus this natural wall recovery released on actual retreat.
+The earlier reset occurred before this recording and is not counted as its result.
+
+Frames at 5, 10, 12 and 18 seconds show approach/contact and retreat with the
+rifle visible. They are not an exact geometric nonpenetration proof. This is a
+bounded wall-recovery demonstration, not a complete interaction showcase or
+headset acceptance. No evidence here resolves the Floodgate rocks, sword blade
+coverage, headset flicker, or performance report. Runtime remains 13da6c4.
