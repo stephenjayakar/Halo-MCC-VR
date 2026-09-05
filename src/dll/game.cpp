@@ -9207,7 +9207,10 @@ namespace
         // the final palette guard must see the same valid animated geometry.
         // Keep a per-thread copy so a later native update cannot change the
         // matrix while the caller resolves its authored body node.
-        constexpr bool kEnableHalo3RenderRawNodeCandidate = true;
+        // f4ebd9e's Campaign replay kept renderRaw=0 despite gameplay raw-node
+        // reads and visible separation holds. The render provider already
+        // supplied nodes; this experiment did not explain those holds.
+        constexpr bool kEnableHalo3RenderRawNodeCandidate = false;
         if (!returned && kEnableHalo3RenderRawNodeCandidate &&
             g_halo3NodeBinding.load(std::memory_order_acquire) ==
                 static_cast<uint8_t>(Halo3NodeBindingState::Installed))
