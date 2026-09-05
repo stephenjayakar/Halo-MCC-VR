@@ -162,6 +162,31 @@ non-atomic. No match still cannot establish blade-off state. Syntax validation
 and rejection of an out-of-range duration pass; the sampling mode has not yet
 been run against a live session.
 
+### Sampling resolves the missing-record observation
+
+On the next controlled Forge gap session, five seconds of read-only sampling
+made 323 attempts and found all three palette identities in the draw-record
+array. `out/research/20260905-sword-contact/live-render-sampling.json` preserves:
+
+| Render tag | Palette nodes | Selected region meshes | Observations |
+| --- | --- | --- | --- |
+| 4220721659 | 37 | 1, 2 | 3 |
+| 3969977131 | 5 | 0 | 2 |
+| 4234484429 | 51 | 1, 2, 65535 | 3 |
+
+The five-node entry is the existing weapon fixture, not a verified sword.
+Matching uses the full render tag and object handle. The initial one-shot read
+still found no records even though its reread was unchanged. This supersedes
+the concern that the array correlation itself was wrong: it has now been
+observed live, but its low external sampling hit rate makes absence unreliable
+and unsuitable for a production visibility gate. No atomic or per-eye guarantee
+is claimed, and no sword-specific visibility behavior was tested.
+
+The earlier gap session also logged hand-recovery `checks=0`, `resets=0`, and
+`missingPose=19161`. Its gap-test pass must not be represented as testing the
+30 cm recovery behavior; that null-driver fixture did not provide the required
+tracked-hand reference.
+
 ## Native inverse-bind evidence
 
 Read-only disassembly of official `halo3_tag_test.exe` (SHA-256
