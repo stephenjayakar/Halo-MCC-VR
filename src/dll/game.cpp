@@ -10321,17 +10321,28 @@ namespace
             !g_halo3InterpolatedNodes)
             return false;
 
-        std::array<Halo3Matrix4x3, Halo3VisibleWeaponPosePublication::kMaximumNodes> matrices{};
+        std::array<Halo3Matrix4x3, Halo3VisibleWeaponPosePublication::kMaximumNodes> copiedMatrices{};
+        Halo3Matrix4x3* matrices = nullptr;
         int matrixCount = 0;
         bool interpolated = false;
         if (!kEnableHalo3AnimatedRawNodeCandidate)
-            return false;
-        if (!Halo3ContactCopyVisibleNodes(objectHandle, objectData, matrices, matrixCount, interpolated))
         {
-            g_halo3AnimatedMissingNodes.fetch_add(1, std::memory_order_relaxed);
-            return false;
+            // Preserve the prior interpolated-only behavior while the raw
+            // fallback candidate is disabled.
+            if (!Halo3ContactReadInterpolatedNodes(objectHandle, &matrices, &matrixCount) ||
+                !matrices || matrixCount <= 0 || matrixCount > kHalo3MaximumRenderNodes)
+                return false;
         }
-        (interpolated ? g_halo3AnimatedInterpolatedNodes : g_halo3AnimatedRawNodes).fetch_add(1, std::memory_order_relaxed);
+        else
+        {
+            if (!Halo3ContactCopyVisibleNodes(objectHandle, objectData, copiedMatrices, matrixCount, interpolated))
+            {
+                g_halo3AnimatedMissingNodes.fetch_add(1, std::memory_order_relaxed);
+                return false;
+            }
+            matrices = copiedMatrices.data();
+            (interpolated ? g_halo3AnimatedInterpolatedNodes : g_halo3AnimatedRawNodes).fetch_add(1, std::memory_order_relaxed);
+        }
 
         bool resolvedAny = false;
         for (int32_t bodyIndex = 0;
