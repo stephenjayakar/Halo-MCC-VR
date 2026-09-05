@@ -12,6 +12,7 @@ param(
         'wall',
         'decorator-wall',
         'npc-contact',
+        'npc-motor',
         'melee')]
     [string]$Test = 'equipment-scoop',
 
@@ -421,6 +422,13 @@ function Test-VisibleWeaponGapFailure(
 
 function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
+        'npc-motor' {
+            $line = ($Text -split "`r?`n" | Where-Object { $_ -like '*H3 NPC shove PROBE: stage=*' } | Select-Object -Last 1)
+            if ($line -match 'stage=5 target=0x[0-9A-F]+ calls=([1-9][0-9]*) baselineDrift=([0-9.]+)m moved=([0-9.]+)m') {
+                return [double]$Matches[2] -lt 0.02 -and [double]$Matches[3] -gt 0.02
+            }
+            return $false
+        }
         'npc-contact' {
             # Contact admission only: this does not claim NPC movement.
             $status = ($Text -split "`r?`n" | Where-Object { $_ -like '*H3 physical contact status:*' } | Select-Object -Last 1)
@@ -529,6 +537,7 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE',
     'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT',
     'HALOMCCVR_H3_CONTACT_DEBUG_ROTATING'
+    'HALOMCCVR_H3_CONTACT_DEBUG_NPC_SHOVE'
 )
 $savedEnvironment = @{}
 foreach ($name in $debugVariables) {
@@ -575,6 +584,10 @@ try {
     }
     $env:HALOMCCVR_H3_CONTACT_DEBUG_RIG = '1'
     switch ($Test) {
+        'npc-motor' {
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_NPC_SHOVE = '1'
+            $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
+        }
         'weapon-scoop' {
             $env:HALOMCCVR_H3_CONTACT_DEBUG_SCOOP = '1'
             $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '2'

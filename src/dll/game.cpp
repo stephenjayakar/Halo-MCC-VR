@@ -8433,6 +8433,8 @@ namespace
         return objectData != nullptr;
     }
 
+    #include "halo3_npc_shove_probe.inl"
+
     bool Halo3ContactResolveBodyNodeIndex(
         int32_t objectHandle, int32_t bodyIndex,
         const Halo3Matrix4x3* matrices, int matrixCount,
@@ -13472,6 +13474,7 @@ namespace
         }
         if (g_origHalo3ObjectsUpdate)
             g_origHalo3ObjectsUpdate();
+        Halo3RunNpcShoveProbe(GetTickCount64());
         if (deferredWorldVelocity)
         {
             bool deferredValid = deferredGeneration &&
@@ -18199,6 +18202,7 @@ namespace
         if (nowMs < nextLogMs)
             return;
         nextLogMs = nowMs + 2000;
+        Halo3LogNpcShoveProbe();
         static constexpr const char* kStageNames[] = {
             "disabled", "base-gate", "motion", "visible-pose", "game-mode",
             "object-table", "held-weapon", "sweeping", "static-block",
@@ -24556,6 +24560,7 @@ namespace
                 pointImpulseUnique && componentDataConsistent &&
                 cooperativeUnique && updateUnique)
             {
+                Halo3BindNpcShoveProbe(base, size);
                 g_halo3ObjectSetVelocity =
                     reinterpret_cast<Halo3ObjectSetVelocityFn>(velocityHit);
                 g_halo3ObjectSetVelocities =

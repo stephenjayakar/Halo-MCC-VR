@@ -45,6 +45,57 @@ documents `game_start` via `init.txt` for the editing-kit executable. This is
 not evidence that retail MCC accepts that startup mechanism. Do not apply
 editing-kit startup files to the retail game based on that documentation.
 
+### Campaign object-script failure and isolation
+
+The second Crow's Nest null-driver run reached gameplay, but the player-unit
+getter and both validated TLS object-table copies reported local unit
+`0xE3DE016F` with slot `-1` and all four weapon handles `FFFFFFFF`. The contact
+worker correctly stayed at its held-weapon gate. The HUD silhouette alone was
+not evidence of a held weapon. `tools/probe-h3-objects.py` exposes these read-only
+snapshots, requires a pinned image, validates the native table header, and
+requires an explicit table selection when more than one game-state copy exists.
+
+An external `(object_set_velocity (list_get ...) ...)` experiment subsequently
+crashed. The native exception dump in
+`out/test-runs/20260905-campaign-hang/crash_report/minidump.dmp` records a null
+read at `halo3+0x9B710`, with the interrupted stack inside script evaluation.
+Script descriptors on that stack resolve to `list_get` (`0x7EED00`) and
+`object_set_velocity` (`0x7EDBA0`). The faulting native routine accesses a
+thread-context allocation table. No character movement was established.
+The later apparent hang was the game writing its large crash dump.
+
+The external helper now admits only the observed letterbox boolean toggle.
+Object/list expressions remain disabled while simulation-context control is
+investigated. An enqueued command still must not be reported as executed.
+Campaign saves were copied with verified hashes before mission selection to
+`out/test-runs/20260905-campaign-save-backup`; that backup preserves the user's
+previous Floodgate progress for restoration after testing.
+
+### Native biped motor probe provenance
+
+The official H3EK string `biped_accelerate` has its named dispatch record at
+`0x18E0D38`, whose callback `0xB20460` passes the vector at argument `+0xC` to
+`0xB21690`. In the pinned retail image the corresponding named dispatch record
+is `0x8B4E98`; callback `0x3DF6C0` has the same argument adjustment and calls
+`0x3DF244`. Both implementations mark the character physics acceleration state
+at object `+0x4DC` and enter the native object acceleration path. The runtime
+probe matches a unique instruction signature at `0x3DF244`; it does not bind by
+the recorded address. Its signature was checked against the pinned file.
+
+The diagnostic's living-target and damage readbacks follow official H3EK
+`unit_get_health`: script wrapper `0x7B92A0` -> `0xAE4F40` -> `0xAD7540`, which
+returns zero for object damage flag bit 2 at `+0x110`, otherwise reads health at
+`+0xF4`. The shield sibling at `0xAD75C0` reads `+0xF8`. Pinned retail wrappers
+`0x1E3364` and `0x1E33C0` independently confirm these fields and the flag test.
+
+`HALOMCCVR_H3_CONTACT_DEBUG_NPC_SHOVE=1` enables an isolated simulation-callback
+probe: nearest live root biped excluding the player, three seconds of baseline,
+at most twelve horizontal 0.15 m/s-vector pulses, then three seconds of
+observation. Pulses stop above 0.6 m/s horizontal native speed. It monitors
+health/shield loss and disables only the probe if either falls or a native call
+faults. This is an experiment to establish motor behavior; no production NPC
+weapon shove is enabled by this scaffolding.
+
 ## Local runtime evidence and limits
 
 The null-driver harness now keeps the stationary compositor awake during its
