@@ -10300,6 +10300,7 @@ namespace
     // and polyhedron coordinates are local to the named render node. Halo's
     // proven interpolated-node provider returns that node in world space.
     std::atomic<uint32_t> g_halo3AnimatedRawNodes{0}, g_halo3AnimatedInterpolatedNodes{0}, g_halo3AnimatedMissingNodes{0};
+    constexpr bool kEnableHalo3AnimatedRawNodeCandidate = false;
     bool Halo3ContactSweepAnimatedBodies(
         int32_t objectHandle, const unsigned char* objectData,
         const PhysicalContactCompoundShape& weaponShape,
@@ -10323,6 +10324,8 @@ namespace
         std::array<Halo3Matrix4x3, Halo3VisibleWeaponPosePublication::kMaximumNodes> matrices{};
         int matrixCount = 0;
         bool interpolated = false;
+        if (!kEnableHalo3AnimatedRawNodeCandidate)
+            return false;
         if (!Halo3ContactCopyVisibleNodes(objectHandle, objectData, matrices, matrixCount, interpolated))
         {
             g_halo3AnimatedMissingNodes.fetch_add(1, std::memory_order_relaxed);

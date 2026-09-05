@@ -169,3 +169,13 @@ living bipeds have ten authored bodies, predominantly capsule type 7. This is
 not evidence that those bodies are absent. The animated sweep requires an
 interpolated bank, unlike the existing renderer-proven visible-node helper,
 which also supports the raw bank. The provider return still needs measurement.
+
+The 681eec0 retry reached stationary gameplay NPC E3E800F5 and repeatedly
+reported missing nodes. Read-only snapshot h3-681eec0-gameplay-node-counts.json
+shows its raw node byte size is 2860 (55 matrices of 52 bytes), at offset 1820.
+The reused helper had a fixed 16-node weapon array, so its correct bounds guard
+rejects this NPC. Disable that candidate before correcting the caller capacity.
+The original standalone snapshot position was also corrected from +0x20 to the
+already evidenced +0x50; earlier snapshot positions are not usable. The native
+motor probe always used kHalo3ObjectPositionOffset (+0x50), so its measurements
+are unaffected by the standalone snapshot bug.

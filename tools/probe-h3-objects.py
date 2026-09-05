@@ -153,6 +153,7 @@ def main():
                            shield=struct.unpack_from("<f", data, 0xF8)[0],
                            damage_dead=bool(struct.unpack_from("<I", data, 0x110)[0] & 4),
                            character_mode=data[0x4DE])
+                obj["node_byte_size"], obj["node_offset"] = struct.unpack_from("<hh", data, 0x136)
             if args.physics:
                 # Same pinned H3 tag globals and chain as Halo3LoadedTagDefinition
                 # and Halo3ContactPhysicsForObject; bounded read-only snapshot.
