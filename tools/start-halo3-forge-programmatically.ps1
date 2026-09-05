@@ -13,7 +13,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
     $text = $lines -join "`n"
     $state = ''
     $keys = @()
-    if ($text -match 'PRESS.*Enter.*TO START') { $state='start'; $keys=@('Enter') }
+    if ($text -match 'MESSAGE OF THE DAY') { $state='message-of-the-day'; $keys=@('Escape') }
+    elseif ($text -match 'PRESS.*Enter.*TO START') { $state='start'; $keys=@('Enter') }
     elseif ($text -match 'CAMPAIGNS' -and $text -match 'MULTIPLAYER' -and $text -match 'CREATIVE') {
         $state='main'; $keys=@('Up','Up','Up','Up','Up','Up','Up','Down','Down','Enter')
     }
