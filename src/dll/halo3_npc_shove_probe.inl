@@ -4,7 +4,7 @@
 // and one vector, set the character-physics acceleration flag, then enter the
 // native object acceleration path. No damage entry point is called here.
 using Halo3BipedAccelerateFn = void (__fastcall*)(int32_t, const float*);
-constexpr bool kEnableHalo3NpcShoveProbeCandidate = false;
+constexpr bool kEnableHalo3NpcShoveProbeCandidate = true;
 Halo3BipedAccelerateFn g_halo3NpcProbeAccelerate = nullptr;
 std::atomic<bool> g_halo3NpcProbeEnabled{false};
 std::atomic<uint32_t> g_halo3NpcProbeStage{0}, g_halo3NpcProbeCalls{0};
@@ -40,7 +40,7 @@ void Halo3BindNpcShoveProbe(uintptr_t base, size_t size)
     g_halo3NpcProbeStage.store(1, std::memory_order_relaxed);
     g_halo3NpcProbeCalls.store(0, std::memory_order_relaxed);
     g_halo3NpcProbeEnabled.store(true, std::memory_order_release);
-    LOG("H3 NPC shove PROBE enabled: native biped acceleration +0x%llX; simulation context; bounded 12-pulse experiment; not weapon-contact acceptance",
+    LOG("H3 NPC shove PROBE enabled: native biped acceleration +0x%llX; simulation context; bounded sustained-cadence experiment; not weapon-contact acceptance",
         static_cast<unsigned long long>(hit - base));
 }
 
@@ -195,8 +195,8 @@ void Halo3RunNpcShoveProbe(uint64_t nowMs)
             return;
         }
         g_halo3NpcProbeStage.store(3, std::memory_order_relaxed);
-        if ((lastPulseMs && nowMs - lastPulseMs < 250) ||
-            g_halo3NpcProbeCalls.load(std::memory_order_relaxed) >= 12)
+        if ((lastPulseMs && nowMs - lastPulseMs < 10) ||
+            g_halo3NpcProbeCalls.load(std::memory_order_relaxed) >= 300)
             return;
         lastPulseMs = nowMs;
         float before[3]{}, angular[3]{};
