@@ -3997,6 +3997,28 @@ struct PhysicalContactReleaseCommand
 // Keep the newest tracked slow-contact handoff. Consume it once after exact
 // shape separation. A different target and stale or invalid state clear the
 // latch without transferring motion.
+// Slow exact contact drives the native biped motor horizontally. Relative
+// target motion alone must never turn a stationary hand into a shove.
+inline PhysicalContactVec3 PhysicalContactNpcShoveDelta(
+    PhysicalContactVec3 weaponVelocity, PhysicalContactVec3 relativeVelocity,
+    PhysicalContactVec3 normal, float threshold, float dt, float scale)
+{
+    if (!PhysicalContactFinite(weaponVelocity) || !PhysicalContactFinite(relativeVelocity) ||
+        !PhysicalContactFinite(normal) || !std::isfinite(threshold) || threshold <= 0 ||
+        !std::isfinite(dt) || dt <= 0 || dt > 0.1f ||
+        !std::isfinite(scale) || scale < 0.05f || scale > 2.0f ||
+        PhysicalContactLength(weaponVelocity) >= threshold)
+        return {};
+    normal.z = 0;
+    normal = PhysicalContactNormalize(normal, {});
+    const float approach = std::min(-PhysicalContactDot(weaponVelocity, normal),
+                                   -PhysicalContactDot(relativeVelocity, normal));
+    if (approach < 0.05f)
+        return {};
+    const float delta = std::min(0.15f, approach * 0.4f) * std::min(dt * 60.0f, 1.0f);
+    return normal * (-delta * scale);
+}
+
 class PhysicalContactReleaseLatch
 {
 public:

@@ -169,6 +169,20 @@ namespace
 int main()
 {
     {
+        const auto shove = PhysicalContactNpcShoveDelta({0.4f, 0, 0}, {0.4f, 0, 0}, {-1, 0, 0}, 1.5f, 1.0f/60, 1);
+        Check(shove.x > 0 && shove.x <= 0.15f && shove.z == 0, "Slow inward NPC contact produces bounded horizontal motor input");
+        Check(PhysicalContactLengthSquared(PhysicalContactNpcShoveDelta({}, {1,0,0}, {-1,0,0}, 1.5f, 1.0f/60, 1)) == 0,
+              "NPC motion cannot turn a stationary hand into a shove");
+        Check(PhysicalContactLengthSquared(PhysicalContactNpcShoveDelta({-0.4f,0,0}, {-0.4f,0,0}, {-1,0,0}, 1.5f, 1.0f/60, 1)) == 0,
+              "Separating contact never pulls an NPC");
+        Check(PhysicalContactLengthSquared(PhysicalContactNpcShoveDelta({1.5f,0,0}, {1.5f,0,0}, {-1,0,0}, 1.5f, 1.0f/60, 1)) == 0,
+              "A melee-speed strike cannot also request the slow NPC motor");
+        Check(PhysicalContactLengthSquared(PhysicalContactNpcShoveDelta({0.4f,0,0}, {0.4f,0,0}, {-1,0,0}, 1.5f, 0.2f, 1)) == 0,
+              "Stale kinematics cannot produce an NPC shove");
+        const auto half = PhysicalContactNpcShoveDelta({0.4f,0,0}, {0.4f,0,0}, {-1,0,0}, 1.5f, 1.0f/120, 1);
+        Check(std::fabs(half.x * 2 - shove.x) < 0.00001f, "NPC motor input scales down for higher sampling rates");
+    }
+    {
         // sig::Find is memchr-anchored for speed (it is the dominant cost of
         // every hook install: ODST resolves four optional features, each
         // needing a find plus an ambiguity re-scan, ~945 ms of whole-module

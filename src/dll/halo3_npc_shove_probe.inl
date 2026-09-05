@@ -6,6 +6,8 @@
 using Halo3BipedAccelerateFn = void (__fastcall*)(int32_t, const float*);
 constexpr bool kEnableHalo3NpcShoveProbeCandidate = true;
 Halo3BipedAccelerateFn g_halo3NpcProbeAccelerate = nullptr;
+std::atomic<bool> g_halo3NpcContactEnabled{false};
+std::atomic<uint32_t> g_halo3NpcContactApplied{0}, g_halo3NpcContactRejected{0}, g_halo3NpcContactFaulted{0};
 std::atomic<bool> g_halo3NpcProbeEnabled{false};
 std::atomic<uint32_t> g_halo3NpcProbeStage{0}, g_halo3NpcProbeCalls{0};
 std::atomic<int32_t> g_halo3NpcProbeTarget{-1};
@@ -22,8 +24,8 @@ void Halo3BindNpcShoveProbe(uintptr_t base, size_t size)
     wchar_t value[8]{};
     const DWORD length = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_DEBUG_NPC_SHOVE", value, 8);
-    if (!kEnableHalo3NpcShoveProbeCandidate || length != 1 || value[0] != L'1')
-        return;
+    const bool probeRequested = kEnableHalo3NpcShoveProbeCandidate && length == 1 && value[0] == L'1';
+    g_halo3NpcContactEnabled.store(false, std::memory_order_release);
     const char* signature =
         "48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 55 "
         "41 54 41 55 41 56 41 57 48 8D 68 A1 48 81 EC 00 01 00 00 "
@@ -33,10 +35,14 @@ void Halo3BindNpcShoveProbe(uintptr_t base, size_t size)
     if (!hit || sig::Find(hit + 1, base + size - hit - 1, signature))
     {
         g_halo3NpcProbeStage.store(6, std::memory_order_relaxed);
-        LOG("H3 NPC shove PROBE: unique biped acceleration binding unavailable; probe stays off");
+        LOG("H3 NPC shove: unique biped acceleration binding unavailable; NPC shove stays stock; VR core unchanged");
         return;
     }
     g_halo3NpcProbeAccelerate = reinterpret_cast<Halo3BipedAccelerateFn>(hit);
+    g_halo3NpcContactEnabled.store(true, std::memory_order_release);
+    LOG("H3 NPC shove: native biped motor +0x%llX installed for slow exact contact; independent of damage", static_cast<unsigned long long>(hit - base));
+    if (!probeRequested)
+        return;
     g_halo3NpcProbeStage.store(1, std::memory_order_relaxed);
     g_halo3NpcProbeCalls.store(0, std::memory_order_relaxed);
     g_halo3NpcProbeEnabled.store(true, std::memory_order_release);
@@ -222,8 +228,60 @@ void Halo3RunNpcShoveProbe(uint64_t nowMs)
     }
 }
 
+void Halo3ApplyNpcContactShove(int32_t handle, int32_t player, const float* delta)
+{
+    if (!g_halo3NpcContactEnabled.load(std::memory_order_acquire) || !g_halo3NpcProbeAccelerate)
+        return;
+    bool applied = false;
+    __try
+    {
+        unsigned char* data = nullptr;
+        uint8_t kind = 0xFF;
+        const float scale = g_worldScale.load(std::memory_order_relaxed);
+        const PhysicalContactVec3 impulse{delta[0], delta[1], delta[2]};
+        bool paused = true;
+        int32_t scene = -1, shot = -1;
+        if (player != -1 && handle != player && g_halo3PlayerUnitGetter &&
+            g_halo3PlayerUnitGetter(0) == player &&
+            ReadEnginePaused(paused) && !paused &&
+            ReadCinematicControl(scene, shot) == CinematicControlState::PlayerControlled &&
+            std::isfinite(scale) && scale >= 0.05f && scale <= 2.0f &&
+            PhysicalContactFinite(impulse) && std::fabs(impulse.z) < 0.00001f &&
+            PhysicalContactLength(impulse) <= 0.151f * scale &&
+            Halo3ContactObjectDataForHandle(handle, data, &kind) && kind == 0 &&
+            data[0x4DE] == 1 && // Only the ground mode demonstrated by the motor probe.
+            *reinterpret_cast<int32_t*>(data + kHalo3ObjectParentOffset) == -1 &&
+            !(*reinterpret_cast<uint32_t*>(data + 0x110) & 4u) &&
+            std::isfinite(*reinterpret_cast<float*>(data + 0xF4)) &&
+            *reinterpret_cast<float*>(data + 0xF4) > 0 &&
+            g_halo3ObjectGetVelocities)
+        {
+            float linear[3]{}, angular[3]{};
+            g_halo3ObjectGetVelocities(handle, linear, angular);
+            const PhysicalContactVec3 velocity{linear[0], linear[1], linear[2]};
+            if (PhysicalContactFinite(velocity) &&
+                PhysicalContactLength({velocity.x, velocity.y, 0}) <= 0.60f * scale)
+            {
+                g_halo3NpcProbeAccelerate(handle, delta);
+                applied = true;
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        g_halo3NpcContactEnabled.store(false, std::memory_order_release);
+        g_halo3NpcContactFaulted.fetch_add(1, std::memory_order_relaxed);
+    }
+    (applied ? g_halo3NpcContactApplied : g_halo3NpcContactRejected).fetch_add(1, std::memory_order_relaxed);
+}
+
 void Halo3LogNpcShoveProbe()
 {
+    LOG("H3 NPC contact shove: enabled=%u applied=%u rejected=%u faulted=%u (biped motor only; fault disables NPC shove only)",
+        g_halo3NpcContactEnabled.load(std::memory_order_relaxed) ? 1u : 0u,
+        g_halo3NpcContactApplied.load(std::memory_order_relaxed),
+        g_halo3NpcContactRejected.load(std::memory_order_relaxed),
+        g_halo3NpcContactFaulted.load(std::memory_order_relaxed));
     if (!g_halo3NpcProbeStage.load(std::memory_order_relaxed))
         return;
     LOG("H3 NPC shove PROBE: stage=%u target=0x%08X calls=%u baselineDrift=%.5fm moved=%.5fm before=%.5fm/s after=%.5fm/s health=%.5f shield=%.5f healthLoss=%.5f shieldLoss=%.5f (native motor experiment; no melee call)",

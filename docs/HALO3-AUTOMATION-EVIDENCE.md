@@ -141,3 +141,22 @@ Both completed runs restored settings hash
 Videos use actual window captures and measured frame timestamps. Neither these
 videos nor null-driver passes provide headset acceptance or demonstrate NPC
 shoving. `docs/CURRENT-STATE.md` remains unchanged.
+
+### Sustained native motor result (2026-09-05)
+
+Candidate e6dace8 changed only the opt-in probe cadence: unchanged 0.15 m/s
+input, up to one call per simulation update (10 ms minimum), for three seconds.
+Steam / SteamVR 2.17.8 null driver / Crow's Nest: 179 calls, 0.00043 m baseline
+drift, 0.17294 m displacement, health 1 and shield 0 unchanged, no fault.
+The run passed its motor-only criterion; this is not weapon-contact or headset
+acceptance. Log SHA-256 A1E72BF753C0A61FE084745743D298B6425114E51CD2DA0EA9C732A3CC002DBC.
+Local recording: out/debug-openxr/20260905-092104845Z-e6dace8-campaign-npc-motor/recording.mp4
+(93 captured frames, 25.009272 seconds), SHA-256
+A4945F58E5B8CA6D399420ADCB3E5C5ADC2F21A31139732DBAEBD4268A34DB57.
+
+The next candidate connects this proven motor entry to exact slow biped contact.
+It excludes the melee catch zone, unreliable normals, stationary/separating hands,
+melee-speed swings, attached/dead objects, and stale commands. Motor input is
+horizontal and bounded by the tested 0.15 m/s input and 0.60 m/s target speed.
+Native calls run after objects_update, with an independent fault latch; damage
+and camera ownership are untouched. This integration remains untested.

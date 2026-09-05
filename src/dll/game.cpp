@@ -7302,6 +7302,7 @@ namespace
     constexpr uint32_t kHalo3ContactCommandMelee = 1u << 1;
     constexpr uint32_t kHalo3ContactCommandPointImpulse = 1u << 2;
     constexpr uint32_t kHalo3ContactCommandRelease = 1u << 3;
+    constexpr uint32_t kHalo3ContactCommandNpcShove = 1u << 4;
     std::atomic<uint32_t> g_halo3ContactCommandFlags{0};
     std::atomic<int32_t> g_halo3ContactCommandUnitHandle{-1};
     std::atomic<int32_t> g_halo3ContactCommandWeaponHandle{-1};
@@ -13002,6 +13003,8 @@ namespace
     // The original always runs after a failure.
     void __fastcall Halo3ObjectsUpdateHook()
     {
+        bool deferredNpcShove = false;
+        int32_t deferredNpcPlayer = -1;
         bool deferredWorldVelocity = false;
         bool deferredRelease = false;
         bool deferredHadMelee = false;
@@ -13061,6 +13064,7 @@ namespace
                 (commandFlags & kHalo3ContactCommandRelease) != 0;
             const bool wantsMelee =
                 (commandFlags & kHalo3ContactCommandMelee) != 0;
+            const bool wantsNpcShove = commandFlags == kHalo3ContactCommandNpcShove;
             const bool enemyMeleeCommand =
                 PhysicalContactEnemyMeleeKind(
                     static_cast<uint8_t>(commandTargetKind));
@@ -13069,7 +13073,7 @@ namespace
                 sampleMs && nowMs >= sampleMs && nowMs - sampleMs <= 500 &&
                 handle != -1 &&
                 (wantsImpulse || wantsPointImpulse || wantsRelease ||
-                 wantsMelee) &&
+                 wantsMelee || wantsNpcShove) &&
                 serial ==
                     g_halo3ContactCommandSerial.load(
                         std::memory_order_acquire);
@@ -13083,6 +13087,14 @@ namespace
                         std::memory_order_relaxed))
                 {
                     bool contactHapticSent = false;
+                    if (wantsNpcShove && nowMs - sampleMs <= 100)
+                    {
+                        deferredNpcShove = true;
+                        deferredNpcPlayer = unitHandle;
+                        deferredGeneration = generation;
+                        deferredHandle = handle;
+                        memcpy(deferredVelocity, velocity, sizeof(deferredVelocity));
+                    }
                     if (wantsImpulse || wantsPointImpulse || wantsRelease)
                     {
                         const bool impulseValid =
@@ -13475,6 +13487,8 @@ namespace
         if (g_origHalo3ObjectsUpdate)
             g_origHalo3ObjectsUpdate();
         Halo3RunNpcShoveProbe(GetTickCount64());
+        if (deferredNpcShove && deferredGeneration == g_halo3RuntimeGeneration.load(std::memory_order_acquire))
+            Halo3ApplyNpcContactShove(deferredHandle, deferredNpcPlayer, deferredVelocity);
         if (deferredWorldVelocity)
         {
             bool deferredValid = deferredGeneration &&
@@ -17567,6 +17581,22 @@ namespace
                             closestHandle, closest.point,
                             pointVelocity.weaponMetersPerSecond, nowMs);
                     }
+                }
+            }
+
+            if (targetKind == 0 && !closestEnemyMeleeAssist &&
+                closestUsesAuthoredShape && dynamicImpulseNormalEligible &&
+                !enemyMeleeWithoutReliableNormal && commandFlags == 0 &&
+                action == PhysicalContactAction::ImpulseOnly && !requestMelee &&
+                g_halo3NpcContactEnabled.load(std::memory_order_acquire))
+            {
+                const auto delta = PhysicalContactNpcShoveDelta(
+                    pointVelocity.weaponMetersPerSecond, relativeVelocity,
+                    closest.normal, meleeThreshold, dt, worldScale);
+                if (PhysicalContactLengthSquared(delta) > 0.0f)
+                {
+                    worldVelocity = delta;
+                    commandFlags = kHalo3ContactCommandNpcShove;
                 }
             }
 
