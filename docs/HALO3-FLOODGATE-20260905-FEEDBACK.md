@@ -366,3 +366,56 @@ MCC/vrserver absent after cleanup; null=false, forcedDriver empty,
 requireHmd=true, exact settings SHA
 `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E` restored.
 No headset acceptance, useful demo video or accepted-pointer advance.
+
+## Visible fixed controller and wall approach (September 5, 22:02-22:11 UTC)
+
+The old fixed controller position (.28,1.25,-.45) had never been measured
+against the null headset's LOCAL origin. With installed `0bf98d0`, 23 F9 steps
+(+.8 rad process-local head pitch trim) revealed weapon geometry above the
+camera. Inspected image:
+`out/debug-openxr/20260905-220409621Z-controller-pose-up/0000-220409901Z.jpg`.
+Result: `out/debug-openxr/20260905-220222262Z-controller-contact-result.json`,
+log SHA `8E57F6CF50AAABE2BCE33EF1DD7894F434341B2AF0B97B5B3DE200514FA2C262`.
+This supports a fixture placement correction; no numerical null head-position
+measurement is claimed.
+
+Diagnostic-only candidate `a299b061aa2ec9526aa90209ce8051361e084355` sets the
+shared aim/motion fixed position to (.18,-.18,-.65). Real controller input and
+user configuration remain unchanged. Package:
+`out/candidates/a299b06-h3-physical-contact-20260905-220638316Z`.
+Installed DLL SHA independently verified:
+`C3890C1AF27243EE7DEECC45C3A3E51B96B9B662D88945E7F473519897AB1977`.
+Build/core tests and Reach consistency passed. A normal level-camera screenshot
+now clearly shows the held assault rifle:
+`out/debug-openxr/20260905-220831731Z-controller-front/0000-220832020Z.jpg`.
+The framing change is visually verified; no actual head pose values were read.
+
+Run: `out/debug-openxr/20260905-220649984Z-controller-contact-result.json`.
+Preserved log SHA: `8DE2168C474546E8826BB568BF12DB0FEBFF314941DC5D8EF7792F58A8B80D23`.
+Steam Construct Forge / SteamVR null driver / Null Model Number,
+22:06:55-22:11:35 UTC, no synthetic prop replay or injected recovery.
+A natural startup recovery records consumed offset=(0,-.000001,-.33) at scale
+.33, with a matching 1 m downward final-root displacement. Its provenance is a
+consumed wall offset, not the controlled injection; the cause of that offset
+is not yet established.
+
+Normal A600ms/D850ms, then D2000ms, established a wall-facing view. At that
+point wallBlocks remained one. W1500ms then increased wallBlocks to nine and
+resets to four. Inspected contact image:
+`out/debug-openxr/20260905-221025988Z-controller-wall-forward/0000-221026253Z.jpg`.
+Later S1100ms retreated. At preserved cutoff 15:11:16.426, wallBlocks=16,
+hits=10, resets=7, checks=12,975, awaitingMotion=0, nativeSamples=93, and
+stage=sweeping. Thus retreat did release the recovery hold and resume sampling.
+A further S700ms attempt was rejected by the input tool because the harness
+had already closed MCC; no input was sent. The admission test passed, but it
+is not a nonpenetration test and does not prove clean sustained wall contact.
+No video was recorded or represented as a successful functionality demo.
+
+The new fixture supplies a visible ordinary controller-path wall reproduction.
+Sustained pushing still drives large corrections and recoveries; this is not
+claimed fixed by the earlier movement gate. The movement gate specifically
+prevents time-only rearming when the uncorrected pose stays still.
+MCC/vrserver absent after cleanup, null=false, forcedDriver empty,
+requireHmd=true, exact settings SHA
+`175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E` restored.
+No headset acceptance or accepted-pointer advance.
