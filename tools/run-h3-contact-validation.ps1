@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet(
+        'controller-pose',
         'weapon-scoop',
         'equipment-scoop',
         'left-grab',
@@ -429,6 +430,15 @@ function Test-VisibleWeaponGapFailure(
 
 function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
+        'controller-pose' {
+            # Admission only: prove the normal palette reconstruction has a
+            # hand reference. No synthetic prop replay or injected separation,
+            # and no claim of wall/prop contact from this result alone.
+            $line = ($Text -split "`r?`n" | Where-Object { $_ -like '*H3 contact hand recovery:*' } | Select-Object -Last 1)
+            return $Text -match 'H3 direct weapon aim DEBUG: using fixed null-driver controller pose' -and
+                $line -match 'checks=([1-9][0-9]{2,}) ' -and
+                $Text -notmatch 'H3 physical contact DEBUG RIG:'
+        }
         'npc-melee' {
             $status = ($Text -split "`r?`n" | Where-Object { $_ -like '*H3 physical contact status:*' } | Select-Object -Last 1)
             return $status -match 'enemyMeleeApplied=([1-9][0-9]*) ' -and $status -match 'enemyMeleeFaulted=0 '
@@ -551,6 +561,7 @@ $passed = $false
 $failure = $null
 
 $debugVariables = @(
+    'HALOMCCVR_H3_AIM_DEBUG_POSE',
     'HALOMCCVR_H3_CONTACT_DEBUG_RIG',
     'HALOMCCVR_H3_CONTACT_DEBUG_SCOOP',
     'HALOMCCVR_H3_CONTACT_DEBUG_LEFT_GRAB',
@@ -606,7 +617,11 @@ try {
         [Environment]::SetEnvironmentVariable(
             $name, $null, [EnvironmentVariableTarget]::Process)
     }
-    $env:HALOMCCVR_H3_CONTACT_DEBUG_RIG = '1'
+    if ($Test -eq 'controller-pose') {
+        $env:HALOMCCVR_H3_AIM_DEBUG_POSE = '1'
+    } else {
+        $env:HALOMCCVR_H3_CONTACT_DEBUG_RIG = '1'
+    }
     if ($TestHandRecovery) { $env:HALOMCCVR_H3_CONTACT_DEBUG_HAND_RECOVERY = '1' }
     if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
