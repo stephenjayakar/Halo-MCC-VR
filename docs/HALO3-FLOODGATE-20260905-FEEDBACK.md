@@ -86,3 +86,19 @@ were removed from the active mod directory by moving them to that backup after
 hash verification. No upstream gameplay changes were merged into this branch.
 The upstream result does not constitute a test of this branch's 30 cm recovery.
 Independent sword geometry work is in `HALO3-SWORD-CONTACT-EVIDENCE.md`.
+
+## Opt-in automated recovery diagnostic
+
+The Forge replay fixture bypasses controller reconstruction, so its successful
+gap sessions had zero valid hand-leash checks. A new explicit
+`HALOMCCVR_H3_CONTACT_DEBUG_HAND_RECOVERY=1` diagnostic uses the exact replay's
+uncorrected requested root as its synthetic hand reference, transforms the full
+node palette consistently, and injects one 40 cm separation after the final
+contact solve. The existing production leash must restore the whole reference
+palette before publication. Normal sessions do not enable this diagnostic.
+
+`run-h3-contact-validation.ps1 -Test visible-weapon-gap -TestHandRecovery`
+sets that process-only variable, restores its prior environment in cleanup, and
+requires nonzero recovery and valid-check counters in addition to the gap pass.
+Release build, core tests and Reach consistency pass. Runtime validation of this
+diagnostic is pending; it does not replace headset acceptance of the reset.

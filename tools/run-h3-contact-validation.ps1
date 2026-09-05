@@ -34,7 +34,8 @@ param(
     [ValidateSet('Forge', 'Campaign')]
     [string]$Scenario = 'Forge',
 
-    [switch]$ExternalMenuControl
+    [switch]$ExternalMenuControl,
+    [switch]$TestHandRecovery
 )
 
 # Runs one Halo 3 physical-contact transaction through SteamVR's null driver.
@@ -47,6 +48,9 @@ param(
 # never headset acceptance.
 
 $ErrorActionPreference = 'Stop'
+if ($TestHandRecovery -and $Test -ne 'visible-weapon-gap') {
+    throw 'TestHandRecovery requires the exact visible-weapon-gap fixture.'
+}
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $outputRoot = Join-Path $repoRoot 'out\debug-openxr'
@@ -555,6 +559,7 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_WALL',
     'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE',
     'HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT',
+    'HALOMCCVR_H3_CONTACT_DEBUG_HAND_RECOVERY',
     'HALOMCCVR_H3_CONTACT_DEBUG_ROTATING'
     'HALOMCCVR_H3_CONTACT_DEBUG_NPC_SHOVE'
 )
@@ -602,6 +607,7 @@ try {
             $name, $null, [EnvironmentVariableTarget]::Process)
     }
     $env:HALOMCCVR_H3_CONTACT_DEBUG_RIG = '1'
+    if ($TestHandRecovery) { $env:HALOMCCVR_H3_CONTACT_DEBUG_HAND_RECOVERY = '1' }
     if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
         $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT = '1'
@@ -897,7 +903,9 @@ public static class HaloMccVrContactInput {
             (Test-VisibleWeaponGapFailure $text $useSameFrameGapCounters)) {
             throw 'Halo 3 visible-weapon-gap recorded an exact visible-geometry penetration.'
         }
-        Test-ValidationResult $text $Test
+        (Test-ValidationResult $text $Test) -and
+            (-not $TestHandRecovery -or
+             $text -match 'H3 contact hand recovery: resets=[1-9][0-9]* checks=[1-9][0-9]* ')
     } $ValidationTimeoutSeconds "Halo 3 $Test did not reach its pass condition."
 
     if ($PostPassHoldSeconds -gt 0) {
@@ -978,6 +986,7 @@ $result = [ordered]@{
     test = $Test
     requested_scenario = $Scenario
     passed = $passed
+    hand_recovery_requested = [bool]$TestHandRecovery
     source_commit = $runtimeSourceCommit
     validator_source_commit = $validatorCommit
     installed_dll_sha256 = $testedDllHash

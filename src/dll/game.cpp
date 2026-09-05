@@ -973,6 +973,8 @@ namespace
     std::atomic<uint64_t> g_halo3ContactHandRecoveries{0};
     std::atomic<uint64_t> g_halo3ContactHandLeashChecks{0};
     std::atomic<uint64_t> g_halo3ContactHandLeashMissingPose{0};
+    std::atomic<bool> g_halo3ContactDebugHandRecovery{false};
+    std::atomic<bool> g_halo3ContactDebugHandRecoveryInjected{false};
     // Capture the exact offset consumed while reconstructing this submission.
     // Reading the worker publication again afterward can observe a new sample.
     thread_local bool g_halo3CaptureHandOffset = false;
@@ -5770,7 +5772,7 @@ namespace
                 std::array<BoneMatrix,
                            Halo3VisibleWeaponPosePublication::kMaximumNodes>
                     trackedNodes{};
-                const bool haveTrackedNodes = reconstructed &&
+                bool haveTrackedNodes = reconstructed &&
                     g_halo3CapturedHandOffsetValid;
                 if (haveTrackedNodes)
                 {
@@ -5794,6 +5796,7 @@ namespace
                             desiredRoot, desiredMs, desiredExact) &&
                         nowMs >= desiredMs && nowMs - desiredMs <= 100)
                     {
+                        const BoneMatrix replayReferenceRoot = desiredRoot;
                         if (desiredExact)
                         {
                             PhysicalContactVec3 correction{};
@@ -5830,6 +5833,21 @@ namespace
                         }
                         if (movedFinite)
                         {
+                            // Explicit null-driver recovery diagnostic only:
+                            // use the fixture's uncorrected requested pose as
+                            // its hand reference, preserving every node.
+                            if (desiredExact &&
+                                g_halo3ContactDebugHandRecovery.load(std::memory_order_relaxed))
+                            {
+                                for (int node = 0; node < renderNodeCount; ++node)
+                                {
+                                    trackedNodes[node] = moved[node];
+                                    for (int axis = 0; axis < 3; ++axis)
+                                        trackedNodes[node].translation[axis] -=
+                                            desiredRoot.translation[axis] - replayReferenceRoot.translation[axis];
+                                }
+                                haveTrackedNodes = true;
+                            }
                             memcpy(destination, moved.data(),
                                    static_cast<size_t>(renderNodeCount) *
                                        sizeof(BoneMatrix));
@@ -6107,6 +6125,18 @@ namespace
                 // Bound every final mutation, including cached poses and
                 // render-time body following. Recover the whole palette so
                 // stale orientation/animation cannot survive a translation reset.
+                if (guardActive && haveTrackedNodes &&
+                    g_halo3ContactDebugHandRecovery.load(std::memory_order_relaxed) &&
+                    !g_halo3ContactDebugHandRecoveryInjected.exchange(true, std::memory_order_relaxed))
+                {
+                    // Force one 40 cm separation after the final solve. The
+                    // unchanged production leash below must restore it before
+                    // publication; this injected pose must never be displayed.
+                    const float separation = .40f * g_worldScale.load(std::memory_order_relaxed);
+                    const float shift = trackedNodes[0].translation[0] + separation - destination[0].translation[0];
+                    for (int node = 0; node < renderNodeCount; ++node)
+                        destination[node].translation[0] += shift;
+                }
                 if (guardActive)
                 {
                     (haveTrackedNodes ? g_halo3ContactHandLeashChecks :
@@ -23807,6 +23837,11 @@ namespace
             contactDebugWallLength < std::size(contactDebugWallValue) &&
             contactDebugWallValue[0] != L'0';
         wchar_t contactDebugVisibleValue[8]{};
+        wchar_t handRecoveryDebug[2]{};
+        g_halo3ContactDebugHandRecovery.store(
+            GetEnvironmentVariableW(L"HALOMCCVR_H3_CONTACT_DEBUG_HAND_RECOVERY", handRecoveryDebug, 2) == 1 &&
+            handRecoveryDebug[0] == L'1', std::memory_order_relaxed);
+        g_halo3ContactDebugHandRecoveryInjected.store(false, std::memory_order_relaxed);
         const DWORD contactDebugVisibleLength = GetEnvironmentVariableW(
             L"HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE", contactDebugVisibleValue,
             static_cast<DWORD>(std::size(contactDebugVisibleValue)));
