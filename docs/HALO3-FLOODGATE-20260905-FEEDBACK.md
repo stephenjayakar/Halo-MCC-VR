@@ -278,3 +278,46 @@ acceptance. No useful video was produced. Final cleanup independently verified
 MCC/vrserver absent, null=false, forcedDriver empty, requireHmd=true, settings
 SHA `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
 The accepted pointer is unchanged.
+
+## Bounded recovery history: confirmed replay loop (September 5, 21:46 UTC)
+
+Telemetry-only candidate `e34653d9dd61e1e7d3fa866d27421284cb35e764`
+retains the first 16 immutable recovery records per DLL lifetime. Unique atomic
+reservations and per-slot release/acquire publication prevent overwrite/read
+races; logging remains on the existing cold status path. No collision or
+recovery behavior was changed. Release/core tests and Reach consistency passed.
+Package: `out/candidates/e34653d-h3-physical-contact-20260905-214614595Z`.
+Installed DLL independently verified:
+`95FFB0D5C8B17B3CDE4980A74EC6DEBDE29A664F908F28129288FD249CD41640`.
+
+The exact visible gap + hand recovery run FAILED with six confirmed geometry
+penetrations. Result:
+`out/debug-openxr/20260905-214628670Z-visible-weapon-gap-result.json`.
+Log SHA: `8E53687B5A620CBE9293355A00826B441A3972C9F3D39282D10017E95F1E789B`.
+Steam / SteamVR null driver / Null Model Number, 21:46:34-21:48:14 UTC.
+At preserved cutoff 14:48:01.969: 19 resets, 207 checks, 31 missing poses.
+The first record is the expected .40 m injection. Records 1-15 all have target
+E2740005, proof=1, corrected=1, finalGuard=1/1 and a displayed approval exactly
+one proposal behind. Consumed reconstruction offset is zero. Their measured
+root separation is .300065-.559766 m. Most intervals are 515-547 ms, immediately
+after the 500 ms recovery cooldown (first two intervals are 578/750 ms).
+Normalized event data:
+`out/debug-openxr/20260905-214628670Z-recovery-events.json`.
+
+This establishes a repeatable correction/recovery conflict in this fixture,
+not a stale long-lived cached palette explanation: a fresh approved contact
+correction repeatedly exceeds the hand limit. The cooldown then permits the
+same target to constrain again. The exact replay itself moves the weapon via
+compound support points and a sinusoidal placement; the next behavioral change
+must distinguish that artificial placement from real controller motion. Source
+inspection also confirms the render escape search can expand ten .025 m shells
+(doubling each shell), so its allowed correction is not bounded by the .30 m
+hand limit. No claim is made that a particular escape-search branch produced
+these corrections; the records do not include that branch.
+
+The instrumentation succeeded in exposing an existing conflict; the collision
+fixture failed and must not be treated as accepted or as a successful demo.
+No video recorded. Normal settings independently restored (null=false, empty
+forcedDriver, requireHmd=true), MCC/vrserver absent, hash
+`175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
+Accepted-build pointer unchanged.
