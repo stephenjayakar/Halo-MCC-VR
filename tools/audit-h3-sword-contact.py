@@ -133,6 +133,31 @@ def influences(mesh_object, vertex_count):
     return result
 
 
+def variant_selection_audit(model, render):
+    regions = {}
+    for region in render.findall("block[@name='regions']/element"):
+        regions[value(region, "name")] = {
+            value(p, "name"): {"mesh_index": int(value(p, "mesh index")),
+                               "mesh_count": int(value(p, "mesh count"))}
+            for p in region.findall("block[@name='permutations']/element")}
+    variants = []
+    for variant in model.findall("block[@name='variants']/element"):
+        selections = []
+        for region in variant.findall("block[@name='regions']/element"):
+            name = value(region, "region name")
+            for p in region.findall("block[@name='permutations']/element"):
+                requested = value(p, "permutation name")
+                probability = float(value(p, "probability"))
+                if not math.isfinite(probability) or probability < 0:
+                    raise ValueError("invalid variant probability")
+                selections.append({"region": name, "requested_permutation": requested,
+                                   "probability": probability,
+                                   "matching_render_permutation": regions.get(name, {}).get(requested)})
+        variants.append({"name": value(variant, "name"), "selections": selections})
+    return {"render_regions": regions, "variants": variants,
+            "scope": "name correspondence only; missing names do not prove hidden geometry"}
+
+
 def audit(directory, collision_path):
     paths = [directory / "energy_blade.model.xml",
              directory / "fp_energy_blade.render_model.xml",
@@ -158,7 +183,7 @@ def audit(directory, collision_path):
         face_nodes.append(next(iter(unique)))
     counts = Counter(face_nodes)
     return {
-        "schema": 2,
+        "schema": 3,
         "scope": "official H3EK exports only; not retail runtime coverage",
         "inputs": [{"path": str(p.resolve()), "sha256": hashlib.sha256(
             p.read_bytes()).hexdigest()} for p in paths],
@@ -170,6 +195,7 @@ def audit(directory, collision_path):
                            render.findall("block[@name='regions']/element")],
         "export_vertices": len(mesh.vertices), "export_triangles": len(mesh.faces),
         "bind_audit": sword_bind_audit(render, mesh.vertices, joints),
+        "variant_selection_audit": variant_selection_audit(model, render),
         "nodes": [{"index": index, "name": name,
                    "vertices": joints.count(index), "triangles": counts[index],
                    "export_model_space_bounds": bounds([

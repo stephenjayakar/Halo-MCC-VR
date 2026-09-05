@@ -153,6 +153,18 @@ sees its live-node input, and the loaded render tag supplies its inverse.
 
 ## Required runtime work
 
+The schema-3 variant audit maps authored permutation names to actual render
+meshes. The render tag has exactly one `default` permutation for blade (mesh 0)
+and handle (mesh 1). Model variant `default` requests both, with an additional
+empty blade permutation of probability zero. Model variant `noblade` requests
+the handle's default and an empty blade permutation of probability one. That
+empty name has no matching render permutation. This correspondence is not proof
+that the engine hides the blade: neither a variant-name check nor an absent
+permutation-name lookup can substitute for the actual runtime selection.
+In particular, do not implement a speculative `variant == noblade` collision
+gate based only on these exports. The current audit intentionally reports the
+missing correspondence as null, not as an invisible mesh.
+
 1. Verify the equipped retail sword's exact render identity and node mapping.
 2. Apply the current animated blade node with its correctly verified inverse
    bind. Export-space positions cannot be copied into the handle's frame.
