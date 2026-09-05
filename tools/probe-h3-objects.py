@@ -138,7 +138,7 @@ def main():
             if salt < 0x8000 or not address or kind != args.kind:
                 continue
             data = read(address, 0x4E0 if kind == 0 else 0x100)
-            position = struct.unpack_from("<3f", data, 0x20)
+            position = struct.unpack_from("<3f", data, 0x50)
             velocity = struct.unpack_from("<3f", data, 0x74)
             if not all(math.isfinite(v) for v in position + velocity):
                 continue
