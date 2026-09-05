@@ -2,6 +2,7 @@
 param(
     [ValidateSet(
         'controller-pose',
+        'controller-contact',
         'weapon-scoop',
         'equipment-scoop',
         'left-grab',
@@ -430,6 +431,13 @@ function Test-VisibleWeaponGapFailure(
 
 function Test-ValidationResult([string]$Text, [string]$Name) {
     switch ($Name) {
+        'controller-contact' {
+            # Normal contact sampling with the fixed controller. This proves
+            # admission to native geometry sampling, not a successful impact.
+            $status = ($Text -split "`r?`n" | Where-Object { $_ -like '*H3 physical contact status:*' } | Select-Object -Last 1)
+            return (Test-ValidationResult $Text 'controller-pose') -and
+                $status -match 'nativeSamples=([1-9][0-9]*) '
+        }
         'controller-pose' {
             # Admission only: prove the normal palette reconstruction has a
             # hand reference. No synthetic prop replay or injected separation,
@@ -617,7 +625,7 @@ try {
         [Environment]::SetEnvironmentVariable(
             $name, $null, [EnvironmentVariableTarget]::Process)
     }
-    if ($Test -eq 'controller-pose') {
+    if ($Test -in @('controller-pose', 'controller-contact')) {
         $env:HALOMCCVR_H3_AIM_DEBUG_POSE = '1'
     } else {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_RIG = '1'

@@ -182,3 +182,28 @@ parent, dynamic-body and generation checks remain intact. A new core regression
 check covers a near anchored target versus near unanchored acquisition, plus
 negative and NaN distances. Only the diagnostic rig calls this helper; normal
 contact and NPC targeting do not. Runtime framing validation is pending.
+
+## Fixed controller admission (September 5, 21:25 UTC)
+
+Validator `9ecc10a` ran installed `f1351cd` in Steam Construct Forge through
+SteamVR / Null Model Number with only `HALOMCCVR_H3_AIM_DEBUG_POSE=1`.
+Result: `out/debug-openxr/20260905-212551749Z-controller-pose-result.json`.
+Preserved log SHA-256:
+`7388A4D42D0DFD257752B6BFF8E2A9407380F3BA4A99509643CE1DE1F14AEBD9`.
+The fixed aim pose reaches normal right-hand reconstruction without a left
+controller: 16,703 checks, zero resets and zero missing poses at 14:28:49.090.
+No synthetic prop replay was enabled. Native contact remained at `stage=motion`
+with zero samples: `VR_GetRightControllerMotion` still reads the absent real
+controller publication, while the fixed pose only overrides `VR_GetAimPose`.
+The two inspected still frames show partial dark weapon geometry at the bottom,
+not a useful contact demonstration. No video was recorded.
+
+The next diagnostic change supplies a matching stationary LOCAL-space motion
+snapshot under that same explicit environment opt-in: identity orientation,
+shared fixed position, zero velocities, and GetTickCount64 freshness/serial.
+Normal controller tracking is unchanged. The validator gains a separate
+`controller-contact` admission check requiring nonzero native samples; this is
+not proof of impact, nudging, melee, or headset acceptance. The baseline mode
+remains available for comparison. The harness restored the exact normal SteamVR
+settings hash `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`
+and closed MCC/SteamVR. The accepted-build pointer is unchanged.

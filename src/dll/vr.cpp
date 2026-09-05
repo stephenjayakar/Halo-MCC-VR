@@ -394,6 +394,7 @@ namespace
     // actual visible-weapon and firing paths be exercised without adding work
     // to their hot callbacks.
     bool g_halo3AimDebugPose = false;
+    constexpr float kHalo3AimDebugPosition[3]{0.28f, 1.25f, -0.45f};
     struct ControllerMotionPublication
     {
         std::atomic<uint32_t> sequence{0};
@@ -9911,6 +9912,22 @@ bool VR_GetRightControllerPose(float outQuat[4], float outPos[3])
 
 bool VR_GetRightControllerMotion(VrControllerMotionSnapshot& out) noexcept
 {
+    if (g_headCsInit && g_halo3AimDebugPose)
+    {
+        // The opt-in fixed pose must supply matching motion to exercise the
+        // normal contact path. A stationary LOCAL-space controller has zero
+        // linear/angular velocity; body locomotion remains the game's input.
+        // Use the same monotonic clock as contact's freshness gate. Repeated
+        // reads within one millisecond intentionally retain the same serial.
+        out = {};
+        out.serial = out.sampleMs = GetTickCount64();
+        out.poseValid = true;
+        out.linearVelocityValid = true;
+        out.angularVelocityValid = true;
+        for (int i = 0; i < 3; ++i)
+            out.position[i] = kHalo3AimDebugPosition[i];
+        return out.serial != 0;
+    }
     auto& publication = g_rightMotion;
     for (int attempt = 0; attempt < 2; ++attempt)
     {
@@ -10348,9 +10365,8 @@ bool VR_GetAimPose(float outQuat[4], float outPos[3])
         outQuat[1] = 0.0f;
         outQuat[2] = 0.0f;
         outQuat[3] = 1.0f;
-        outPos[0] = 0.28f;
-        outPos[1] = 1.25f;
-        outPos[2] = -0.45f;
+        for (int i = 0; i < 3; ++i)
+            outPos[i] = kHalo3AimDebugPosition[i];
         return true;
     }
     EnterCriticalSection(&g_headCs);
