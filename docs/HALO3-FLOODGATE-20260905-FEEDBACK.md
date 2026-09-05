@@ -69,3 +69,20 @@ Release build, core tests and Reach consistency check passed. Steam on E: was
 the only present installation; other Steam/Store locations were absent.
 The package preserved the previous runtime and headset log. No headset result
 exists for the reset candidate yet.
+
+## Return from upstream trial
+
+The user tried Pancreations' September 4 interaction work, rejected it, and
+explicitly requested resuming this Halo 3 development line. On September 5 the
+manifest installer restored the exact `6ea7e86` package above. The original
+configuration was restored byte-for-byte (SHA-256
+`C570089F47A17AE8645310C02688CA1454E1A02C9239BC24C5CC316E4DA94946`).
+The desktop `Halo MCC VR - Interaction Candidate` shortcut now targets
+`halo3xr_launcher.exe` again. Normal SteamVR headset mode was verified.
+
+Upstream binaries, configuration and the user's upstream log were preserved
+under `out/upstream-setup-backups/20260905-upstream-rejected/`; upstream binaries
+were removed from the active mod directory by moving them to that backup after
+hash verification. No upstream gameplay changes were merged into this branch.
+The upstream result does not constitute a test of this branch's 30 cm recovery.
+Independent sword geometry work is in `HALO3-SWORD-CONTACT-EVIDENCE.md`.
