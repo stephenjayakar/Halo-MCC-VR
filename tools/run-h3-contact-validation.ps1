@@ -599,7 +599,7 @@ try {
     $env:HALOMCCVR_H3_CONTACT_DEBUG_RIG = '1'
     if ($Test -in @('npc-shove', 'npc-geometry')) {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
-        $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE = '1'
+        $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT = '1'
     }
     switch ($Test) {
         'npc-motor' {

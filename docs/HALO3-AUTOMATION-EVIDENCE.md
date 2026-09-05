@@ -213,3 +213,23 @@ its next diagnostic aligns the weapon front against one concrete animated body.
 With the geometry dependency now exercised, re-enable the previously isolated
 slow-contact motor candidate for the next end-to-end diagnostic. Headset
 acceptance and the accepted-build pointer remain unchanged.
+
+Candidate 1b2a43c passed the slow NPC contact diagnostic on Steam / SteamVR null
+in Sierra 117: native motor calls increased with zero rejections/faults and zero
+melee calls. All 86 read-only snapshots retained target health 1 and shield 0.
+The target moved from the settled location near (-28.720,164.265,5.684) to
+(-28.92,163.85,5.70) before shutdown; the final snapshot after game teardown
+returned the saved-state copy and is excluded from displacement interpretation.
+Log: out/debug-openxr/20260905-095758364Z-npc-shove.log, SHA-256
+6CC757400E8C4F55F82E3754E732EEFD2644CDE083630D7CF20728433A25C2C7.
+Video: out/debug-openxr/20260905-100026603Z-1b2a43c-campaign-npc-shove/recording.mp4,
+115 captured frames / 29.988443 seconds, SHA-256
+99961EA4058E944AB134BCD0A1529843BDDFEBEF396C7CB8D395E07615A1B45E.
+Snapshots: out/research/h3-1b2a43c-npc-contact-samples.json.
+
+This run used DEBUG_VISIBLE, so exactPublishes stayed zero: the new exact
+animated-body placement helper was not exercised. The NPC validator now selects
+DEBUG_VISIBLE_EXACT to exercise that helper and measure the proposed/visible
+surfaces. The motor result above is valid, but does not prove visual separation
+or headset quality. The saved video shows the NPC, with the replayed gun poorly
+framed relative to the fixed null-headset view.
