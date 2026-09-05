@@ -218,6 +218,32 @@ inline bool PhysicalContactTransformFinite(const PhysicalContactTransform& t)
         t.scale > 1.0e-4f && t.scale < 1000.0f;
 }
 
+// Recovery must not re-enter the same large correction merely because its
+// cooldown expired. Compare uncorrected poses in world space (metres after
+// scaling), so locomotion and deliberate weapon turns can release the hold.
+inline bool PhysicalContactRecoveryPoseMoved(
+    PhysicalContactVec3 referencePosition, PhysicalContactVec3 position,
+    PhysicalContactVec3 referenceForward, PhysicalContactVec3 forward,
+    PhysicalContactVec3 referenceUp, PhysicalContactVec3 up, float worldScale)
+{
+    if (!PhysicalContactFinite(referencePosition) || !PhysicalContactFinite(position) ||
+        !PhysicalContactFinite(referenceForward) || !PhysicalContactFinite(forward) ||
+        !PhysicalContactFinite(referenceUp) || !PhysicalContactFinite(up) ||
+        !std::isfinite(worldScale) || worldScale < .05f || worldScale > 2.0f ||
+        PhysicalContactLengthSquared(referenceForward) < .0001f ||
+        PhysicalContactLengthSquared(forward) < .0001f ||
+        PhysicalContactLengthSquared(referenceUp) < .0001f ||
+        PhysicalContactLengthSquared(up) < .0001f)
+        return false;
+    const float distance = .10f * worldScale;
+    constexpr float cosineTwentyDegrees = .9396926208f;
+    return PhysicalContactLengthSquared(position - referencePosition) >= distance * distance ||
+        PhysicalContactDot(PhysicalContactNormalize(referenceForward),
+                           PhysicalContactNormalize(forward)) <= cosineTwentyDegrees ||
+        PhysicalContactDot(PhysicalContactNormalize(referenceUp),
+                           PhysicalContactNormalize(up)) <= cosineTwentyDegrees;
+}
+
 inline bool PhysicalContactTransformExactlyEqual(
     const PhysicalContactTransform& a,
     const PhysicalContactTransform& b)

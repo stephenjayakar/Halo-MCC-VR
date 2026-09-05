@@ -9127,6 +9127,25 @@ int main()
               PhysicalContactHandLeashExceeded({0, 0, 0}, {NAN, 0, 0}, 1.0f) &&
               PhysicalContactHandLeashExceeded({0, 0, 0}, {0, 0, 0}, 0.0f),
               "Hand recovery leaves a tracked weapon alone and rejects invalid correction inputs");
+        for (float scale : {.05f, .33f, 1.0f, 2.0f})
+        {
+            const auto moved = [&](float metres, float radians) {
+                return PhysicalContactRecoveryPoseMoved(
+                    {4, -3, 2}, {4 + metres * scale, -3, 2},
+                    {1, 0, 0}, {std::cos(radians), std::sin(radians), 0},
+                    {0, 0, 1}, {0, 0, 1}, scale);
+            };
+            Check(!moved(0, 0) && !moved(.09f, 0) && moved(.11f, 0) &&
+                  !moved(0, 19.0f * .01745329252f) && moved(0, 21.0f * .01745329252f),
+                  "Recovery stays held for stationary/jitter poses and rearms on movement or turning at every world scale");
+        }
+        Check(!PhysicalContactRecoveryPoseMoved({}, {NAN, 0, 0},
+                  {1, 0, 0}, {1, 0, 0}, {0, 0, 1}, {0, 0, 1}, 1) &&
+              !PhysicalContactRecoveryPoseMoved({}, {1, 0, 0},
+                  {}, {1, 0, 0}, {0, 0, 1}, {0, 0, 1}, 1) &&
+              PhysicalContactRecoveryPoseMoved({}, {},
+                  {2, 0, 0}, {2, 0, 0}, {0, 0, 2}, {0, 1, 1}, 1),
+              "Recovery rejects invalid poses and recognizes roll with scaled basis vectors");
         Check(PhysicalContactApprovedPaletteCompatible(
                   kActiveWeaponRenderTag, kActiveWeaponRenderTag,
                   0x12340001, 0x12340001, 5, 5, 30, 11, 1000, 5000) &&

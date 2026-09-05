@@ -50,8 +50,8 @@ param(
 # never headset acceptance.
 
 $ErrorActionPreference = 'Stop'
-if ($TestHandRecovery -and $Test -ne 'visible-weapon-gap') {
-    throw 'TestHandRecovery requires the exact visible-weapon-gap fixture.'
+if ($TestHandRecovery -and $Test -notin @('visible-weapon-gap', 'controller-contact')) {
+    throw 'TestHandRecovery requires visible-weapon-gap or controller-contact.'
 }
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))

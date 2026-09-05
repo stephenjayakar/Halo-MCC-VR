@@ -970,6 +970,10 @@ namespace
     std::atomic<uint64_t> g_halo3ContactApprovedPalettes{0};
     std::atomic<uint64_t> g_halo3ContactHeldPalettes{0};
     std::atomic<uint64_t> g_halo3ContactHandRecoveryUntilMs{0};
+    std::atomic<bool> g_halo3ContactHandRecoveryAwaitingMotion{false};
+    // Only the render publisher writes this reference. Its serial stores the
+    // runtime generation; it contains one uncorrected root, not an approval.
+    Halo3VisibleWeaponPosePublication g_halo3ContactHandRecoveryReference;
     std::atomic<uint64_t> g_halo3ContactHandRecoveries{0};
     std::atomic<uint64_t> g_halo3ContactHandLeashChecks{0};
     std::atomic<uint64_t> g_halo3ContactHandLeashMissingPose{0};
@@ -5913,8 +5917,37 @@ namespace
                     &approvedCorrected);
                 const uint32_t contactGeneration =
                     g_halo3RuntimeGeneration.load(std::memory_order_acquire);
+                if (g_halo3ContactHandRecoveryAwaitingMotion.load(std::memory_order_acquire) &&
+                    haveTrackedNodes)
+                {
+                    float recoveryBasis[9]{}, recoveryPosition[3]{}, recoveryScale = 1.0f;
+                    uint64_t recoveryMs = 0, recoveryGeneration = 0;
+                    int32_t recoveryWeapon = -1;
+                    uint16_t recoveryTag = 0xFFFFu;
+                    if (Halo3ReadWeaponPose(g_halo3ContactHandRecoveryReference,
+                            recoveryBasis, recoveryPosition, recoveryScale, recoveryMs,
+                            nullptr, nullptr, &recoveryTag, &recoveryWeapon, &recoveryGeneration))
+                    {
+                        const auto& currentRoot = trackedNodes[0];
+                        const bool identityChanged = recoveryGeneration != contactGeneration ||
+                            recoveryTag != tag || (activeWeaponHandle != -1 &&
+                            recoveryWeapon != activeWeaponHandle);
+                        const bool moved = PhysicalContactRecoveryPoseMoved(
+                            {recoveryPosition[0], recoveryPosition[1], recoveryPosition[2]},
+                            {currentRoot.translation[0], currentRoot.translation[1], currentRoot.translation[2]},
+                            {recoveryBasis[0], recoveryBasis[1], recoveryBasis[2]},
+                            {currentRoot.rotation[0], currentRoot.rotation[1], currentRoot.rotation[2]},
+                            {recoveryBasis[6], recoveryBasis[7], recoveryBasis[8]},
+                            {currentRoot.rotation[6], currentRoot.rotation[7], currentRoot.rotation[8]},
+                            g_worldScale.load(std::memory_order_relaxed));
+                        if (identityChanged || (moved && nowMs >=
+                                g_halo3ContactHandRecoveryUntilMs.load(std::memory_order_acquire)))
+                            g_halo3ContactHandRecoveryAwaitingMotion.store(false, std::memory_order_release);
+                    }
+                }
                 const bool guardActive =
                     g_config.physical_weapon_contact &&
+                    !g_halo3ContactHandRecoveryAwaitingMotion.load(std::memory_order_acquire) &&
                     nowMs >= g_halo3ContactHandRecoveryUntilMs.load(
                         std::memory_order_acquire) &&
                     contactGeneration &&
@@ -6195,6 +6228,10 @@ namespace
                     }
                     memcpy(destination, trackedNodes.data(),
                            static_cast<size_t>(renderNodeCount) * sizeof(BoneMatrix));
+                    Halo3PublishWeaponPose(g_halo3ContactHandRecoveryReference,
+                        trackedNodes.data(), 1, tag, activeWeaponHandle,
+                        contactGeneration, nowMs, false);
+                    g_halo3ContactHandRecoveryAwaitingMotion.store(true, std::memory_order_release);
                     g_halo3ContactHandRecoveryUntilMs.store(
                         nowMs + 500, std::memory_order_release);
                     g_halo3ContactHandRecoveries.fetch_add(1, std::memory_order_relaxed);
@@ -6509,6 +6546,7 @@ namespace
             const uint64_t nowMs = GetTickCount64();
             if (nowMs >= g_halo3ContactHandRecoveryUntilMs.load(
                     std::memory_order_acquire) &&
+                !g_halo3ContactHandRecoveryAwaitingMotion.load(std::memory_order_acquire) &&
                 Halo3ReadWeaponWallOffset(wallOffset, wallSampleMs) &&
                 PhysicalContactPublishedOffsetUsable(
                     wallOffset, wallSampleMs, nowMs, s))
@@ -13953,7 +13991,8 @@ namespace
             consumedRecoveryUntil = recoveryUntil;
             Halo3ResetPhysicalContact(32);
         }
-        if (nowMs < recoveryUntil)
+        if (nowMs < recoveryUntil ||
+            g_halo3ContactHandRecoveryAwaitingMotion.load(std::memory_order_acquire))
             return;
         const uint32_t generation =
             g_halo3RuntimeGeneration.load(std::memory_order_acquire);
@@ -18534,11 +18573,12 @@ namespace
                 r.tracked.x, r.tracked.y, r.tracked.z, r.final.x, r.final.y, r.final.z,
                 r.consumedOffset.x, r.consumedOffset.y, r.consumedOffset.z);
         }
-        LOG("H3 contact hand recovery: resets=%llu checks=%llu missingPose=%llu limit=0.30m cooldown=500ms active=%d",
+        LOG("H3 contact hand recovery: resets=%llu checks=%llu missingPose=%llu limit=0.30m cooldown=500ms active=%d awaitingMotion=%d",
             (unsigned long long)g_halo3ContactHandRecoveries.load(std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactHandLeashChecks.load(std::memory_order_relaxed),
             (unsigned long long)g_halo3ContactHandLeashMissingPose.load(std::memory_order_relaxed),
-            nowMs < g_halo3ContactHandRecoveryUntilMs.load(std::memory_order_acquire));
+            nowMs < g_halo3ContactHandRecoveryUntilMs.load(std::memory_order_acquire),
+            g_halo3ContactHandRecoveryAwaitingMotion.load(std::memory_order_acquire));
         LOG("H3 animated contact nodes: raw=%u interpolated=%u missing=%u renderRaw=%llu",
             g_halo3AnimatedRawNodes.load(std::memory_order_relaxed),
             g_halo3AnimatedInterpolatedNodes.load(std::memory_order_relaxed),
