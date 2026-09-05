@@ -1,0 +1,61 @@
+# Floodgate headset feedback, 2026-09-05
+
+The user tested Campaign on source `16c8bd47cdf6358b9ab94c1125d7afa610c4954b`.
+Installed DLL independently verified as
+`6D6C07D4140D9890560834C65E4453E26625F2B104FC971784C9F637539AFC60`.
+The preserved log is `out/headset-sessions/20260905-floodgate-user-feedback/halo3xr.log`,
+SHA-256 `DCB70A5D1D2E4A25A96CE3B7FD0B196C7A789E7F26488F0B1A9F217696C4C2C8`.
+It identifies Steam, SteamVR/OpenXR 2.17.8, headset `SteamVR/OpenXR : oculus`,
+120 Hz. The log does not identify the physical Quest model.
+
+User results: enemy melee worked well; floor nudging seemed good; some Floodgate
+rocks still clip; weapons stick far from the hand and flicker between positions;
+energy sword collision uncertain; gameplay laggy. This is partial feature
+feedback, not acceptance of the cumulative candidate. CURRENT-STATE is unchanged.
+
+## Measured findings
+
+- Seven native enemy melee applications, zero rejected/faulted/no-damage requests.
+- 330 prop impulses recorded. This supports nudging being active, not proof that
+  every visual contact is aligned.
+- Body displacement reached 0.998 m. Render code can retain compatible old
+  palettes without an age limit; refreshing an approval does not prove that its
+  position remains close to the current hand. These are concrete reasons to
+  bound final presentation, including render-time target following.
+- Gameplay renderWindow p95 is usually about 12–18 ms, with one 35.65 ms window,
+  above the 8.33 ms deadline at 120 Hz. The old deployment backup is a null-driver
+  session, not a comparable real-headset performance baseline. No specific
+  optimization is proven by this comparison.
+- Decorator instance/plane counters stayed zero. Some decorator draw counters
+  were nonzero. This does not identify which reported rocks are decorators;
+  Floodgate geometry coverage remains unproved.
+- Official H3EK energy-blade collision XML contains one region named `handle`,
+  one BSP, and a small box with eight vertices. There is no blade region in that
+  collision tag. File: `out/h3-contact-re/weapon-collision-xml/objects_weapons_melee_energy_blade_energy_blade.collision_model.xml`,
+  SHA-256 `93AF66FC628922BDE83282361C2E2280A41A191C66D3FACAA605595FA89A8870`.
+  The held-weapon contact reader uses the collision model. This is a specific
+  explanation to verify against the equipped retail sword, not proof of runtime
+  blade coverage. A future blade implementation must use proven visible geometry.
+
+## First candidate: recover excessive hand separation
+
+Limit contact displacement to 30 cm relative to the same weapon's uncorrected,
+hand-tracked root. This avoids confusing barrel length or configured grip offsets
+with separation from the hand. Capture the exact correction used during palette
+reconstruction, including reuse of the stereo solve cache. Check after all final
+render mutations, including old approved/cached palettes and target following.
+On excess displacement, restore the full tracked palette and ask the gameplay
+worker to clear constraints, approvals, target following and motion history.
+Pause contact correction for 500 ms so the old constraint cannot immediately
+reattach. Invalidating the stereo cache on recovery avoids carrying the stuck
+solve into the other eye. The worker logs reset count and cooldown state.
+
+This is deliberate temporary contact fallback: during recovery the gun follows
+the hand and can pass through an obstacle. Melee speed remains 1.50 m/s. Clearing
+motion history prevents the recovery jump itself from becoming a melee swing.
+
+Build and core tests pass before packaging; tests cover radial distance, world
+scales and invalid inputs. Headset behavior is unaccepted. Rock coverage, sword
+blade geometry, remaining flicker below the leash and performance remain open.
+Keep this behavioral candidate separate for the next headset result before
+stacking changes to collision geometry or scheduling.

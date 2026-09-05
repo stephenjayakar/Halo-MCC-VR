@@ -85,6 +85,21 @@ inline float PhysicalContactLengthSquared(PhysicalContactVec3 v)
     return PhysicalContactDot(v, v);
 }
 
+// Compare the same authored weapon root before and after contact correction,
+// so weapon length and configured grip offsets do not consume the leash.
+inline bool PhysicalContactHandLeashExceeded(
+    PhysicalContactVec3 trackedRoot, PhysicalContactVec3 displayedRoot,
+    float worldScale)
+{
+    if (!PhysicalContactFinite(trackedRoot) ||
+        !PhysicalContactFinite(displayedRoot) ||
+        !std::isfinite(worldScale) || worldScale < 0.05f || worldScale > 2.0f)
+        return true;
+    const float limit = 0.30f * worldScale;
+    return PhysicalContactLengthSquared(displayedRoot - trackedRoot) >
+        limit * limit;
+}
+
 inline float PhysicalContactLength(PhysicalContactVec3 v)
 {
     return std::sqrt(PhysicalContactLengthSquared(v));

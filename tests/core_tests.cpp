@@ -9113,6 +9113,20 @@ int main()
                   0x12340001, 0x12340001, 5, 5, 12, 11, 1000, 1101),
             "The render gate consumes only a fresh, same-weapon, same-shape "
             "worker approval that cannot come from a future proposal");
+        for (float worldScale : {0.05f, 0.333333f, 1.0f, 2.0f})
+        {
+            Check(!PhysicalContactHandLeashExceeded(
+                      {0, 0, 0}, {0.29f * worldScale, 0, 0}, worldScale) &&
+                  PhysicalContactHandLeashExceeded(
+                      {0, 0, 0}, {0.31f * worldScale, 0, 0}, worldScale) &&
+                  PhysicalContactHandLeashExceeded(
+                      {0, 0, 0}, {0.22f * worldScale, 0.22f * worldScale, 0}, worldScale),
+                  "Hand recovery measures a 30 cm radial displacement in metres at every supported world scale");
+        }
+        Check(!PhysicalContactHandLeashExceeded({5, -3, 9}, {5, -3, 9}, 1.0f) &&
+              PhysicalContactHandLeashExceeded({0, 0, 0}, {NAN, 0, 0}, 1.0f) &&
+              PhysicalContactHandLeashExceeded({0, 0, 0}, {0, 0, 0}, 0.0f),
+              "Hand recovery leaves a tracked weapon alone and rejects invalid correction inputs");
         Check(PhysicalContactApprovedPaletteCompatible(
                   kActiveWeaponRenderTag, kActiveWeaponRenderTag,
                   0x12340001, 0x12340001, 5, 5, 30, 11, 1000, 5000) &&

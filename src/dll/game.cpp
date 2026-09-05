@@ -969,6 +969,15 @@ namespace
     std::atomic<int32_t> g_halo3ContactActiveWeaponHandle{-1};
     std::atomic<uint64_t> g_halo3ContactApprovedPalettes{0};
     std::atomic<uint64_t> g_halo3ContactHeldPalettes{0};
+    std::atomic<uint64_t> g_halo3ContactHandRecoveryUntilMs{0};
+    std::atomic<uint64_t> g_halo3ContactHandRecoveries{0};
+    std::atomic<uint64_t> g_halo3ContactHandLeashChecks{0};
+    std::atomic<uint64_t> g_halo3ContactHandLeashMissingPose{0};
+    // Capture the exact offset consumed while reconstructing this submission.
+    // Reading the worker publication again afterward can observe a new sample.
+    thread_local bool g_halo3CaptureHandOffset = false;
+    thread_local bool g_halo3CapturedHandOffsetValid = false;
+    thread_local PhysicalContactVec3 g_halo3CapturedHandOffset{};
     // Normal-play visibility telemetry. These counters are written only by
     // the final palette callback and read by the existing two-second worker
     // status line. They distinguish a collision-approved draw from the
@@ -1516,6 +1525,9 @@ namespace
     // FP prepare/palette/render sequence is synchronous on one render thread.
     struct FpStereoPaletteCache
     {
+        PhysicalContactVec3 contactHandOffset{};
+        bool contactHandOffsetValid = false;
+        uint64_t contactRecoveryUntilMs = 0;
         bool valid = false;
         uint16_t tag = 0;
         int player = -1;
@@ -4882,6 +4894,8 @@ namespace
 
         auto cacheMatches = [&](const FpStereoPaletteCache& cache) {
             return cache.valid && cache.tag == tag &&
+                cache.contactRecoveryUntilMs ==
+                    g_halo3ContactHandRecoveryUntilMs.load(std::memory_order_acquire) &&
                 cache.player == context.player && cache.slot == context.slot &&
                 cache.count == context.count && cache.wrist == context.wrist &&
                 cache.elbow == context.elbow &&
@@ -4920,6 +4934,11 @@ namespace
                 }
                 if (reused)
                 {
+                    if (g_halo3CaptureHandOffset)
+                    {
+                        g_halo3CapturedHandOffset = cache.contactHandOffset;
+                        g_halo3CapturedHandOffsetValid = cache.contactHandOffsetValid;
+                    }
                     if (kEnableRetiredHalo3Diagnostics && perfEyeBucket >= 0)
                         g_perfFpPaletteCacheHits[perfEyeBucket].fetch_add(
                             1, std::memory_order_relaxed);
@@ -4937,6 +4956,11 @@ namespace
                     continue;
                 cache.valid = true;
                 cache.tag = tag;
+                cache.contactHandOffset = g_halo3CapturedHandOffset;
+                cache.contactHandOffsetValid = g_halo3CaptureHandOffset &&
+                    g_halo3CapturedHandOffsetValid;
+                cache.contactRecoveryUntilMs = g_halo3ContactHandRecoveryUntilMs.load(
+                    std::memory_order_acquire);
                 cache.player = context.player;
                 cache.slot = context.slot;
                 cache.count = context.count;
@@ -5594,10 +5618,14 @@ namespace
         // relation is publishing), use the untouched snapshot for this frame.
         if (context.valid && source==context.source)
             selectedSource=g_fpUnmodifiedInterpolations[context.slot];
+        g_halo3CapturedHandOffsetValid = false;
+        g_halo3CapturedHandOffset = {};
+        g_halo3CaptureHandOffset = true;
         bool reconstructed=false;
         if (root && source)
             reconstructed=ReconstructVisiblePaletteSource(
                 tag,context,*root,source,selectedSource);
+        g_halo3CaptureHandOffset = false;
 
         // FLOATING HANDS (optional, OFF by default): a pure presentation filter
         // over the already-solved palette. The VRIK solve above still tracks the
@@ -5739,6 +5767,21 @@ namespace
                 : boundedWristSubmission;
             if (acceptedSubmission)
             {
+                std::array<BoneMatrix,
+                           Halo3VisibleWeaponPosePublication::kMaximumNodes>
+                    trackedNodes{};
+                const bool haveTrackedNodes = reconstructed &&
+                    g_halo3CapturedHandOffsetValid;
+                if (haveTrackedNodes)
+                {
+                    for (int node = 0; node < renderNodeCount; ++node)
+                    {
+                        trackedNodes[node] = destination[node];
+                        trackedNodes[node].translation[0] -= g_halo3CapturedHandOffset.x;
+                        trackedNodes[node].translation[1] -= g_halo3CapturedHandOffset.y;
+                        trackedNodes[node].translation[2] -= g_halo3CapturedHandOffset.z;
+                    }
+                }
                 bool candidateCorrectionApplied = false;
                 if (g_halo3ContactDebugVisibleReplay.load(
                         std::memory_order_acquire))
@@ -5836,6 +5879,8 @@ namespace
                     g_halo3RuntimeGeneration.load(std::memory_order_acquire);
                 const bool guardActive =
                     g_config.physical_weapon_contact &&
+                    nowMs >= g_halo3ContactHandRecoveryUntilMs.load(
+                        std::memory_order_acquire) &&
                     contactGeneration &&
                     g_halo3PhysicalContactBindings.load(
                         std::memory_order_acquire) &&
@@ -6058,6 +6103,32 @@ namespace
                         renderProof = 3;
                         unprovedFinalTarget = finalGuardRequired;
                     }
+                }
+                // Bound every final mutation, including cached poses and
+                // render-time body following. Recover the whole palette so
+                // stale orientation/animation cannot survive a translation reset.
+                if (guardActive)
+                {
+                    (haveTrackedNodes ? g_halo3ContactHandLeashChecks :
+                        g_halo3ContactHandLeashMissingPose).fetch_add(
+                            1, std::memory_order_relaxed);
+                }
+                if (guardActive && haveTrackedNodes &&
+                    PhysicalContactHandLeashExceeded(
+                        {trackedNodes[0].translation[0], trackedNodes[0].translation[1],
+                         trackedNodes[0].translation[2]},
+                        {destination[0].translation[0], destination[0].translation[1],
+                         destination[0].translation[2]},
+                        g_worldScale.load(std::memory_order_relaxed)))
+                {
+                    memcpy(destination, trackedNodes.data(),
+                           static_cast<size_t>(renderNodeCount) * sizeof(BoneMatrix));
+                    g_halo3ContactHandRecoveryUntilMs.store(
+                        nowMs + 500, std::memory_order_release);
+                    g_halo3ContactHandRecoveries.fetch_add(1, std::memory_order_relaxed);
+                    displayedSerial = proposalSerial;
+                    displayedCorrected = false;
+                    renderProof = 3;
                 }
                 if (renderProof == 1)
                     g_halo3ContactRenderApprovedPalettes.fetch_add(
@@ -6357,18 +6428,24 @@ namespace
             : Clamp(g_config.gun_forward_m, -0.3f, 0.5f)) * s;
         for (int j = 0; j < 3; ++j)
             pos[j] = cam[j] + off[j] + basis[j] * standoff;
+        if (!left && g_halo3CaptureHandOffset)
+            g_halo3CapturedHandOffsetValid = true;
         if (!left && g_config.physical_weapon_contact)
         {
             PhysicalContactVec3 wallOffset{};
             uint64_t wallSampleMs = 0;
             const uint64_t nowMs = GetTickCount64();
-            if (Halo3ReadWeaponWallOffset(wallOffset, wallSampleMs) &&
+            if (nowMs >= g_halo3ContactHandRecoveryUntilMs.load(
+                    std::memory_order_acquire) &&
+                Halo3ReadWeaponWallOffset(wallOffset, wallSampleMs) &&
                 PhysicalContactPublishedOffsetUsable(
                     wallOffset, wallSampleMs, nowMs, s))
             {
                 pos[0] += wallOffset.x;
                 pos[1] += wallOffset.y;
                 pos[2] += wallOffset.z;
+                if (g_halo3CaptureHandOffset)
+                    g_halo3CapturedHandOffset = wallOffset;
             }
         }
         scale = Clamp(g_config.gun_scale, 0.3f, 3.0f);
@@ -13794,6 +13871,18 @@ namespace
     // TLS/object-table path used by the vehicle sampler.
     void Halo3ProcessPhysicalWeaponContact(uint64_t nowMs)
     {
+        const uint64_t recoveryUntil = g_halo3ContactHandRecoveryUntilMs.load(
+            std::memory_order_acquire);
+        // Only the contact worker resets its own constraints and motion history.
+        // The render hook requests recovery atomically; it never mutates them.
+        static uint64_t consumedRecoveryUntil = 0;
+        if (recoveryUntil != consumedRecoveryUntil)
+        {
+            consumedRecoveryUntil = recoveryUntil;
+            Halo3ResetPhysicalContact(32);
+        }
+        if (nowMs < recoveryUntil)
+            return;
         const uint32_t generation =
             g_halo3RuntimeGeneration.load(std::memory_order_acquire);
         const bool debugRig =
@@ -18359,6 +18448,11 @@ namespace
             return;
         nextLogMs = nowMs + 2000;
         Halo3LogNpcShoveProbe();
+        LOG("H3 contact hand recovery: resets=%llu checks=%llu missingPose=%llu limit=0.30m cooldown=500ms active=%d",
+            (unsigned long long)g_halo3ContactHandRecoveries.load(std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactHandLeashChecks.load(std::memory_order_relaxed),
+            (unsigned long long)g_halo3ContactHandLeashMissingPose.load(std::memory_order_relaxed),
+            nowMs < g_halo3ContactHandRecoveryUntilMs.load(std::memory_order_acquire));
         LOG("H3 animated contact nodes: raw=%u interpolated=%u missing=%u renderRaw=%llu",
             g_halo3AnimatedRawNodes.load(std::memory_order_relaxed),
             g_halo3AnimatedInterpolatedNodes.load(std::memory_order_relaxed),
