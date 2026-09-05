@@ -198,3 +198,18 @@ installed. Its source/log identify 4a003b1; the tested DLL was the independently
 verified 28A9BFE480391A2057192D0A77947C5D6484CB6A2E404300F6B9A4D2EC29CA87,
 not the later D417... DLL listed in that result. The validator now captures
 source-tool identity and installed hashes before launching MCC.
+
+Candidate a9f1811 passed the geometry-only Campaign run after the approach
+helper reached stationary gameplay NPC E3E800F5. The correctly sized reader
+reported raw nodes and repeated exact animated body hits, zero missing nodes,
+and zero melee. The NPC motor remained disabled in this run.
+Log: out/debug-openxr/20260905-095208042Z-npc-geometry.log, SHA-256
+6C43CF77533FFE54C215BBDA0D168935A36CA0BB4D329FE71F5B0BEBB1F3FDC6.
+Video: out/debug-openxr/20260905-095501564Z-a9f1811-campaign-npc-geometry/recording.mp4,
+112 captured frames / 29.881128 seconds, SHA-256
+06E4EB719905540AB421717D49779DF226790344F1017F988AD15352990FFE61.
+The replay started inside the body and yielded unreliable overlap normals;
+its next diagnostic aligns the weapon front against one concrete animated body.
+With the geometry dependency now exercised, re-enable the previously isolated
+slow-contact motor candidate for the next end-to-end diagnostic. Headset
+acceptance and the accepted-build pointer remain unchanged.

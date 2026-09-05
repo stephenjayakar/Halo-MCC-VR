@@ -7,7 +7,7 @@ using Halo3BipedAccelerateFn = void (__fastcall*)(int32_t, const float*);
 constexpr bool kEnableHalo3NpcShoveProbeCandidate = true;
 Halo3BipedAccelerateFn g_halo3NpcProbeAccelerate = nullptr;
 std::atomic<bool> g_halo3NpcContactEnabled{false};
-constexpr bool kEnableHalo3NpcContactCandidate = false;
+constexpr bool kEnableHalo3NpcContactCandidate = true;
 std::atomic<uint32_t> g_halo3NpcContactApplied{0}, g_halo3NpcContactRejected{0}, g_halo3NpcContactFaulted{0};
 std::atomic<bool> g_halo3NpcProbeEnabled{false};
 std::atomic<uint32_t> g_halo3NpcProbeStage{0}, g_halo3NpcProbeCalls{0};
