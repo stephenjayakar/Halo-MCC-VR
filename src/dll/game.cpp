@@ -1299,6 +1299,7 @@ namespace
     // palette hook only uses it to bound the render-model palette before
     // publishing its root; a missing tag binding simply withholds contact.
     unsigned char* Halo3LoadedTagDefinition(uint32_t datum);
+    void Halo3LogSelectionProbe();
 
     void Halo3PublishWeaponPose(
         Halo3VisibleWeaponPosePublication& published,
@@ -18740,6 +18741,7 @@ namespace
         Halo3LogNpcShoveProbe();
         Halo3LogClearanceProbe();
         VR_LogNullControllerPathStatus();
+        Halo3LogSelectionProbe();
         Halo3LogContactReplays();
         if (VR_UsesFixedControllerDebugPose())
         {
@@ -23524,6 +23526,7 @@ namespace
     // Final visible first-person skin palette consumer. Unlike 0x2C13B8
     // (marker/effect packets), this function maps interpolated bones into the
     // actual render palette and receives the exact root as argument 2.
+    #include "halo3_selection_probe.inl"
     const char* kFpVisiblePaletteSig =
         "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 56 41 57 48 83 EC 20 48 8B 05 ?? ?? ?? ?? 49 8B F0 0F B7 C9 4C 8B F2";
     // First-person camera rebuild (0x279BEC in build 1.3528). Re-copies the FP
@@ -25458,6 +25461,7 @@ namespace
         }
         RememberInstalledGameHook(reinterpret_cast<void*>(interpolateHit));
         RememberInstalledGameHook(reinterpret_cast<void*>(visiblePaletteHit));
+        if (visiblePathOk) Halo3InstallSelectionProbe(base, size);
         if (visiblePathOk)
         {
             g_fpInterpolatorHooked.store(true,std::memory_order_release);

@@ -27,6 +27,15 @@ def verify(path):
         "visible_palette_to_skinning": (0x295BA9,
             "41 8B 14 24 4D 8D 44 24 0C 48 89 4C 24 38 BE 01 00 00 00 "
             "41 8B 4C 24 04 4C 8B CF 40 88 74 24 28"),
+        "selection_count_leaf": (0x2667AC,
+            "48 89 5C 24 08 48 8B 05 60 28 7E 00 4D 8B D8 "
+            "48 8B 1D 06 8D D6 01 0F B7 C9 8B 54 C8 04"),
+        "selection_count_fp_caller": (0x295B57,
+            "41 8B 0C 24 48 8D 7B 0E 4C 8B C7 E8 45 0C FD FF "
+            "45 33 FF 88 43 0C"),
+        "palette_consumer_context": (0x2958A7,
+            "4C 8D 25 7A 53 7E 00 4C 8B 05 63 37 7B 00 "
+            "4C 8B D3 44 8B 6C 24 48 48 89 5C 24 60 41 0F B7 04 24"),
     }
     matches = {}
     for name, (expected, pattern) in signatures.items():
@@ -45,7 +54,7 @@ def verify(path):
         matches[name] = hex(found[0])
     calls = {0x28AE53: 0x2C0D20, 0x2C0F39: 0x2C5A38,
              0x2C5A74: 0x2C561C, 0x295BC9: 0x266838,
-             0x2669AD: 0x120DF8}
+             0x2669AD: 0x120DF8, 0x295B62: 0x2667AC}
     for site, target in calls.items():
         instruction = pe.get_data(site, 5)
         if instruction[0] != 0xE8 or site + 5 + struct.unpack_from("<i", instruction, 1)[0] != target:
@@ -57,6 +66,9 @@ def verify(path):
             raise ValueError("unexpected palette reference instruction")
         if site + 7 + struct.unpack_from("<i", instruction, 3)[0] != 0xA7AC28:
             raise ValueError("palette producer and consumer differ")
+    count_store = pe.get_data(0x28AE58, 6)
+    if count_store[:2] != b"\x89\x05" or 0x28AE5E + struct.unpack_from("<i", count_store, 2)[0] != 0xA7AC24:
+        raise ValueError("palette producer count store differs")
     return {"schema": 1, "module": str(path.resolve()), "sha256": digest,
             "scope": "offline pinned-module verification; no runtime acceptance",
             "unique_sequences": matches,

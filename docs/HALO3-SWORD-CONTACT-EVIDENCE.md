@@ -455,3 +455,41 @@ real-headset settings SHA-256
 `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E` was
 independently verified restored. Installed DLL/configuration and accepted
 pointer unchanged.
+
+## Synchronous selection-capture candidate, September 5
+
+The pinned retail leaf at `0x2667AC` consumes the render tag in ECX and selected
+mesh-index pointer in R8. Its complete body through `0x266834` overwrites EDX
+before use, reads no stack arguments and returns a matrix count in EAX. It
+does not alter the selection list. The first-person caller at `0x295B57`
+passes the current palette's render tag and the finalized region selections
+from its draw record, calls this leaf at `0x295B62`, then stores AL and allocates
+the skinning buffer. This is before skinning/submission; a captured selection
+is not proof that later allocation/submission succeeded.
+
+Read-only disassembly is preserved as `retail-selection-matrix-count.txt` under
+the sword research directory. The extended `verify-h3-sword-skinning.py`
+checks the pinned hash, unique exact code sequences, count-call target and
+palette-count producer store. The probe's four wildcard signatures were also
+checked across the full mapped pinned image and each has exactly one match:
+leaf `0x2667AC`, caller `0x295B57`, producer `0x28AE4C`, consumer `0x2958A7`.
+Results: `retail-selection-verification.json`, `selection-probe-signatures.json`.
+The producer and consumer independently resolve palette array `0xA7AC28`;
+the producer's returned count is stored at `0xA7AC24`.
+
+`halo3_selection_probe.inl` is an opt-in diagnostic through
+`HALOMCCVR_H3_SWORD_SELECTION_PROBE=1` / harness `-SelectionProbe`. It forwards
+the native count result unchanged and observes only the verified first-person
+return address and current primary prepared render tag. It copies bounded
+region selections and the unique matching palette, records generation/weapon
+identity, and byte-compares that palette with our last-drawn publication.
+Sixty-four immutable selection-change records maximum are drained by the cold
+logger. Rendering performs no logging, allocation, I/O, locks or scanning.
+Observation faults disable the probe alone; missing/ambiguous bindings or hook
+failure do not alter camera/contact ownership. The hook is registered with the
+existing title teardown registry. No matrix-product hook is added.
+
+The harness requires at least one exact palette-paired record and zero probe
+faults, rather than treating its generic contact pass as probe verification.
+This candidate does not enable sword blade collision. Runtime capture of a
+blade-off selection and a production geometry/selection policy remain pending.

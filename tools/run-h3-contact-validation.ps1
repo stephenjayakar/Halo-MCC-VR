@@ -40,7 +40,8 @@ param(
     [switch]$TestHandRecovery,
     [switch]$ProbeClearance,
     [switch]$FreshRegion,
-    [switch]$KeyboardGamepad
+    [switch]$KeyboardGamepad,
+    [switch]$SelectionProbe
 )
 
 # Runs one Halo 3 physical-contact transaction through SteamVR's null driver.
@@ -58,6 +59,9 @@ if ($TestHandRecovery -and $Test -notin @('visible-weapon-gap', 'controller-cont
 }
 if ($FreshRegion -and $Test -ne 'controller-contact') {
     throw 'FreshRegion requires the normal controller-contact path, not a synthetic contact fixture.'
+}
+if ($SelectionProbe -and $Test -ne 'controller-contact') {
+    throw 'SelectionProbe requires the normal controller-contact path.'
 }
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -576,6 +580,7 @@ $failure = $null
 
 $debugVariables = @(
     'HALOMCCVR_DEBUG_KEYBOARD_GAMEPAD',
+    'HALOMCCVR_H3_SWORD_SELECTION_PROBE',
     'HALOMCCVR_H3_AIM_DEBUG_POSE',
     'HALOMCCVR_H3_CONTACT_DEBUG_RIG',
     'HALOMCCVR_H3_CONTACT_DEBUG_SCOOP',
@@ -641,6 +646,7 @@ try {
     }
     if ($TestHandRecovery) { $env:HALOMCCVR_H3_CONTACT_DEBUG_HAND_RECOVERY = '1' }
     if ($KeyboardGamepad) { $env:HALOMCCVR_DEBUG_KEYBOARD_GAMEPAD = '1' }
+    if ($SelectionProbe) { $env:HALOMCCVR_H3_SWORD_SELECTION_PROBE = '1' }
     if ($ProbeClearance) { $env:HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE = '1' }
     if ($FreshRegion) { $env:HALOMCCVR_H3_CONTACT_FRESH_REGION = '1' }
     if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
@@ -939,6 +945,9 @@ public static class HaloMccVrContactInput {
             throw 'Halo 3 visible-weapon-gap recorded an exact visible-geometry penetration.'
         }
         (Test-ValidationResult $text $Test) -and
+            (-not $SelectionProbe -or
+             ($text -match 'H3 selection PROBE status: enabled=1 calls=[1-9][0-9]* changes=[1-9][0-9]* rejected=[0-9]+ faults=0' -and
+              $text -match 'H3 selection PROBE record:.*matchesDrawn=1 drawnSerial=[1-9][0-9]*')) -and
             (-not $FreshRegion -or
              $text -match 'H3 fresh region EXPERIMENT status: enabled=1 queries=[1-9][0-9]* clears=[1-9][0-9]* frames=[1-9][0-9]* shapeRejects=[0-9]+ faults=0') -and
             (-not $ProbeClearance -or
@@ -956,6 +965,10 @@ public static class HaloMccVrContactInput {
         }
     }
     $text = Get-NewLogText $runtimeLog $startedUtc
+    if ($SelectionProbe -and ($text -match 'H3 selection PROBE status:.*faults=[1-9][0-9]*' -or
+        $text -notmatch 'H3 selection PROBE record:.*matchesDrawn=1 drawnSerial=[1-9][0-9]*')) {
+        throw 'Selection probe faulted or did not pair a selection with the published final palette.'
+    }
     if ($FreshRegion -and $text -match 'H3 fresh region EXPERIMENT status:.*faults=[1-9][0-9]*') {
         throw 'Fresh-region experiment faulted; its rendering permission disabled itself.'
     }
@@ -1042,6 +1055,7 @@ $result = [ordered]@{
     passed = $passed
     hand_recovery_requested = [bool]$TestHandRecovery
     keyboard_gamepad_requested = [bool]$KeyboardGamepad
+    selection_probe_requested = [bool]$SelectionProbe
     post_pass_hold_seconds = $PostPassHoldSeconds
     fresh_region_requested = [bool]$FreshRegion
     source_commit = $runtimeSourceCommit
