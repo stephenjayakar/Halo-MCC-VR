@@ -90,6 +90,7 @@ struct PhysicalContactVolumeSweep
     float progress = 0;
     uint32_t queries = 0;
     PhysicalContactVolumeCast contact{};
+    float surfaceDistance = 0; // First contact plane, with cast radius removed.
 };
 
 // The caller MUST establish that the entire starting cover (including the
@@ -132,6 +133,7 @@ inline PhysicalContactVolumeSweep PhysicalContactSweepVolume(
         {
             const auto target = PhysicalContactVolumePathAt(path,desired);
             PhysicalContactVolumeCast earliest{true,false,1,{}};
+            float surfaceDistance = 0;
             float maximumTravel = 0;
             for (uint16_t i=0;i<cover.count;++i)
             {
@@ -151,7 +153,11 @@ inline PhysicalContactVolumeSweep PhysicalContactSweepVolume(
                     (hit.hit && (!PhysicalContactFinite(hit.normal) ||
                      std::abs(PhysicalContactLengthSquared(hit.normal)-1) > .002f)))
                 { result.valid=false; return result; }
-                if (hit.hit && (!earliest.hit || hit.fraction < earliest.fraction)) earliest=hit;
+                if (hit.hit && (!earliest.hit || hit.fraction < earliest.fraction))
+                {
+                    earliest=hit;
+                    surfaceDistance=PhysicalContactDot(start+delta*hit.fraction,hit.normal)-radius;
+                }
             }
             if (!earliest.hit)
             {
@@ -159,7 +165,7 @@ inline PhysicalContactVolumeSweep PhysicalContactSweepVolume(
                 if (result.blocked) return result;
                 break;
             }
-            result.blocked=true; result.contact=earliest;
+            result.blocked=true; result.contact=earliest; result.surfaceDistance=surfaceDistance;
             // Back off by a fraction of the query skin. Recasting, rather than
             // the backoff itself, is what proves the resulting endpoint clear.
             const float retreat = maximumTravel > 0 ? std::min(.1f,skin*.1f/maximumTravel) : 1;
@@ -169,5 +175,73 @@ inline PhysicalContactVolumeSweep PhysicalContactSweepVolume(
             if (attempt==4) { result.exhausted=true; return result; }
         }
     }
+    return result;
+}
+
+struct PhysicalContactVolumeSlide
+{
+    bool valid = false, blocked = false, exhausted = false, leashExceeded = false;
+    PhysicalContactTransform pose{};
+    uint32_t queries = 0, planes = 0;
+};
+
+// Project the requested rigid pose along encountered contact planes, then
+// sweep that changed motion again. The planes propose a destination; only a
+// successful sweep authorizes it. Plane state lasts for this solve only, so
+// retreat never waits for old normals or a release timer to expire.
+template<class Cast>
+inline PhysicalContactVolumeSlide PhysicalContactSlideVolume(
+    const PhysicalContactVolumeCover& cover, const PhysicalContactTransform& from,
+    const PhysicalContactTransform& requested, float skin, float maximumCorrection,
+    uint32_t maximumQueries, Cast&& cast)
+{
+    PhysicalContactVolumeSlide result{};
+    result.pose=from;
+    if (!std::isfinite(maximumCorrection) || maximumCorrection<=0) return result;
+    struct Plane { PhysicalContactVec3 normal; float distance; };
+    std::array<Plane,4> planes{};
+    auto target=requested;
+    for (unsigned iteration=0;iteration<5;++iteration)
+    {
+        if (result.queries>=maximumQueries) { result.exhausted=true; return result; }
+        const auto sweep=PhysicalContactSweepVolume(cover,result.pose,target,skin,
+            maximumQueries-result.queries,cast);
+        result.queries+=sweep.queries;
+        result.valid=sweep.valid;
+        if (!sweep.valid) return result;
+        result.pose=sweep.pose;
+        result.blocked=result.blocked || sweep.blocked;
+        if (sweep.exhausted) { result.exhausted=true; return result; }
+        if (!sweep.blocked) return result;
+        if (result.planes==planes.size()) { result.exhausted=true; return result; }
+        planes[result.planes++]={sweep.contact.normal,sweep.surfaceDistance};
+        target=requested;
+        bool settled=false;
+        for (unsigned pass=0;pass<12;++pass)
+        {
+            float largest=0;
+            for (uint32_t p=0;p<result.planes;++p)
+            {
+                const auto& plane=planes[p];
+                float minimum=INFINITY;
+                for (uint16_t i=0;i<cover.count;++i)
+                {
+                    const auto& sphere=cover.spheres[i];
+                    minimum=std::min(minimum,PhysicalContactDot(
+                        PhysicalContactTransformPoint(target,sphere.center),plane.normal)-
+                        sphere.radius*target.scale);
+                }
+                const float separation=std::max(0.f,plane.distance+skin*1.1f-minimum);
+                if (!std::isfinite(separation)) { result.valid=false; return result; }
+                target.position=target.position+plane.normal*separation;
+                largest=std::max(largest,separation);
+            }
+            if (PhysicalContactLength(target.position-requested.position)>maximumCorrection)
+            { result.leashExceeded=true; return result; }
+            if (largest<=skin*.001f) { settled=true; break; }
+        }
+        if (!settled) { result.exhausted=true; return result; }
+    }
+    result.exhausted=true;
     return result;
 }

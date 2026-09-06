@@ -112,4 +112,42 @@ static void TestPhysicalContactVolumeSweep()
     Check(!PhysicalContactBuildVolumePath(from,scaled,badPath),"scale change requires a new coverage proof");
     auto skewed=to; skewed.left=skewed.forward;
     Check(!PhysicalContactBuildVolumePath(from,skewed,badPath),"skewed palette cannot masquerade as a rigid sweep");
+
+    // A hand target slightly inside the wall must still move tangentially.
+    // Merely stopping at the first fraction would pin the gun at its old Y.
+    cover.count=1; cover.spheres[0]={{},.04f,0};
+    from={}; from.position={.2f,0,0}; to=from; to.position={-.05f,.7f,0};
+    const auto slide=PhysicalContactSlideVolume(cover,from,to,.005f,.3f,128,plane);
+    Check(slide.valid && slide.blocked && !slide.exhausted && !slide.leashExceeded &&
+          std::abs(slide.pose.position.y-.7f)<1.e-6f &&
+          slide.pose.position.x>=.045f && slide.pose.position.x<.046f,
+        "an obstructed hand target slides the weapon along the wall without accumulating positional lag");
+    to=slide.pose; to.position.x=.2f;
+    const auto release=PhysicalContactSlideVolume(cover,slide.pose,to,.005f,.3f,128,plane);
+    Check(release.valid && !release.blocked && release.pose.position.x==.2f && release.planes==0,
+        "sliding does not retain a contact plane after the hand retreats");
+    const auto corner=[&](PhysicalContactVec3 p,PhysicalContactVec3 d,float r) {
+        auto first=plane(p,d,r);
+        if (!first.valid) return first;
+        if (p.y<r-1.e-6f) return PhysicalContactVolumeCast{};
+        if (d.y<0 && p.y+d.y<r)
+        {
+            const float fraction=(r-p.y)/d.y;
+            if (!first.hit || fraction<first.fraction)
+                return PhysicalContactVolumeCast{true,true,fraction,{0,1,0}};
+        }
+        return first;
+    };
+    from.position={.2f,.2f,0}; to=from; to.position={-.05f,-.05f,.7f};
+    const auto cornerSlide=PhysicalContactSlideVolume(cover,from,to,.005f,.3f,128,corner);
+    Check(cornerSlide.valid && cornerSlide.blocked && !cornerSlide.exhausted &&
+          !cornerSlide.leashExceeded && cornerSlide.planes>=2 &&
+          cornerSlide.pose.position.x>=.045f && cornerSlide.pose.position.y>=.045f &&
+          std::abs(cornerSlide.pose.position.z-.7f)<1.e-6f,
+        "two independent wall contacts preserve sliding along the corner's free axis");
+    to.position={-1.f,-1.f,0};
+    const auto leash=PhysicalContactSlideVolume(cover,from,to,.005f,.3f,128,corner);
+    Check(leash.valid && leash.blocked && leash.leashExceeded &&
+          leash.pose.position.x>=.045f && leash.pose.position.y>=.045f,
+        "unreachable hand targets request recovery while keeping the last swept pose outside the wall");
 }

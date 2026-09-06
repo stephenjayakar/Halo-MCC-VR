@@ -305,3 +305,41 @@ null disabled, forcedDriver empty, requireHmd true. No normal weapon rendering
 policy changed. Sliding toward an obstructed hand target, clear-pose lifetime,
 recovery, dynamic impulses, latency and headset acceptance remain unfinished.
 The accepted pointer is unchanged, and no new functionality video is claimed.
+
+## Current-pose integration: verified math boundary and sliding
+
+The normal worker-approved palette adds measured pose age even in free space
+(see HALO3-CLEARANCE-QUERY-EVIDENCE). Moving the new volume solver into that
+worker without changing consumption would preserve that delay. The intended
+integration therefore gathers nearby world geometry on the simulation worker
+and evaluates rigid motion against a bounded immutable snapshot for the current
+rendered controller pose. This is an implementation direction, not installed
+behavior or proof that snapshot lifetime/coverage is already correct.
+
+`tools/verify-h3-feature-math.py` pins both existing module identities and the
+matched first-contact ABI, then checks full reviewed retail unwind ranges and
+hashes for `24B8B0`, its sphere/cylinder/prism helpers `24AFF0`, `24B1F8`,
+`24B5B8`, and normalization helper `212AC`. All direct calls stay in that closure
+except thunk `6F5612`, verified as the `sqrtf` import through
+`api-ms-win-crt-math-l1-1-0.dll`. All RIP-relative data references are read-only
+`.rdata`; the projection helper's static axis table is at `768EF0`. There are
+no indirect branches inside the five reviewed functions, no engine TLS accesses,
+no world/object lookup calls, and no allocation or logging calls. The reviewed
+argument flow reads the supplied feature records and point/vector inputs, uses
+local scratch, and writes the supplied result. Output is recorded in
+`out/research/20260906-native-volume/verified-feature-math.json`.
+
+That permits testing a copied-feature query independently of the gather's
+engine context. It is not a render-thread runtime result. Complete snapshots,
+internal feature-count/index validation, exact query radii, swept-region
+coverage, scene/weapon identity and clear starting poses remain required.
+The gather and point-interior functions must stay on the simulation worker.
+
+`PhysicalContactSlideVolume` now proposes rigid destinations along up to four
+encountered contact planes, then recasts each changed movement before accepting
+it. Planes live only for that solve. Tests independently check one-wall sliding,
+two-wall corner sliding, immediate retreat, and rejection of a correction beyond
+the caller's hand-distance limit. It returns the last swept pose plus a recovery
+flag for an unreachable target; it never teleports to the inside-wall hand pose.
+An outer rendering policy still has to implement that recovery. Both CTest
+suites pass; this helper has not yet been used by the installed runtime.
