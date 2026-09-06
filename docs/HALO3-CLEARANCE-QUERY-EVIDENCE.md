@@ -203,8 +203,8 @@ units to the requested gather radius; the verifier checks both RIP-relative
 float constants. This inflation is native behavior, not a mod tuning value.
 
 The retail routine differs from the official two-ignore-argument narrative:
-its object path reads the first ignore argument at original entry RSP+28
-(1FEDB4), while the second argument's entry RSP+30 slot is overwritten with
+its object path reads the first ignore argument at original entry RSP+30
+(1FEDB4), while the second argument's entry RSP+38 slot is overwritten with
 an instance index at 1FEB90 and reused as local storage. The retail movement
 caller explicitly supplies -1 for the first and does not initialize the
 second. Never assume the retail gather excludes two objects just because
@@ -255,3 +255,41 @@ This is insufficient positive-control evidence. Log SHA-256:
 The next diagnostic candidate queries selected.surface in the wall fixture,
 retains the original pose sampling for controller-contact, and makes the wall
 probe require at least one positive gather. Normal rendering is unchanged.
+
+Corrected positive-control candidate f266cf5953a6dfaac927ed39af0864e0557ec8b1
+built and passed core tests and Reach consistency. Installed DLL independently
+verified: BA9507DA0D7165CD272CB04F905387877018766406856071A5592E7FD10153B9.
+Package: out/candidates/f266cf5-h3-physical-contact-20260905-235540964Z.
+Its first run (20260905-235555466Z-wall) crashed in MCC startup before the
+probe initialized or Halo 3 gameplay began. The visible UE4 Fatal error dialog
+is retained in the menu capture at 20260905-235712104Z-forge-menu-ocr.
+Preserved runtime log SHA-256:
+57B60909C722B1CE3A97FBC5125EA5C613C04602B0EE47694FB03D2044C36647.
+The harness terminated and restored settings before a same-candidate retry.
+No query behavior is inferred from that startup failure.
+
+Documentation correction: the gather first/second ignore slots are entry
+RSP+30/+38, respectively. The earlier +28/+30 text conflated caller stack
+locations with callee entry offsets. The eight-argument C++ probe declaration
+already places these arguments correctly; no implementation change was needed.
+
+### Live positive-control result
+
+Same-candidate retry out/debug-openxr/20260905-235821818Z-wall-result.json
+passed on Steam / SteamVR null driver / Null Model Number, 23:58:27-23:59:54 UTC.
+All 32 queries returned gathered=1, counts within bounds, and faulted=0.
+Twenty point queries hit; observed result types were 0, 1 and 4. At the known
+structure surface (-9.695743,4.401137,8.300009), structure-only queries returned
+counts 0/0/1; including objects produced counts such as 1/12/14 and 11/33/29.
+Combined query and bounds-check cost: median 48.85 us, observed p95 59.1 us,
+maximum 62.3 us. Preserved log SHA-256:
+62AE9555EA56588D8C41E9208E09393C39F94A1BB475FF97C78CD50E4EB8A2B9.
+
+This validates bounded outputs and positive/negative behavior of the probe's
+call shape in the tested scene. It does not certify all geometry categories,
+rendered motion between physics ticks, whole-weapon clearance, or headset
+performance. Rendering still uses the existing approval policy. Both native
+wall/fixed-object fixture checks passed separately. No demo video is claimed
+for this diagnostic. MCC and SteamVR were closed by the harness; original
+SteamVR settings were independently verified restored, SHA-256
+175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E.
