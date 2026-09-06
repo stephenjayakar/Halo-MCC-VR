@@ -77,8 +77,9 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     constexpr bool kEnableHalo3WorldVolumeExperiment = false;
     const bool worldFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_VOLUME", value, 2) == 1 && value[0] == L'1';
-    // Disabled after unowned sword fallback penetrated the Guardian doorway.
-    constexpr bool kEnableHalo3WorldPartitionsExperiment = false;
+    // Opt-in candidate: independently revalidate historical poses after a
+    // shape/reset change, including the complete incoming weapon cover.
+    constexpr bool kEnableHalo3WorldPartitionsExperiment = true;
     const bool partitionsFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS", value, 2) == 1 && value[0] == L'1';
     const bool partitions = kEnableHalo3WorldPartitionsExperiment && partitionsFlag;
@@ -240,7 +241,8 @@ PhysicalContactVolumeCast Halo3CastNativeVolume(PhysicalContactVec3 start,
 // expanded by this sphere's radius. Nearby features alone are not overlap.
 // First-hit with zero motion cannot replace point membership: it filters by
 // movement direction. All native work remains on the simulation worker.
-bool Halo3NativeVolumeSeedClear(PhysicalContactVec3 center,float radius,int32_t ignored,uint64_t flags)
+bool Halo3NativeVolumeSeedClear(PhysicalContactVec3 center,float radius,int32_t ignored,uint64_t flags,
+    uint32_t expectedActive=0)
 {
     if (!g_halo3ClearancePoint || !g_halo3ClearanceGather || !g_halo3ClearanceActiveMask ||
         !PhysicalContactFinite(center) || !std::isfinite(radius) || radius<=0 || radius>10) return false;
@@ -249,7 +251,7 @@ bool Halo3NativeVolumeSeedClear(PhysicalContactVec3 center,float radius,int32_t 
     __try
     {
         const uint32_t active=*g_halo3ClearanceActiveMask;
-        if (!active || (active&0xFFFF0000u)) return false;
+        if (!active || (active&0xFFFF0000u) || (expectedActive && active!=expectedActive)) return false;
         int32_t type=0;
         if (g_halo3ClearancePoint(flags,&center.x,ignored,-1,&type)) return false;
         const bool gathered=g_halo3ClearanceGather(flags,&center.x,radius,0,radius,ignored,-1,features);

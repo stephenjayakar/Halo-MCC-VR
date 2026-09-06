@@ -1674,3 +1674,30 @@ swept-region coverage must remain. This is a proposed next action, not implement
 behavior or evidence of a solved recovery path. Goal and accepted pointer remain
 unchanged; Forge/Campaign, sword, props/NPCs and headset performance acceptance
 are still required.
+
+#### Historical full-cover seed revalidation candidate (2026-09-06)
+
+The 08d6675 Guardian doorway run recorded new shape identity at unchanged reset,
+then missing-seed fallback with submitted blade penetration. This candidate
+re-tests a historical same-generation/weapon/tag rigid transform against every
+sphere of the incoming cover and current native scene. Shape/reset approval is
+not inherited. The candidate must have identical scale and be within 0.60 m of
+the raw root (twice the existing visual leash); all complete candidate-to-raw
+regions are gathered before a candidate can publish. Each native seed query
+must match the gathered active structure, with the existing reset/epoch checks
+still required at publication. A rejected candidate cannot seed the new shape.
+Raw clearance recovery and the 0.30 m visual leash remain.
+
+Revalidation uses the existing expanded-feature membership proof, on the
+simulation worker only. Cold counters distinguish whole-cover tests, clears,
+and rejections. Partitions are re-enabled only through the diagnostic opt-in;
+normal launches retain the prior contact path. This also exercises the separate
+65bf5c5 motion timestamp fix for the first time; no runtime result is yet claimed.
+
+A two-prong analytic wall fixture checks raw blade penetration despite a clear
+handle, full new-cover seed approval, rejection after further blade growth or
+scene movement, bounded recovery sweep regions, and immediate withdrawal.
+The initial Release build and both CTests passed; final packaging must rebuild
+a subsequent invalid-radius guard and its negative control before runtime.
+This is a recovery experiment, not headset acceptance or comprehensive surface
+coverage proof. The accepted pointer is unchanged.

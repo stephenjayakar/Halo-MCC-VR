@@ -41,6 +41,7 @@ std::atomic<uint64_t> g_halo3WorldUnknown{0},g_halo3WorldShapeRejects{0},g_halo3
 std::atomic<uint64_t> g_halo3WorldQueries{0},g_halo3WorldExhausted{0};
 std::atomic<uint64_t> g_halo3WorldClockAdvances{0};
 std::atomic<uint64_t> g_halo3WorldCoverReused{0},g_halo3WorldCoverChanged{0};
+std::atomic<uint64_t> g_halo3WorldSeedRetests{0},g_halo3WorldSeedRetestClear{0},g_halo3WorldSeedRetestRejected{0};
 std::atomic<uint64_t> g_halo3WorldCoverChecks{0},g_halo3WorldCoverTicks{0},g_halo3WorldCoverMaxTicks{0};
 std::atomic<uint64_t> g_halo3WorldSolveMaxTicks{0},g_halo3WorldSolveTicks{0},g_halo3WorldSolveCount{0};
 std::atomic<uint64_t> g_halo3WorldPartitionCalls{0},g_halo3WorldPartitionRegions{0};
@@ -474,6 +475,14 @@ void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
     auto safe=g_halo3WorldPoses.read();
     const bool sameSafe=safe && safe.get().generation==generation && safe.get().reset==reset &&
         safe.get().weapon==weapon && safe.get().tag==tag && safe.get().shape==c.shape;
+    // Shape/reset identity is deliberately not inherited. A nearby same-weapon
+    // transform can be re-proved using today's complete cover and native scene.
+    // Bound recovery to twice the visual leash; farther history cannot make
+    // native gathering grow with an arbitrary old controller displacement.
+    const bool retestSafe=c.partitioned && !sameSafe && safe &&
+        safe.get().generation==generation && safe.get().weapon==weapon && safe.get().tag==tag &&
+        PhysicalContactVolumeRigid(safe.get().root) && safe.get().root.scale==raw.scale &&
+        PhysicalContactLength(safe.get().root.position-raw.position)<=.60f*worldScale;
     bool gathered=false;
     if (c.partitioned)
     {
@@ -483,7 +492,7 @@ void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
         // raw-only regions can omit that start while raw is inside a wall,
         // leaving every subsequent solve unable to advance or recover.
         // The existing region/count/query budgets still bound all work.
-        const auto from=sameSafe ? safe.get().root : raw;
+        const auto from=(sameSafe || retestSafe) ? safe.get().root : raw;
         const bool planned=PhysicalContactBuildVolumeRegions(c.cover,from,raw,c.skin,
             .40f*worldScale,.20f*worldScale,.08f*worldScale,c.regions);
         if (!planned) g_halo3WorldPartitionPlansFailed.fetch_add(1,std::memory_order_relaxed);
@@ -509,17 +518,25 @@ void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
         c.seed=safe.get().root;
         c.seeded=true;
     }
+    if (retestSafe)
+    {
+        g_halo3WorldSeedRetests.fetch_add(1,std::memory_order_relaxed);
+        const bool clear=PhysicalContactVolumeSeedClear(c.cover,safe.get().root,c.skin,
+            [&](PhysicalContactVec3 center,float radius) {
+                return Halo3NativeVolumeSeedClear(center,radius,ignored,9,c.active);
+            });
+        (clear ? g_halo3WorldSeedRetestClear : g_halo3WorldSeedRetestRejected)
+            .fetch_add(1,std::memory_order_relaxed);
+        if (clear) { c.seed=safe.get().root; c.seeded=true; }
+    }
     // Re-seed only at an independently clear raw pose. A stationary native
     // first-hit query is directional and cannot prove an inside-wall reset.
-    if (!carry || PhysicalContactLength(c.seed.position-raw.position)>.30f*worldScale)
+    if (!c.seeded || PhysicalContactLength(c.seed.position-raw.position)>.30f*worldScale)
     {
-        bool clear=true;
-        for (uint16_t i=0;i<c.cover.count && clear;++i)
-        {
-            const auto& sphere=c.cover.spheres[i];
-            clear=Halo3NativeVolumeSeedClear(PhysicalContactTransformPoint(raw,sphere.center),
-                c.radii[sphere.child],ignored,9);
-        }
+        const bool clear=PhysicalContactVolumeSeedClear(c.cover,raw,c.skin,
+            [&](PhysicalContactVec3 center,float radius) {
+                return Halo3NativeVolumeSeedClear(center,radius,ignored,9,c.active);
+            });
         if (clear)
         { c.seed=raw; c.seeded=true; g_halo3WorldSeeds.fetch_add(1,std::memory_order_relaxed); }
     }
@@ -685,6 +702,8 @@ void Halo3LogWorldVolume()
         g_halo3SeedFeatureClear.load(),g_halo3SeedFeatureRejected.load());
     LOG("H3 world motion clock: futureSamplesSkipped=%llu; newer motion samples do not expire by unsigned age wrap",
         g_halo3ContactFutureMotionSkips.load());
+    LOG("H3 world historical seed: tested=%llu clear=%llu rejected=%llu; full current cover and scene revalidation, 0.60m candidate bound",
+        g_halo3WorldSeedRetests.load(),g_halo3WorldSeedRetestClear.load(),g_halo3WorldSeedRetestRejected.load());
     LOG("H3 world handoff counts: lost=%llu visibleOverLeashWithoutLoss=%llu hidden=%llu controls=%llu clockCases=%llu missingSeed=%llu",
         g_halo3WorldHandoffCounts[0].load(),g_halo3WorldHandoffCounts[1].load(),
         g_halo3WorldHandoffCounts[2].load(),g_halo3WorldHandoffCounts[3].load(),g_halo3WorldHandoffCounts[4].load(),

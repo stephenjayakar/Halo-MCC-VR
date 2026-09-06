@@ -20,6 +20,28 @@ inline bool PhysicalContactVolumeRigid(const PhysicalContactTransform& t)
         PhysicalContactDot(PhysicalContactCross(t.forward,t.left),t.up) > .9999f;
 }
 
+// A previous pose is only a location to test when the weapon cover changes.
+// Every ball of the incoming cover must be clear in the current scene; an old
+// shape's approval (or a clear handle with an overlapping blade) is insufficient.
+template<class ClearSphere>
+inline bool PhysicalContactVolumeSeedClear(const PhysicalContactVolumeCover& cover,
+    const PhysicalContactTransform& pose,float skin,ClearSphere&& clearSphere)
+{
+    if (!PhysicalContactVolumeRigid(pose) || !cover.count ||
+        cover.count>cover.kMaximumSpheres || !std::isfinite(skin) || skin<0 || skin>100) return false;
+    for (uint16_t i=0;i<cover.count;++i)
+    {
+        const auto& sphere=cover.spheres[i];
+        if (!std::isfinite(sphere.radius) || sphere.radius<=0 || sphere.radius>100 ||
+            sphere.child>=PhysicalContactCompoundShape::kMaximumChildren) return false;
+        const float radius=sphere.radius*pose.scale+skin;
+        const auto center=PhysicalContactTransformPoint(pose,sphere.center);
+        if (!PhysicalContactFinite(center) || !std::isfinite(radius) || radius<=0 ||
+            !clearSphere(center,radius)) return false;
+    }
+    return true;
+}
+
 inline bool PhysicalContactBuildVolumePath(const PhysicalContactTransform& from,
     const PhysicalContactTransform& to, PhysicalContactVolumePath& path)
 {

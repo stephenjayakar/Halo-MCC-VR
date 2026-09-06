@@ -175,6 +175,63 @@ static void TestPhysicalContactRecoveryRegions()
         "recovery contact releases immediately without replaying an old contact plane");
 }
 
+static void TestPhysicalContactChangedCoverSeed()
+{
+    PhysicalContactVolumeCover cover{};
+    for (unsigned side=0;side<2;++side) for (unsigned i=0;i<10;++i)
+        cover.spheres[cover.count++]={{i*.1f,side ? -.08f : .08f,0},.075f,static_cast<uint16_t>(side)};
+    PhysicalContactTransform historical{},raw{};
+    historical.position={-.15f,0,0}; raw.position={.15f,0,0};
+    const auto outsideWall=[](PhysicalContactVec3 center,float radius) {
+        return center.x+radius<1.f;
+    };
+    Check(!PhysicalContactVolumeSeedClear(cover,raw,.005f,outsideWall),
+        "clear sword handle cannot approve a new blade penetrating the doorway");
+    unsigned checked=0;
+    Check(PhysicalContactVolumeSeedClear(cover,historical,.005f,
+        [&](PhysicalContactVec3 center,float radius) { ++checked; return outsideWall(center,radius); }) &&
+        checked==cover.count,"historical seed revalidation checks the entire new two-prong cover");
+    auto grown=cover; grown.spheres[grown.count-1].center.x=1.2f;
+    Check(!PhysicalContactVolumeSeedClear(grown,historical,.005f,outsideWall),
+        "a formerly safe pose is rejected when the incoming blade extends into the wall");
+    Check(!PhysicalContactVolumeSeedClear(cover,historical,.005f,
+        [](PhysicalContactVec3 center,float radius) { return center.x+radius<.7f; }),
+        "scene geometry moving into historical clearance prevents seed recovery");
+    PhysicalContactVolumeRegions regions{};
+    Check(PhysicalContactBuildVolumeRegions(cover,historical,raw,.005f,.4f,.2f,.08f,regions),
+        "new blade recovery path fits bounded complete native regions");
+    const auto sweep=[&](const PhysicalContactTransform& from,const PhysicalContactTransform& to) {
+        return PhysicalContactSlideVolume(cover,from,to,.005f,.3f,192,
+            [&](PhysicalContactVec3 start,PhysicalContactVec3 motion,float radius) {
+                PhysicalContactVolumeCast hit{};
+                for (uint32_t i=0;i<regions.count;++i)
+                    hit.valid=hit.valid || PhysicalContactVolumeRegionContains(
+                        regions.regions[i],start,start+motion,radius);
+                if (!hit.valid) return hit;
+                hit.fraction=1;
+                if (motion.x>0 && start.x+motion.x+radius>=1.f) {
+                    hit.hit=true; hit.normal={-1,0,0};
+                    hit.fraction=std::clamp((1.f-radius-start.x)/motion.x,0.f,1.f);
+                }
+                return hit;
+            });
+    };
+    const auto contact=sweep(historical,raw);
+    Check(contact.valid && contact.blocked && !contact.leashExceeded && !contact.exhausted &&
+        PhysicalContactVolumeSeedClear(cover,contact.pose,.0049f,outsideWall),
+        "revalidated new blade reaches a clear doorway contact without losing ownership");
+    const auto retreat=sweep(contact.pose,historical);
+    Check(retreat.valid && !retreat.blocked && !retreat.exhausted &&
+        PhysicalContactLength(retreat.pose.position-historical.position)<1.e-6f,
+        "recovered blade follows the hand immediately on withdrawal");
+    PhysicalContactVolumeCover empty{};
+    Check(!PhysicalContactVolumeSeedClear(empty,historical,0,outsideWall),
+        "missing geometry never revalidates a historical pose");
+    auto invalid=cover; invalid.spheres[0].radius=-.001f;
+    Check(!PhysicalContactVolumeSeedClear(invalid,historical,.005f,outsideWall),
+        "query skin cannot mask an invalid negative cover radius");
+}
+
 static void TestPhysicalContactCoverReuse()
 {
     auto shape=std::make_unique<PhysicalContactCompoundShape>();
@@ -287,6 +344,7 @@ static void TestPhysicalContactVolumeSweep()
 {
     TestHalo3ExpandedFeatureClearance();
     TestPhysicalContactCoverReuse();
+    TestPhysicalContactChangedCoverSeed();
     TestPhysicalContactRecoveryRegions();
     TestPhysicalContactVolumeRegions();
     TestContactSnapshotLifetime();
