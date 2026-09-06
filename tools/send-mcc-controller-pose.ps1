@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
-    [ValidateRange(-1.5,1.5)][float]$X=.18,
-    [ValidateRange(-1.8,.8)][float]$Y=-.18,
-    [ValidateRange(-1.6,.4)][float]$Z=-.65,
+    [ValidateRange(-1.5,1.5)][double]$X=.18,
+    [ValidateRange(-1.8,.8)][double]$Y=-.18,
+    [ValidateRange(-1.6,.4)][double]$Z=-.65,
     [ValidateRange(-180,180)][float]$YawDegrees=0,
     [ValidateRange(-180,180)][float]$PitchDegrees=0,
     [ValidateRange(-180,180)][float]$RollDegrees=0,
