@@ -8,6 +8,8 @@ Halo3ClearanceGatherFn g_halo3ClearanceGather = nullptr;
 using Halo3VolumeSolveFn = uint16_t(__fastcall*)(const float*, const float*, const void*,
     float*, float*, uint16_t, void*);
 Halo3VolumeSolveFn g_halo3VolumeSolve = nullptr;
+using Halo3VolumeFirstHitFn = bool(__fastcall*)(const void*, const float*, const float*, void*);
+Halo3VolumeFirstHitFn g_halo3VolumeFirstHit = nullptr;
 std::atomic<bool> g_halo3VolumeProbeEnabled{false};
 struct Halo3VolumeProbeRecord
 {
@@ -19,6 +21,11 @@ struct Halo3VolumeProbeRecord
     uint16_t featureCounts[3]{}, collisions{};
     bool interior{}, gathered{}, bounded{}, faulted{};
     double microseconds{};
+    bool coverBuilt{}, coverSeed{}, coverValid{}, coverBlocked{}, coverExhausted{};
+    uint16_t coverCount{};
+    uint32_t coverQueries{};
+    float coverProgress{}, coverClearance{};
+    double coverMicroseconds{};
 };
 std::array<Halo3VolumeProbeRecord, 32> g_halo3VolumeProbeRecords{};
 std::array<std::atomic<uint32_t>, 32> g_halo3VolumeProbeStates{};
@@ -106,9 +113,11 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     if (volumeRequested && g_halo3ClearanceActiveMask)
     {
         const uintptr_t solver = unique("48 8B C4 4C 89 40 18 55 53 56 57 41 54 41 55 41 56 41 57 48 8D A8 38 FF FF FF 48 81 EC 88 01 00 00");
-        if (solver && solver - base == 0x1FEF30)
+        const uintptr_t firstHit = unique("48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 55 41 54 41 55 41 56 41 57 48 8B EC 48 81 EC 80 00 00 00 0F 29 70 C8 4D 8B F0 F3 0F 10 35 97 BC 5F 00 4C 8B FA");
+        if (solver && solver - base == 0x1FEF30 && firstHit && firstHit-base == 0x24B8B0)
         {
             g_halo3VolumeSolve = reinterpret_cast<Halo3VolumeSolveFn>(solver);
+            g_halo3VolumeFirstHit = reinterpret_cast<Halo3VolumeFirstHitFn>(firstHit);
             g_halo3VolumeProbeEnabled.store(true, std::memory_order_release);
             LOG("H3 volume PROBE enabled: 32 native sphere-motion observations; no production pose changes");
         }
@@ -116,9 +125,140 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     }
 }
 
+// Worker-only native adapter. The gather uses explicit owner exclusion because
+// the retail convenience movement wrapper drops that argument. See the pinned
+// first-contact ABI and record writes in HALO3-NATIVE-VOLUME-EVIDENCE.md.
+PhysicalContactVolumeCast Halo3CastNativeVolume(PhysicalContactVec3 start,
+    PhysicalContactVec3 motion, float radius, int32_t ignored, uint64_t flags)
+{
+    PhysicalContactVolumeCast result{};
+    if (!g_halo3VolumeFirstHit || !g_halo3ClearanceGather || !g_halo3ClearanceActiveMask ||
+        !PhysicalContactFinite(start) || !PhysicalContactFinite(motion) ||
+        !std::isfinite(radius) || radius <= 0 || radius > 10) return result;
+    const auto center=start+motion*.5f;
+    const float searchRadius=radius+PhysicalContactLength(motion)*.5f;
+    if (!PhysicalContactFinite(center) || !std::isfinite(searchRadius) || searchRadius>20) return result;
+    alignas(16) unsigned char features[0xC490];
+    alignas(16) unsigned char record[48+64];
+    memset(features,0xCD,sizeof(features)); memset(record,0xCD,sizeof(record));
+    __try
+    {
+        const uint32_t active=*g_halo3ClearanceActiveMask;
+        if (!active || (active&0xFFFF0000u)) return result;
+        const bool gathered=g_halo3ClearanceGather(flags,&center.x,searchRadius,0,radius,ignored,-1,features);
+        uint16_t counts[3]{}; memcpy(counts,features,sizeof(counts));
+        // A full feature category may be truncated. It is not a clear result.
+        if (counts[0]>=256 || counts[1]>=256 || counts[2]>=256) return result;
+        for (size_t i=0xC408;i<sizeof(features);++i) if (features[i]!=0xCD) return result;
+        if (gathered)
+        {
+            result.hit=g_halo3VolumeFirstHit(features,&start.x,&motion.x,record);
+            memcpy(&result.fraction,record+0x10,4);
+            PhysicalContactVec3 point{}; memcpy(&point,record+0x14,sizeof(point));
+            if (!std::isfinite(result.fraction) || result.fraction<0 || result.fraction>1 ||
+                !PhysicalContactFinite(point) ||
+                PhysicalContactLength(point-(start+motion*result.fraction))>.001f) return {};
+            if (result.hit)
+            {
+                memcpy(&result.normal,record+0x20,sizeof(result.normal));
+                float distance=0; memcpy(&distance,record+0x2C,4);
+                if (!PhysicalContactFinite(result.normal) || !std::isfinite(distance) ||
+                    std::abs(PhysicalContactLengthSquared(result.normal)-1)>.002f) return {};
+            }
+            for (size_t i=48;i<sizeof(record);++i) if (record[i]!=0xCD) return {};
+        }
+        else if (counts[0] || counts[1] || counts[2]) return {};
+        if (active!=*g_halo3ClearanceActiveMask) return {};
+        result.valid=true;
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return {}; }
+    return result;
+}
+
+// Empty broadphase plus outside point is a conservative seed only. Nonempty
+// features mean unknown, not overlap. A zero-motion first-hit cast cannot
+// replace this test: the native query filters contacts by movement direction.
+bool Halo3NativeVolumeSeedClear(PhysicalContactVec3 center,float radius,int32_t ignored,uint64_t flags)
+{
+    if (!g_halo3ClearancePoint || !g_halo3ClearanceGather || !g_halo3ClearanceActiveMask ||
+        !PhysicalContactFinite(center) || !std::isfinite(radius) || radius<=0 || radius>10) return false;
+    alignas(16) unsigned char features[0xC490];
+    memset(features,0xCD,sizeof(features));
+    __try
+    {
+        const uint32_t active=*g_halo3ClearanceActiveMask;
+        if (!active || (active&0xFFFF0000u)) return false;
+        int32_t type=0;
+        if (g_halo3ClearancePoint(flags,&center.x,ignored,-1,&type)) return false;
+        const bool gathered=g_halo3ClearanceGather(flags,&center.x,radius,0,0,ignored,-1,features);
+        uint16_t counts[3]{}; memcpy(counts,features,sizeof(counts));
+        if (gathered || counts[0] || counts[1] || counts[2] || active!=*g_halo3ClearanceActiveMask) return false;
+        for (size_t i=0xC408;i<sizeof(features);++i) if (features[i]!=0xCD) return false;
+        return true;
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+void Halo3ProbeWeaponVolume(Halo3VolumeProbeRecord& r,
+    const PhysicalContactCompoundShape& shape, PhysicalContactTransform from,
+    PhysicalContactVec3 surface, PhysicalContactVec3 normal,float worldScale,int32_t ignored)
+{
+    LARGE_INTEGER begin{},end{},frequency{};
+    QueryPerformanceFrequency(&frequency); QueryPerformanceCounter(&begin);
+    PhysicalContactVolumeCover cover{};
+    r.coverBuilt=PhysicalContactVolumeRigid(from) &&
+        PhysicalContactBuildVolumeCover(shape,.12f*worldScale/from.scale,cover);
+    if (!r.coverBuilt) return;
+    r.coverCount=cover.count;
+    const float skin=.005f*worldScale;
+    float minimum=FLT_MAX;
+    for (uint16_t i=0;i<cover.count;++i)
+        minimum=std::min(minimum,PhysicalContactDot(
+            PhysicalContactTransformPoint(from,cover.spheres[i].center)-surface,normal)-
+            cover.spheres[i].radius*from.scale-skin);
+    from.position=from.position+normal*(.60f*worldScale-minimum);
+    constexpr uint64_t flags=9ull|(0x7FFFull<<32);
+    r.coverSeed=true;
+    for (uint16_t i=0;i<cover.count && r.coverSeed;++i)
+        r.coverSeed=Halo3NativeVolumeSeedClear(PhysicalContactTransformPoint(from,cover.spheres[i].center),
+            cover.spheres[i].radius*from.scale+skin,ignored,flags);
+    if (r.coverSeed)
+    {
+        auto to=from;
+        to.position=to.position+normal*((r.mode==1 ? .20f : -.90f)*worldScale);
+        if (r.mode==2)
+        {
+            const auto tangent=PhysicalContactNormalize(PhysicalContactCross(normal,
+                std::abs(normal.z)<.9f ? PhysicalContactVec3{0,0,1}:PhysicalContactVec3{0,1,0}));
+            to.position=to.position+tangent*(.40f*worldScale);
+        }
+        if (r.mode==3)
+        {
+            to.forward=PhysicalContactRotateAxisAngle(from.forward,{0,0,1},1.5707963f);
+            to.left=PhysicalContactRotateAxisAngle(from.left,{0,0,1},1.5707963f);
+            to.up=PhysicalContactRotateAxisAngle(from.up,{0,0,1},1.5707963f);
+        }
+        const auto swept=PhysicalContactSweepVolume(cover,from,to,skin,192,
+            [&](PhysicalContactVec3 start,PhysicalContactVec3 motion,float radius) {
+                return Halo3CastNativeVolume(start,motion,radius,ignored,flags);
+            });
+        r.coverValid=swept.valid; r.coverBlocked=swept.blocked; r.coverExhausted=swept.exhausted;
+        r.coverQueries=swept.queries; r.coverProgress=swept.progress;
+        minimum=FLT_MAX;
+        for (uint16_t i=0;i<cover.count;++i)
+            minimum=std::min(minimum,PhysicalContactDot(
+                PhysicalContactTransformPoint(swept.pose,cover.spheres[i].center)-surface,normal)-
+                cover.spheres[i].radius*swept.pose.scale);
+        r.coverClearance=minimum/worldScale;
+    }
+    QueryPerformanceCounter(&end);
+    if (frequency.QuadPart>0) r.coverMicroseconds=(end.QuadPart-begin.QuadPart)*1.e6/frequency.QuadPart;
+}
+
 void Halo3RunVolumeProbe(uint64_t nowMs, PhysicalContactVec3 surface,
     PhysicalContactVec3 normal, PhysicalContactVec3 camera, int32_t surfaceType,
-    float worldScale, int32_t ignoredPlayer)
+    float worldScale, int32_t ignoredPlayer,
+    const PhysicalContactCompoundShape& shape, const PhysicalContactTransform& weapon)
 {
     if (!g_halo3VolumeProbeEnabled.load(std::memory_order_acquire) ||
         !PhysicalContactFinite(surface) || !PhysicalContactFinite(normal) ||
@@ -170,6 +310,7 @@ void Halo3RunVolumeProbe(uint64_t nowMs, PhysicalContactVec3 surface,
                 0.0f, r.radius, ignoredPlayer, -1, features);
             memcpy(r.featureCounts, features, sizeof(r.featureCounts));
             r.bounded = r.featureCounts[0] <= 256 && r.featureCounts[1] <= 256 && r.featureCounts[2] <= 256;
+            for (size_t i = 0xC408; i < sizeof(features); ++i) r.bounded = r.bounded && features[i] == 0xCD;
             if (r.gathered && r.bounded)
                 r.collisions = g_halo3VolumeSolve(&r.start.x, &r.motion.x, features,
                     &r.result.x, &r.velocity.x, 16, collisions);
@@ -183,6 +324,8 @@ void Halo3RunVolumeProbe(uint64_t nowMs, PhysicalContactVec3 surface,
     QueryPerformanceCounter(&end);
     if (frequency.QuadPart > 0) r.microseconds = (end.QuadPart - begin.QuadPart) * 1.0e6 / frequency.QuadPart;
     r.clearance = PhysicalContactDot(r.result - surface, normal) / worldScale;
+    if (!r.faulted && r.bounded)
+        Halo3ProbeWeaponVolume(r,shape,weapon,surface,normal,worldScale,ignoredPlayer);
     if (r.faulted || !r.bounded) g_halo3VolumeProbeEnabled.store(false, std::memory_order_release);
     g_halo3VolumeProbeStates[index].store(2, std::memory_order_release);
 }
@@ -352,6 +495,9 @@ void Halo3LogClearanceProbe()
             r.result.x, r.result.y, r.result.z, r.velocity.x, r.velocity.y, r.velocity.z,
             r.interior, r.gathered, r.featureCounts[0], r.featureCounts[1], r.featureCounts[2],
             r.collisions, r.clearance, r.bounded, r.faulted, r.microseconds);
+        LOG("H3 whole volume PROBE: index=%u mode=%u type=%d built=%d seed=%d valid=%d blocked=%d exhausted=%d spheres=%u queries=%u progress=%.6f clearanceM=%.6f costUs=%.1f",
+            index,r.mode,r.surfaceType,r.coverBuilt,r.coverSeed,r.coverValid,r.coverBlocked,r.coverExhausted,
+            r.coverCount,r.coverQueries,r.coverProgress,r.coverClearance,r.coverMicroseconds);
     }
     if (g_halo3FreshRegionEnabled.load() || g_halo3FreshRegionFaults.load())
         LOG("H3 fresh region EXPERIMENT status: enabled=%d queries=%llu clears=%llu frames=%llu shapeRejects=%llu faults=%llu",

@@ -203,3 +203,46 @@ Integration must still maintain a clear start, cover the actual rotation path,
 recast any changed motion, bound query work, and keep movable-object impulses
 and melee as separate features. The native map geometry does not establish
 collision for purely visual meshes that the engine never gave a collider.
+
+## Rigid sweep kernel and opt-in retail integration
+
+`physical_contact_volume_sweep.h` now consumes a bounded enclosing cover and a
+first-contact callback. It extracts the relative world rotation, follows its
+shortest rigid arc, and subdivides by the fixed skin's arc/chord error. All
+spheres share one accepted transform. A blocked fractional rotation is recast
+from the last proved pose before it can be accepted. Query failures and work
+budget exhaustion never admit the untested remainder. Scale changes and skewed
+bases require a new proof. The caller must separately prove the starting cover,
+including the fixed skin, is clear in the current world.
+
+Tests use analytic half-spaces and arbitrary independent axis-angle rotations.
+They check whole-body stopping at the independently calculated first sphere
+contact, tangential movement, immediate retreat, exact unobstructed endpoints,
+budget exhaustion, query failure, and a 120-degree rotation whose endpoints are
+both clear but whose middle passes through the wall. Every sampled point on the
+accepted portion of that rotation stays clear. Release and both CTest suites
+pass. This kernel currently stops at contact; an outer slide/hand-target policy
+and normal palette ownership are not implemented by this change.
+
+The opt-in `-ProbeVolume` path now binds the verified first-contact function and
+calls this kernel with the current weapon's entire authored convex cover. It
+attempts a conservative seed with point-outside plus empty gathered features
+for every sphere, including the skin. Nonempty broadphase is unknown and skips
+that observation. Native casts reject a saturated feature category, validate
+canaries before the first-hit call, validate returned fraction/point/normal,
+and check active-structure continuity. They remain on the simulation worker.
+
+For each of the existing 32 observations, the whole-weapon fixture starts with
+its nearest covered point 60 cm in front of the reference plane and requests
+90 cm inward travel, 20 cm retreat, inward/tangential travel, or inward travel
+with a 90-degree yaw. It uses 12 cm local-axis slabs converted through live
+scale, 5 mm skin, and a maximum of 192 first-hit queries per observation. The
+`H3 whole volume PROBE` record reports cover construction, seed admission,
+validity, blocking, work exhaustion, sphere/query counts, rigid progress,
+reference-plane clearance and total cost including seeding.
+
+The harness now requires both a seeded inward block and a seeded full retreat,
+in addition to the original 32 bounded native sphere observations. A seeded
+query failure fails the run. These conditions do not prove universal scene
+coverage or performance; rotation results, costs and skipped seeds still need
+inspection. This remains an opt-in probe without production pose changes.

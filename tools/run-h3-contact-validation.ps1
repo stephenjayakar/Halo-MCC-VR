@@ -976,7 +976,9 @@ public static class HaloMccVrContactInput {
             (-not $ProbeClearance -or
              $text -match 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0') -and
             (-not $ProbeVolume -or
-             $text -match 'H3 volume PROBE: index=31 .*bounded=1 faulted=0') -and
+             ($text -match 'H3 volume PROBE: index=31 .*bounded=1 faulted=0' -and
+              $text -match 'H3 whole volume PROBE:.*mode=0 .*seed=1 valid=1 blocked=1' -and
+              $text -match 'H3 whole volume PROBE:.*mode=1 .*seed=1 valid=1 blocked=0 exhausted=0 .*progress=1\.000000')) -and
             (-not $TestHandRecovery -or
              $text -match 'H3 contact hand recovery: resets=[1-9][0-9]* checks=[1-9][0-9]* ')
     } $ValidationTimeoutSeconds "Halo 3 $Test did not reach its pass condition."
@@ -1007,8 +1009,9 @@ public static class HaloMccVrContactInput {
         throw 'Clearance probe did not complete 32 bounded, fault-free observations.'
     }
     if ($ProbeVolume -and ($text -match 'H3 volume PROBE:.*(?:bounded=0|faulted=1)' -or
+        $text -match 'H3 whole volume PROBE:.*seed=1 valid=0' -or
         $text -notmatch 'H3 volume PROBE: index=31 .*bounded=1 faulted=0')) {
-        throw 'Native volume probe did not complete 32 bounded, fault-free observations.'
+        throw 'Native volume probe did not complete bounded observations or a seeded whole-volume query failed.'
     }
     if ($ProbeClearance -and $Test -eq 'wall' -and
         $text -notmatch 'H3 clearance PROBE sample:.*gathered=1.*bounds=1 faulted=0') {

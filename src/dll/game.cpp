@@ -41,6 +41,7 @@
 #include "../common/odst_bringup_logic.h"
 #include "../common/odst_vehicle_logic.h"
 #include "../common/physical_contact_logic.h"
+#include "../common/physical_contact_volume_sweep.h"
 #include "../common/scope_logic.h"
 #include "../common/weapon_aim_logic.h"
 
@@ -15979,7 +15980,7 @@ namespace
                     // not the pre-fixture weapon position in open space.
                     Halo3RunClearanceProbe(nowMs, selected.surface, worldScale, unitHandle);
                     Halo3RunVolumeProbe(nowMs, selected.surface, selected.normal, camera,
-                        selected.type, worldScale, unitHandle);
+                        selected.type, worldScale, unitHandle, weaponShape, weaponTransform);
                     const PhysicalContactVec3 direction =
                         PhysicalContactNormalize(
                             selected.surface - camera,

@@ -11634,11 +11634,14 @@ __declspec(noinline) static void TestPhysicalContactVolumeCover()
         "invalid rotation and allowance reject before a native call");
 }
 
+#include "volume_sweep_tests.h"
+
 int main()
 {
     // The legacy suite's compiler-sized frame is already near Windows' stack
     // reserve. Exercise the mesh kernel before entering that separate frame.
     TestHalo3SwordGeometry();
     TestPhysicalContactVolumeCover();
+    TestPhysicalContactVolumeSweep();
     return RunCoreTests();
 }
