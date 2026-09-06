@@ -474,11 +474,12 @@ void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
     if (c.partitioned)
     {
         LARGE_INTEGER begin{},end{}; QueryPerformanceCounter(&begin);
-        // Beyond the leash the previous behavior already requires an
-        // independently clear raw seed. Plan around that proposed recovery;
-        // it still cannot become a seed until the tests below prove it clear.
-        const auto from=sameSafe && PhysicalContactLength(safe.get().root.position-raw.position)<=.30f*worldScale
-            ? safe.get().root : raw;
+        // The renderer retains the last safe pose until a new raw seed is
+        // independently clear. Cover its path even beyond the visual leash:
+        // raw-only regions can omit that start while raw is inside a wall,
+        // leaving every subsequent solve unable to advance or recover.
+        // The existing region/count/query budgets still bound all work.
+        const auto from=sameSafe ? safe.get().root : raw;
         const bool planned=PhysicalContactBuildVolumeRegions(c.cover,from,raw,c.skin,
             .40f*worldScale,.20f*worldScale,.08f*worldScale,c.regions);
         if (!planned) g_halo3WorldPartitionPlansFailed.fetch_add(1,std::memory_order_relaxed);

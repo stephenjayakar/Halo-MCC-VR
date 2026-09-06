@@ -127,6 +127,54 @@ static void TestPhysicalContactVolumeRegions()
         "invalid cached bounds cannot authorize a zero-motion query");
 }
 
+static void TestPhysicalContactRecoveryRegions()
+{
+    // Raw is inside a wall, so an independent raw-seed test cannot replace
+    // the retained safe position. This exceeds both the 30 cm visual leash
+    // and the raw-only region's 40 cm motion reserve.
+    PhysicalContactVolumeCover cover{};
+    cover.count=1; cover.spheres[0]={{0,0,0},.075f,0};
+    PhysicalContactTransform safe{},raw{}; raw.position={.6f,0,0};
+    PhysicalContactVolumeRegions rawOnly{},recovery{};
+    Check(PhysicalContactBuildVolumeRegions(cover,raw,raw,.005f,.4f,.2f,.08f,rawOnly) &&
+        PhysicalContactBuildVolumeRegions(cover,safe,raw,.005f,.4f,.2f,.08f,recovery),
+        "both recovery fixture region plans remain within their fixed budgets");
+    const auto solve=[&](const PhysicalContactVolumeRegions& regions,
+        const PhysicalContactTransform& from,const PhysicalContactTransform& to) {
+        return PhysicalContactSlideVolume(cover,from,to,.005f,.3f,192,
+            [&](PhysicalContactVec3 start,PhysicalContactVec3 motion,float radius) {
+                bool covered=false;
+                for (uint32_t i=0;i<regions.count;++i)
+                    covered=covered || PhysicalContactVolumeRegionContains(
+                        regions.regions[i],start,start+motion,radius);
+                PhysicalContactVolumeCast hit{};
+                if (!covered) return hit;
+                hit.valid=true; hit.fraction=1;
+                // Analytic wall occupies x >= .45; moving away is clear.
+                if (motion.x>0 && start.x+motion.x+radius>=.45f) {
+                    hit.hit=true; hit.normal={-1,0,0};
+                    hit.fraction=std::clamp((.45f-radius-start.x)/motion.x,0.f,1.f);
+                }
+                return hit;
+            });
+    };
+    const auto missing=solve(rawOnly,safe,raw);
+    Check(!missing.valid && missing.queries>0,
+        "raw-only recovery reproduces the unqueryable retained-safe path");
+    const auto contact=solve(recovery,safe,raw);
+    Check(contact.valid && contact.blocked && !contact.exhausted && !contact.leashExceeded &&
+        contact.pose.position.x>.3f && contact.pose.position.x<.375f &&
+        PhysicalContactLength(contact.pose.position-raw.position)<.3f,
+        "covering the retained safe path reaches a clear wall contact within the visual leash");
+    PhysicalContactVolumeRegions retreat{};
+    Check(PhysicalContactBuildVolumeRegions(cover,contact.pose,safe,.005f,.4f,.2f,.08f,retreat),
+        "retreat region plan covers the corrected contact pose");
+    const auto released=solve(retreat,contact.pose,safe);
+    Check(released.valid && !released.blocked && !released.exhausted &&
+        PhysicalContactLength(released.pose.position-safe.position)<1.e-6f,
+        "recovery contact releases immediately without replaying an old contact plane");
+}
+
 static void TestPhysicalContactCoverReuse()
 {
     auto shape=std::make_unique<PhysicalContactCompoundShape>();
@@ -183,6 +231,7 @@ static void TestPhysicalContactCoverReuse()
 static void TestPhysicalContactVolumeSweep()
 {
     TestPhysicalContactCoverReuse();
+    TestPhysicalContactRecoveryRegions();
     TestPhysicalContactVolumeRegions();
     TestContactSnapshotLifetime();
     auto features=std::make_unique<Halo3VolumeFeatures>();

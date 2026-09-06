@@ -1230,3 +1230,25 @@ MCC and SteamVR closed. Campaign checkpoint bytes remained original in the
 read-only check before the third Forge run. Accepted pointer unchanged.
 The failed partition behavior is disabled in its own commit before repair;
 the incoming-geometry containment code is retained.
+
+### Retained-safe-path recovery candidate
+
+The worker previously chose a raw-to-raw region plan once the retained safe
+root was more than 30 cm from raw. However, the same function carried that old
+safe seed unless independent native clearance established that raw was clear.
+The renderer could therefore start from a position absent from its own cache.
+This is a verified contradictory path in the code. The Guardian recontact
+misses are consistent with it, but no individual late miss recorded its full
+query endpoints, so that exact causal attribution remains unproven.
+
+The new candidate always plans from the matching retained safe pose when one
+exists. It keeps independent raw-seed clearance, the visual leash, all native
+capacity and validation guards, the 96-region/64-step planning caps, and the
+192-query render budget. Excessive travel can still exceed those budgets; this
+does not grant unchecked relocation or claim arbitrary teleport recovery.
+
+The analytic regression places raw 60 cm from safe inside a wall. A raw-only
+cache cannot authorize the first sweep; the retained-safe path reaches contact
+within 30 cm of raw and releases immediately on retreat. This synthetic case
+proves the coverage correction, not native performance or headset behavior.
+The experiment remains opt-in pending a repeat-approach runtime result.
