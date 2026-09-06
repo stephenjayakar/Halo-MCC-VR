@@ -155,6 +155,7 @@ bool VR_GetHeadPose(float outQuat[4], float outPos[3]);
 bool VR_UsesFixedControllerDebugPose() noexcept;
 struct NullControllerPoseCommand;
 bool VR_RequestNullControllerPose(const NullControllerPoseCommand& command, uint32_t generation);
+void VR_LogNullControllerPathStatus(); // cold diagnostic logger only
 // Latest right-controller aim pose in the same OpenXR local space as the head.
 // This is tracking only; weapon/projectile application is performed by M3 game hooks.
 bool VR_GetRightControllerPose(float outQuat[4], float outPos[3]);

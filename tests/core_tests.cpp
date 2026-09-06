@@ -167,7 +167,9 @@ namespace
     }
 }
 
-int main()
+// Keep the diagnostic path's temporaries out of the already-large core-test
+// main frame; Windows reported STATUS_STACK_OVERFLOW with them inlined there.
+__declspec(noinline) static void TestNullControllerPath()
 {
     {
         NullControllerPoseCommand command{};
@@ -213,6 +215,11 @@ int main()
         command={}; command.position[0]=1.5f; command.durationMs=200;
         Check(!NullControllerMakeTarget(command,path.from,path.to),"Null-controller rejects excessive peak speed");
     }
+}
+
+int main()
+{
+    TestNullControllerPath();
     {
         const auto shove = PhysicalContactNpcShoveDelta({0.4f, 0, 0}, {0.4f, 0, 0}, {-1, 0, 0}, 1.5f, 1.0f/60, 1);
         Check(shove.x > 0 && shove.x <= 0.15f && shove.z == 0, "Slow inward NPC contact produces bounded horizontal motor input");

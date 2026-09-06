@@ -18721,6 +18721,7 @@ namespace
         nextLogMs = nowMs + 2000;
         Halo3LogNpcShoveProbe();
         Halo3LogClearanceProbe();
+        VR_LogNullControllerPathStatus();
         LOG("H3 contact sampling phase: laterStage=%d calls=%llu",
             g_halo3ContactLateUpdateInstalled.load(std::memory_order_acquire) ? 1 : 0,
             (unsigned long long)g_halo3ContactLateUpdateCalls.load(

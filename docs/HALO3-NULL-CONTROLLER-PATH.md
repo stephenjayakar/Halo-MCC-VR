@@ -50,3 +50,11 @@ For floor targets, lower Y gradually and choose an appropriate pitch. Native
 collision, visible alignment and target movement must be observed, not inferred
 from successful command delivery. The separate fresh-region experiment remains
 opt-in and its unresolved dynamic coverage is unchanged.
+
+Initial source 14c75f0 compiled but packaging stopped at a core-test crash.
+The executable returned C00000FD (STATUS_STACK_OVERFLOW). Moving the new
+test cases into a noinline helper, outside the existing large main frame,
+made the complete test executable pass without increasing its stack reserve.
+No candidate from the failed packaging attempt was installed. The subsequent
+candidate also adds cold cumulative command/moving-sample/peak-speed logging
+to distinguish command receipt from observation by the collision motion reader.

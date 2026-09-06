@@ -407,6 +407,8 @@ namespace
         std::atomic<float> to[7]{{.18f},{-.18f},{-.65f},{0},{0},{0},{1}};
     } g_nullControllerPath;
     std::atomic<int64_t> g_nullControllerQpcFrequency{0};
+    std::atomic<uint64_t> g_nullControllerCommands{0}, g_nullControllerMovingSamples{0};
+    std::atomic<float> g_nullControllerPeakLinear{0}, g_nullControllerPeakAngular{0};
     uint64_t NullControllerNowUs() noexcept
     {
         LARGE_INTEGER now{};
@@ -9919,10 +9921,21 @@ bool VR_RequestNullControllerPose(const NullControllerPoseCommand& command, uint
         p.to[3+i].store(target.orientation[i],std::memory_order_relaxed);
     }
     p.sequence.fetch_add(1,std::memory_order_release);
+    g_nullControllerCommands.fetch_add(1,std::memory_order_relaxed);
     LOG("H3 null controller command: generation=%u duration=%ums from=(%.4f %.4f %.4f) to=(%.4f %.4f %.4f) quat=(%.5f %.5f %.5f %.5f)",
         generation,command.durationMs,current.pose.position[0],current.pose.position[1],current.pose.position[2],
         target.position[0],target.position[1],target.position[2],target.orientation[0],target.orientation[1],target.orientation[2],target.orientation[3]);
     return true;
+}
+
+void VR_LogNullControllerPathStatus()
+{
+    if (!g_halo3AimDebugPose || !g_nullControllerCommands.load(std::memory_order_relaxed)) return;
+    LOG("H3 null controller path status: commands=%llu movingSamples=%llu peakLinear=%.4fm/s peakAngular=%.4frad/s [cumulative motion-reader observations]",
+        (unsigned long long)g_nullControllerCommands.load(std::memory_order_relaxed),
+        (unsigned long long)g_nullControllerMovingSamples.load(std::memory_order_relaxed),
+        g_nullControllerPeakLinear.load(std::memory_order_relaxed),
+        g_nullControllerPeakAngular.load(std::memory_order_relaxed));
 }
 
 void VR_GetPadState(VrPadState& out)
@@ -10012,6 +10025,17 @@ bool VR_GetRightControllerMotion(VrControllerMotionSnapshot& out) noexcept
         // velocity; commanded motion supplies its actual derivative.
         NullControllerPathSample sample{};
         if (!ReadNullControllerSample(sample)) return false;
+        if (sample.moving)
+        {
+            g_nullControllerMovingSamples.fetch_add(1,std::memory_order_relaxed);
+            const auto observePeak=[](std::atomic<float>& peak, const float* v) {
+                const float speed=std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+                float prior=peak.load(std::memory_order_relaxed);
+                while (speed>prior && !peak.compare_exchange_weak(prior,speed,std::memory_order_relaxed)) {}
+            };
+            observePeak(g_nullControllerPeakLinear,sample.linearVelocity);
+            observePeak(g_nullControllerPeakAngular,sample.angularVelocity);
+        }
         out = {};
         out.serial = out.sampleMs = GetTickCount64();
         out.poseValid = true;
