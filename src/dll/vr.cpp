@@ -41,6 +41,7 @@
 #include "../common/input_logic.h"
 #include "../common/reach_vehicle_logic.h"
 #include "../common/scope_logic.h"
+#include "../common/null_controller_path.h"
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
@@ -398,6 +399,53 @@ namespace
     // revealed weapon geometry above the camera. Do not assume a standing
     // floor height for the null driver's LOCAL-space diagnostic hand.
     constexpr float kHalo3AimDebugPosition[3]{0.18f, -0.18f, -0.65f};
+    struct NullControllerPathPublication
+    {
+        std::atomic<uint32_t> sequence{0}, durationMs{0}, generation{0};
+        std::atomic<uint64_t> startUs{0};
+        std::atomic<float> from[7]{{.18f},{-.18f},{-.65f},{0},{0},{0},{1}};
+        std::atomic<float> to[7]{{.18f},{-.18f},{-.65f},{0},{0},{0},{1}};
+    } g_nullControllerPath;
+    std::atomic<int64_t> g_nullControllerQpcFrequency{0};
+    uint64_t NullControllerNowUs() noexcept
+    {
+        LARGE_INTEGER now{};
+        const int64_t frequency=g_nullControllerQpcFrequency.load(std::memory_order_acquire);
+        if (frequency<=0 || !QueryPerformanceCounter(&now) || now.QuadPart<0) return 0;
+        return static_cast<uint64_t>(static_cast<double>(now.QuadPart)*1.0e6/frequency);
+    }
+    bool ReadNullControllerPath(NullControllerPath& out) noexcept
+    {
+        const auto& p=g_nullControllerPath;
+        for (int attempt=0; attempt<2; ++attempt)
+        {
+            const uint32_t seq=p.sequence.load(std::memory_order_acquire);
+            if (seq&1u) continue;
+            out.startUs=p.startUs.load(std::memory_order_relaxed);
+            out.durationMs=p.durationMs.load(std::memory_order_relaxed);
+            out.generation=p.generation.load(std::memory_order_relaxed);
+            for (int i=0; i<3; ++i)
+            {
+                out.from.position[i]=p.from[i].load(std::memory_order_relaxed);
+                out.to.position[i]=p.to[i].load(std::memory_order_relaxed);
+            }
+            for (int i=0; i<4; ++i)
+            {
+                out.from.orientation[i]=p.from[3+i].load(std::memory_order_relaxed);
+                out.to.orientation[i]=p.to[3+i].load(std::memory_order_relaxed);
+            }
+            if (seq==p.sequence.load(std::memory_order_acquire)) return true;
+        }
+        return false;
+    }
+    bool ReadNullControllerSample(NullControllerPathSample& out) noexcept
+    {
+        NullControllerPath path{};
+        if (!ReadNullControllerPath(path)) return false;
+        if (path.generation != Game_NullControllerGeneration()) path={};
+        out=NullControllerSamplePath(path,NullControllerNowUs());
+        return true;
+    }
     struct ControllerMotionPublication
     {
         std::atomic<uint32_t> sequence{0};
@@ -8608,6 +8656,9 @@ float4 ps_scope_linearize(VSOut i):SV_Target { return paint(i.uv,true); }
 
 void VR_InitInstance()
 {
+    LARGE_INTEGER nullControllerFrequency{};
+    if (QueryPerformanceFrequency(&nullControllerFrequency))
+        g_nullControllerQpcFrequency.store(nullControllerFrequency.QuadPart, std::memory_order_release);
     if (!g_headCsInit)
     {
         InitializeCriticalSection(&g_headCs);
@@ -9840,6 +9891,40 @@ bool VR_UsesFixedControllerDebugPose() noexcept
     return g_halo3AimDebugPose;
 }
 
+bool VR_RequestNullControllerPose(const NullControllerPoseCommand& command, uint32_t generation)
+{
+    if (!g_halo3AimDebugPose || !g_headCsInit || !generation) return false;
+    const uint64_t now=NullControllerNowUs();
+    NullControllerPath old{};
+    if (!now || !ReadNullControllerPath(old)) return false;
+    if (old.generation!=generation) old={};
+    const auto current=NullControllerSamplePath(old,now);
+    NullControllerPose target{};
+    // Reject replanning a moving path: a new zero-velocity endpoint must not
+    // create an unphysical velocity discontinuity that could qualify melee.
+    if (current.moving || !NullControllerMakeTarget(command,current.pose,target)) return false;
+    auto& p=g_nullControllerPath; // Single writer: the addressed MCC UI thread.
+    p.sequence.fetch_add(1,std::memory_order_acq_rel);
+    p.startUs.store(now,std::memory_order_relaxed);
+    p.durationMs.store(command.durationMs,std::memory_order_relaxed);
+    p.generation.store(generation,std::memory_order_relaxed);
+    for (int i=0; i<3; ++i)
+    {
+        p.from[i].store(current.pose.position[i],std::memory_order_relaxed);
+        p.to[i].store(target.position[i],std::memory_order_relaxed);
+    }
+    for (int i=0; i<4; ++i)
+    {
+        p.from[3+i].store(current.pose.orientation[i],std::memory_order_relaxed);
+        p.to[3+i].store(target.orientation[i],std::memory_order_relaxed);
+    }
+    p.sequence.fetch_add(1,std::memory_order_release);
+    LOG("H3 null controller command: generation=%u duration=%ums from=(%.4f %.4f %.4f) to=(%.4f %.4f %.4f) quat=(%.5f %.5f %.5f %.5f)",
+        generation,command.durationMs,current.pose.position[0],current.pose.position[1],current.pose.position[2],
+        target.position[0],target.position[1],target.position[2],target.orientation[0],target.orientation[1],target.orientation[2],target.orientation[3]);
+    return true;
+}
+
 void VR_GetPadState(VrPadState& out)
 {
     if (!g_headCsInit)
@@ -9902,6 +9987,7 @@ bool VR_GetRightControllerPose(float outQuat[4], float outPos[3])
 {
     if (!g_headCsInit)
         return false;
+    if (g_halo3AimDebugPose) return VR_GetAimPose(outQuat,outPos);
     EnterCriticalSection(&g_headCs);
     const bool ok = g_rightAimPoseValid;
     if (ok)
@@ -9922,18 +10008,22 @@ bool VR_GetRightControllerMotion(VrControllerMotionSnapshot& out) noexcept
 {
     if (g_headCsInit && g_halo3AimDebugPose)
     {
-        // The opt-in fixed pose must supply matching motion to exercise the
-        // normal contact path. A stationary LOCAL-space controller has zero
-        // linear/angular velocity; body locomotion remains the game's input.
-        // Use the same monotonic clock as contact's freshness gate. Repeated
-        // reads within one millisecond intentionally retain the same serial.
+        // Same analytic path as visible aim. Stationary poses have zero
+        // velocity; commanded motion supplies its actual derivative.
+        NullControllerPathSample sample{};
+        if (!ReadNullControllerSample(sample)) return false;
         out = {};
         out.serial = out.sampleMs = GetTickCount64();
         out.poseValid = true;
         out.linearVelocityValid = true;
         out.angularVelocityValid = true;
         for (int i = 0; i < 3; ++i)
-            out.position[i] = kHalo3AimDebugPosition[i];
+        {
+            out.position[i] = sample.pose.position[i];
+            out.linearVelocity[i] = sample.linearVelocity[i];
+            out.angularVelocity[i] = sample.angularVelocity[i];
+        }
+        for (int i=0; i<4; ++i) out.orientation[i]=sample.pose.orientation[i];
         return out.serial != 0;
     }
     auto& publication = g_rightMotion;
@@ -10367,14 +10457,10 @@ bool VR_GetAimPose(float outQuat[4], float outPos[3])
         return false;
     if (g_halo3AimDebugPose)
     {
-        // OpenXR LOCAL-space pose: a steady right hand in front of the null
-        // driver's local head. Identity points the controller along -Z.
-        outQuat[0] = 0.0f;
-        outQuat[1] = 0.0f;
-        outQuat[2] = 0.0f;
-        outQuat[3] = 1.0f;
-        for (int i = 0; i < 3; ++i)
-            outPos[i] = kHalo3AimDebugPosition[i];
+        NullControllerPathSample sample{};
+        if (!ReadNullControllerSample(sample)) return false;
+        for (int i=0; i<4; ++i) outQuat[i]=sample.pose.orientation[i];
+        for (int i=0; i<3; ++i) outPos[i]=sample.pose.position[i];
         return true;
     }
     EnterCriticalSection(&g_headCs);

@@ -153,6 +153,8 @@ bool VR_RedirectRenderTargets(ID3D11DeviceContext* context, UINT count,
 // valid pose has been read. Thread-safe; the game camera hook (M1) reads this.
 bool VR_GetHeadPose(float outQuat[4], float outPos[3]);
 bool VR_UsesFixedControllerDebugPose() noexcept;
+struct NullControllerPoseCommand;
+bool VR_RequestNullControllerPose(const NullControllerPoseCommand& command, uint32_t generation);
 // Latest right-controller aim pose in the same OpenXR local space as the head.
 // This is tracking only; weapon/projectile application is performed by M3 game hooks.
 bool VR_GetRightControllerPose(float outQuat[4], float outPos[3]);

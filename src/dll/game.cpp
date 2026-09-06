@@ -42802,6 +42802,20 @@ bool Game_RequestNullControllerTurn(int dir)
     return true;
 }
 
+uint32_t Game_NullControllerGeneration()
+{
+    return g_halo3RuntimeGeneration.load(std::memory_order_acquire);
+}
+
+bool Game_RequestNullControllerPose(const NullControllerPoseCommand& command)
+{
+    const uint32_t generation=Game_NullControllerGeneration();
+    if (!generation || !g_enabled.load() || !g_vrAim.load() ||
+        !VR_UsesFixedControllerDebugPose() ||
+        TitleAdapter_GetRuntimeMode()!=RuntimeMode::Gameplay) return false;
+    return VR_RequestNullControllerPose(command,generation);
+}
+
 void Game_PitchTrim(int dir)
 {
     const float t = Clamp(g_pitchTrim.load() + dir * 0.035f, -0.8f, 0.8f); // ~2 deg steps

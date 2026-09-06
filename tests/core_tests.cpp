@@ -29,6 +29,7 @@
 #include "sigscan.h"
 #include "odst_vehicle_logic.h"
 #include "physical_contact_logic.h"
+#include "null_controller_path.h"
 #include "reach_adapter.h"
 #include "reach_chud_logic.h"
 #include "reach_observer_logic.h"
@@ -168,6 +169,50 @@ namespace
 
 int main()
 {
+    {
+        NullControllerPoseCommand command{};
+        command.position[2]=-.95f;
+        command.durationMs=1200;
+        NullControllerPath path{};
+        path.startUs=1000000;
+        path.durationMs=command.durationMs;
+        Check(NullControllerMakeTarget(command,path.from,path.to),"Null-controller slow push is valid");
+        const auto slow=NullControllerSamplePath(path,1600000);
+        Check(std::abs(slow.linearVelocity[2]+.46875f)<.0001f,
+              "Null-controller slow-push velocity is below melee threshold");
+        path.durationMs=250;
+        const auto fast=NullControllerSamplePath(path,1125000);
+        Check(std::abs(fast.linearVelocity[2]+2.25f)<.0001f,
+              "Null-controller fast swing supplies its actual above-threshold velocity");
+        const auto before=NullControllerSamplePath(path,999999);
+        const auto end=NullControllerSamplePath(path,1250000);
+        Check(!before.moving && !end.moving && end.linearVelocity[2]==0 &&
+              std::abs(end.pose.position[2]+.95f)<.0001f,
+              "Null-controller paths hold exact stationary endpoints");
+        const auto a=NullControllerSamplePath(path,1100000-100);
+        const auto b=NullControllerSamplePath(path,1100000+100);
+        const auto middle=NullControllerSamplePath(path,1100000);
+        Check(std::abs((b.pose.position[2]-a.pose.position[2])/.0002f-middle.linearVelocity[2])<.002f,
+              "Null-controller analytic velocity matches measured pose change");
+        command.durationMs=1000;
+        command.orientation[1]=std::sqrt(.5f); command.orientation[3]=std::sqrt(.5f);
+        path.durationMs=1000;
+        Check(NullControllerMakeTarget(command,path.from,path.to),"Null-controller quarter-turn is valid");
+        const auto turn=NullControllerSamplePath(path,1500000);
+        Check(std::abs(turn.pose.orientation[1]-std::sin(3.14159265f/8))<.0001f &&
+              std::abs(turn.angularVelocity[1]-1.875f*3.14159265f/2)<.0001f,
+              "Null-controller quaternion rotation and angular velocity share one path");
+        command.orientation[1]=0; command.orientation[3]=-1;
+        Check(NullControllerMakeTarget(command,path.from,path.to),"Quaternion antipodes remain valid");
+        Check(NullControllerSamplePath(path,1500000).angularVelocity[1]==0,
+              "Equivalent quaternion endpoints never create a spurious swing");
+        command.position[0]=std::numeric_limits<float>::quiet_NaN();
+        Check(!NullControllerMakeTarget(command,path.from,path.to),"Null-controller rejects non-finite targets");
+        command={}; command.version=2;
+        Check(!NullControllerMakeTarget(command,path.from,path.to),"Null-controller rejects unknown protocols");
+        command={}; command.position[0]=1.5f; command.durationMs=200;
+        Check(!NullControllerMakeTarget(command,path.from,path.to),"Null-controller rejects excessive peak speed");
+    }
     {
         const auto shove = PhysicalContactNpcShoveDelta({0.4f, 0, 0}, {0.4f, 0, 0}, {-1, 0, 0}, 1.5f, 1.0f/60, 1);
         Check(shove.x > 0 && shove.x <= 0.15f && shove.z == 0, "Slow inward NPC contact produces bounded horizontal motor input");

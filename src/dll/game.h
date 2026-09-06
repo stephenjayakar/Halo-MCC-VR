@@ -100,6 +100,9 @@ float Game_GetPitchSign();
 bool Game_GetWriteUp();
 void Game_PitchTrim(int dir);   // F8 (down) / F9 (up): nudge pitch offset
 bool Game_RequestNullControllerTurn(int dir); // opt-in diagnostic [ / ] only
+struct NullControllerPoseCommand;
+uint32_t Game_NullControllerGeneration();
+bool Game_RequestNullControllerPose(const NullControllerPoseCommand& command);
 void Game_LeanScale(int dir);   // PageDown / PageUp: leaning strength
 void Game_GunScale(int dir); // Home (bigger) / End (smaller): hand-anchored weapon mesh size
 void Game_ToggleVrAim();        // Insert: right controller steers the weapon aim

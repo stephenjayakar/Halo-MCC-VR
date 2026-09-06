@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cfloat>
 #include <cmath>
+#include <cstring>
 #include <iterator>
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -16,6 +17,7 @@
 #include "d3d11_hook.h"
 #include "../common/log.h"
 #include "../common/config.h"
+#include "../common/null_controller_path.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -309,8 +311,28 @@ namespace
         }
     }
 
+    int HandleNullControllerCopyData(LPARAM lp)
+    {
+        if (!VR_UsesFixedControllerDebugPose()) return -1;
+        NullControllerPoseCommand command{};
+        __try
+        {
+            const auto* data=reinterpret_cast<const COPYDATASTRUCT*>(lp);
+            if (!data || data->dwData!=kNullControllerPoseMessage) return -1;
+            if (data->cbData!=sizeof(command) || !data->lpData) return 0;
+            std::memcpy(&command,data->lpData,sizeof(command));
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+        return Game_RequestNullControllerPose(command) ? 1 : 0;
+    }
+
     LRESULT CALLBACK WndProcHook(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     {
+        if (msg==WM_COPYDATA)
+        {
+            const int handled=HandleNullControllerCopyData(lp);
+            if (handled>=0) return handled;
+        }
         // Fit request (posted from Menu_Init) -- run it here on the UI thread.
         if (msg == kFitGameWindowMsg)
         {
