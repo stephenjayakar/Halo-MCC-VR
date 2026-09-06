@@ -1,6 +1,7 @@
 // Current-pose world collision experiment. Native gathering stays on the
 // simulation worker; rendering only queries pinned, self-contained features.
 // ABI/math evidence: docs/HALO3-NATIVE-VOLUME-EVIDENCE.md.
+#include "../common/halo3_world_recovery_replay.h"
 struct Halo3WorldVolumeRequest
 {
     uint32_t generation{}, reset{}, count{}, tag{};
@@ -44,6 +45,10 @@ std::atomic<uint64_t> g_halo3WorldCoverReused{0},g_halo3WorldCoverChanged{0};
 std::atomic<uint64_t> g_halo3WorldSeedRetests{0},g_halo3WorldSeedRetestClear{0},g_halo3WorldSeedRetestRejected{0};
 std::atomic<uint64_t> g_halo3WorldRecoveryAttempts{0},g_halo3WorldRecoveryClear{0},g_halo3WorldRecoveryQueries{0};
 std::atomic<uint64_t> g_halo3WorldRecoveryTicks{0},g_halo3WorldRecoveryMaxTicks{0};
+Halo3WorldRecoveryReplay g_halo3WorldRecoveryReplay;
+std::atomic<uint32_t> g_halo3WorldRecoveryReplayState{0}; // empty, writing, ready, consumed
+std::atomic<bool> g_halo3WorldRecoveryReplayEnabled{false};
+wchar_t g_halo3WorldRecoveryReplayPath[MAX_PATH]{};
 std::atomic<uint64_t> g_halo3WorldCoverChecks{0},g_halo3WorldCoverTicks{0},g_halo3WorldCoverMaxTicks{0};
 std::atomic<uint64_t> g_halo3WorldSolveMaxTicks{0},g_halo3WorldSolveTicks{0},g_halo3WorldSolveCount{0};
 std::atomic<uint64_t> g_halo3WorldPartitionCalls{0},g_halo3WorldPartitionRegions{0};
@@ -551,19 +556,52 @@ void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
         {
             LARGE_INTEGER begin{},end{}; QueryPerformanceCounter(&begin);
             uint32_t queries=0;
+            uint32_t empty=0;
+            const bool capture=g_halo3WorldRecoveryReplayEnabled.load(std::memory_order_acquire) &&
+                g_halo3WorldRecoveryReplayState.compare_exchange_strong(empty,1,std::memory_order_acquire);
+            auto& replay=g_halo3WorldRecoveryReplay;
+            if (capture)
+            {
+                replay.bytes=sizeof(replay);
+                strncpy_s(replay.source,HALOMCCVR_BUILD_COMMIT,_TRUNCATE);
+                replay.ms=nowMs; replay.epoch=c.epoch; replay.shape=c.shape;
+                replay.generation=generation; replay.reset=reset; replay.active=c.active;
+                replay.tag=tag; replay.weapon=weapon; replay.worldScale=worldScale; replay.skin=c.skin;
+                replay.historical=safe.get().root; replay.raw=raw; replay.cover=c.cover; replay.regions=c.regions;
+                replay.faultsBefore=g_halo3WorldFaults.load(std::memory_order_relaxed);
+                for (uint32_t index=0;index<c.regions.count;++index) replay.features[index]=c.regionFeatures[index];
+            }
             g_halo3WorldRecoveryAttempts.fetch_add(1,std::memory_order_relaxed);
             const bool recovered=PhysicalContactRecoverVolumeSeed(c.cover,safe.get().root,
                 safe.get().root.position-raw.position,c.skin,.10f*worldScale,512,c.seed,queries,
                 [&](PhysicalContactVec3 center,float radius) {
+                    Halo3WorldRecoveryQuery* record=nullptr;
+                    if (capture && queries && queries<=replay.queries.size())
+                    {
+                        record=&replay.queries[queries-1]; record->center=center; record->radius=radius;
+                        record->region=-1; record->outcome=0;
+                    }
                     for (uint32_t index=0;index<c.regions.count;++index)
                     {
                         if (!PhysicalContactVolumeRegionContains(c.regions.regions[index],center,center,radius)) continue;
-                        return Halo3VolumePointOutsideFeatures(c.regionFeatures[index].bytes.data(),
-                            Halo3VolumeFeatures::kBytes,&center.x) &&
-                            Halo3NativeSeedPointOutside(center,ignored,c.active);
+                        if (record) { record->region=static_cast<int32_t>(index); record->outcome=1; }
+                        if (!Halo3VolumePointOutsideFeatures(c.regionFeatures[index].bytes.data(),
+                            Halo3VolumeFeatures::kBytes,&center.x)) return false;
+                        const bool outside=Halo3NativeSeedPointOutside(center,ignored,c.active);
+                        if (record) record->outcome=outside?3:2;
+                        return outside;
                     }
                     return false;
                 });
+            if (capture)
+            {
+                replay.queryCount=queries; replay.recovered=recovered?1:0;
+                replay.result=recovered?c.seed:safe.get().root;
+                replay.sceneStable=(c.epoch==g_halo3ClearanceEpoch.load(std::memory_order_acquire) &&
+                    reset==g_halo3WorldReset.load(std::memory_order_acquire))?1:0;
+                replay.faultsAfter=g_halo3WorldFaults.load(std::memory_order_relaxed);
+                g_halo3WorldRecoveryReplayState.store(2,std::memory_order_release);
+            }
             if (recovered) { c.seeded=true; g_halo3WorldRecoveryClear.fetch_add(1,std::memory_order_relaxed); }
             g_halo3WorldRecoveryQueries.fetch_add(queries,std::memory_order_relaxed);
             QueryPerformanceCounter(&end);
@@ -737,6 +775,33 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
 void Halo3LogWorldVolume()
 {
     if (!g_halo3WorldVolumeEnabled.load() && !g_halo3WorldBuilds.load()) return;
+    // This existing cold logger owns environment/path access and disk I/O.
+    // The simulation hook only copies one bounded snapshot; rendering never
+    // captures features, allocates, reads environment variables or writes files.
+    static bool replayConfigured=false;
+    if (!replayConfigured)
+    {
+        replayConfigured=true;
+        const DWORD length=GetEnvironmentVariableW(L"HALOMCCVR_H3_WORLD_REPLAY_PATH",
+            g_halo3WorldRecoveryReplayPath,MAX_PATH);
+        const bool enabled=length>0 && length<MAX_PATH && g_halo3WorldMeshAuditEnabled.load();
+        g_halo3WorldRecoveryReplayEnabled.store(enabled,std::memory_order_release);
+        if (enabled) LOG("H3 world recovery replay: armed for first rejected historical seed; diagnostic-only snapshot, no clearance permission");
+    }
+    uint32_t ready=2;
+    if (g_halo3WorldRecoveryReplayState.compare_exchange_strong(ready,3,std::memory_order_acquire))
+    {
+        const HANDLE file=CreateFileW(g_halo3WorldRecoveryReplayPath,GENERIC_WRITE,FILE_SHARE_READ,
+            nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+        DWORD written=0;
+        const bool saved=file!=INVALID_HANDLE_VALUE && WriteFile(file,&g_halo3WorldRecoveryReplay,
+            sizeof(g_halo3WorldRecoveryReplay),&written,nullptr) && written==sizeof(g_halo3WorldRecoveryReplay);
+        const DWORD error=saved?0:GetLastError();
+        if (file!=INVALID_HANDLE_VALUE) CloseHandle(file);
+        LOG("H3 world recovery replay: saved=%d bytes=%lu error=%lu queries=%u recovered=%u stable=%u path=%ls",
+            saved?1:0,written,error,g_halo3WorldRecoveryReplay.queryCount,g_halo3WorldRecoveryReplay.recovered,
+            g_halo3WorldRecoveryReplay.sceneStable,g_halo3WorldRecoveryReplayPath);
+    }
     LOG("H3 world volume EXPERIMENT: enabled=%d caches=%llu seeds=%llu frames=%llu blocks=%llu holds=%llu hidden=%llu unknown=%llu shapeRejects=%llu queries=%llu exhausted=%llu faults=%llu",
         g_halo3WorldVolumeEnabled.load()?1:0,g_halo3WorldBuilds.load(),g_halo3WorldSeeds.load(),
         g_halo3WorldFrames.load(),g_halo3WorldBlocks.load(),g_halo3WorldHolds.load(),g_halo3WorldHidden.load(),

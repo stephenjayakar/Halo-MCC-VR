@@ -262,6 +262,10 @@ if(BUILD_TESTING)
         HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE=$<BOOL:${HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE}>)
     add_test(NAME halomccvr_core_tests COMMAND halomccvr_core_tests)
     add_executable(halo3_sword_runtime_replay tests/sword_runtime_replay.cpp)
+    # Read-only replay of opt-in native collision snapshots. Run with a real
+    # captured file; a synthetic no-argument pass would not validate recovery.
+    add_executable(halo3_world_recovery_replay tests/world_recovery_replay.cpp)
+    target_compile_features(halo3_world_recovery_replay PRIVATE cxx_std_20)
     target_compile_features(halo3_sword_runtime_replay PRIVATE cxx_std_20)
     add_test(NAME halo3_sword_runtime_replay COMMAND halo3_sword_runtime_replay)
     set_tests_properties(halo3_sword_runtime_replay PROPERTIES TIMEOUT 10)

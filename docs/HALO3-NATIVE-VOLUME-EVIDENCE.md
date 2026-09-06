@@ -1845,3 +1845,45 @@ and per-sphere rejection causes. Replay that exact geometry offline to establish
 why clearance fails before choosing another recovery radius or direction set.
 The renderer's no-seed fallback remains an explicit unresolved failure. No
 accepted pointer advancement and no claim of Forge/Campaign/headset readiness.
+
+Disabled 4db21a7 install before replay work: package
+`out/candidates/4db21a7-h3-physical-contact-20260906-130952521Z`, source
+`4db21a714fdbfe53e8f730aa6e76ca89cfc578d1`, installed DLL independently checked
+`3AEDC61388560DC38067B21E1FC9922DB960EE08B4AF5CE09DA6388D9DE2093F`.
+Release and both CTests passed. Backup
+`out/deploy-backups/f2dd102-steam-before-4db21a7-20260906-130953692Z`.
+No game session used this disabled package. Normal config/launcher unchanged;
+other Steam/Store roots absent. Profile bytes/Steam metadata remain as before.
+
+#### Exact recovery replay diagnostic (2026-09-06)
+
+A new `-WorldReplay` switch requires `-WorldPartitions` and gives this one
+launch a unique `out/debug-openxr/<stamp>-world-recovery.bin` path. Without
+that path the failed partition experiment remains disabled. With the explicit
+path, the candidate reproduces the failed behavior to capture its first
+rejected historical seed; this is diagnostic reproduction, not a headset-test
+candidate or a new claim that recovery works. The harness restores the new
+environment variable with its other debug variables.
+
+The bounded snapshot contains the complete incoming cover, historical/raw
+transforms, all gathered regions and their copied native features, and the
+outcome of each recovery sphere callback: missing region, expanded boundary
+rejection, native solid-interior/scene rejection, or clear. Source commit,
+shape/reset/epoch/active structure, fault counts, result and scene stability
+are included. One simulation-worker copy publishes through an atomic state;
+no allocation, environment access, logging or disk I/O is added there or in
+rendering. The existing 50ms background polling/logger path (game.cpp callers
+of LogHalo3PhysicalContactStatus) creates the new binary file exclusively and
+writes it once. No overwrite of an existing file is permitted. Capture timing
+can perturb this diagnostic run and is not a normal tracking-cost measurement.
+
+`halo3_world_recovery_replay` independently reloads the bounded file, validates
+its version/length/identities/features, reruns every coverage and expanded-feature
+membership test, and compares its exact callback sequence and result with the
+captured native outcomes. It does not manufacture native interior results at
+unrecorded points. Invalid, truncated, unstable or faulted snapshots fail.
+The standalone executable accepts the capture path as its sole argument;
+its output distinguishes rejection categories and query-budget exhaustion.
+Initial Release build, both existing CTests, standalone replay target build,
+and PowerShell syntax parsing passed. An actual live capture/replay remains
+required; no synthetic no-argument CTest is presented as runtime evidence.

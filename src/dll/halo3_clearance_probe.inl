@@ -82,8 +82,12 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     constexpr bool kEnableHalo3WorldPartitionsExperiment = false;
     const bool partitionsFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS", value, 2) == 1 && value[0] == L'1';
-    const bool partitions = kEnableHalo3WorldPartitionsExperiment && partitionsFlag;
-    if (partitionsFlag && !kEnableHalo3WorldPartitionsExperiment)
+    const DWORD replayPathLength=GetEnvironmentVariableW(L"HALOMCCVR_H3_WORLD_REPLAY_PATH",nullptr,0);
+    const bool replayRequested=replayPathLength>1 && replayPathLength<=MAX_PATH;
+    const bool partitions = (kEnableHalo3WorldPartitionsExperiment || replayRequested) && partitionsFlag;
+    if (partitions && replayRequested)
+        LOG("H3 world recovery replay: explicit diagnostic reproduction of failed partition behavior; not a headset candidate");
+    if (partitionsFlag && !kEnableHalo3WorldPartitionsExperiment && !replayRequested)
         LOG("H3 world partitions EXPERIMENT disabled after Guardian sword reset recovery failure; prior contact path retained; VR unchanged");
     const bool worldRequested = (kEnableHalo3WorldVolumeExperiment && worldFlag) || partitions;
     const bool meshAuditRequested = GetEnvironmentVariableW(

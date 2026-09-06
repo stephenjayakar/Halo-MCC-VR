@@ -43,6 +43,7 @@ param(
     [switch]$FreshRegion,
     [switch]$WorldVolume,
     [switch]$WorldPartitions,
+    [switch]$WorldReplay,
     [switch]$WorldGather,
     [switch]$KeyboardGamepad,
     [switch]$SelectionProbe,
@@ -60,6 +61,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if ($WorldPartitions) { $WorldVolume=$true }
+if ($WorldReplay -and -not $WorldPartitions) { throw 'WorldReplay requires explicit WorldPartitions diagnostic reproduction.' }
 if ($WorldVolume -and $Test -ne 'controller-contact') { throw 'WorldVolume requires the normal controller-contact path.' }
 if ($WorldGather -and ($Test -ne 'controller-contact' -or $WorldVolume -or $FreshRegion -or $ProbeVolume)) {
     throw 'WorldGather is an observation-only controller-contact probe; do not combine with world/fresh-region/volume experiments.'
@@ -628,6 +630,7 @@ $stamp = [DateTime]::UtcNow.ToString("yyyyMMdd-HHmmssfff'Z'")
 $backupPath = Join-Path $outputRoot "steamvr-before-null-$stamp.json"
 $savedLogPath = Join-Path $outputRoot "$stamp-$Test.log"
 $resultPath = Join-Path $outputRoot "$stamp-$Test-result.json"
+$worldReplayPath = Join-Path $outputRoot "$stamp-world-recovery.bin"
 $failureScreenshot = Join-Path $outputRoot "$stamp-$Test-failure.png"
 $successScreenshot = Join-Path $outputRoot "$stamp-$Test-success.png"
 $backupHash = $null
@@ -656,6 +659,7 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_FRESH_REGION',
     'HALOMCCVR_H3_CONTACT_WORLD_VOLUME',
     'HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS',
+    'HALOMCCVR_H3_WORLD_REPLAY_PATH',
     'HALOMCCVR_H3_CONTACT_DEBUG_WORLD_MESH',
     'HALOMCCVR_H3_CONTACT_DEBUG_WORLD_GATHER'
 )
@@ -716,6 +720,7 @@ try {
     if ($FreshRegion) { $env:HALOMCCVR_H3_CONTACT_FRESH_REGION = '1' }
     if ($WorldPartitions) { $env:HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS = '1' }
     elseif ($WorldVolume) { $env:HALOMCCVR_H3_CONTACT_WORLD_VOLUME = '1' }
+    if ($WorldReplay) { $env:HALOMCCVR_H3_WORLD_REPLAY_PATH = $worldReplayPath }
     # Collision qualification retains the independent paired-mesh evidence.
     # These audit-enabled runs must not be presented as ordinary tracking cost.
     if ($WorldVolume) { $env:HALOMCCVR_H3_CONTACT_DEBUG_WORLD_MESH = '1' }
@@ -1176,6 +1181,9 @@ $result = [ordered]@{
     volume_probe_requested = [bool]$ProbeVolume
     world_volume_requested = [bool]$WorldVolume
     world_partitions_requested = [bool]$WorldPartitions
+    world_replay_requested = [bool]$WorldReplay
+    world_replay_path = $(if ($WorldReplay -and (Test-Path -LiteralPath $worldReplayPath -PathType Leaf)) { $worldReplayPath } else { $null })
+    world_replay_sha256 = $(if ($WorldReplay -and (Test-Path -LiteralPath $worldReplayPath -PathType Leaf)) { Get-Sha256 $worldReplayPath } else { $null })
     world_mesh_audit_requested = [bool]$WorldVolume
     world_gather_requested = [bool]$WorldGather
     post_pass_hold_seconds = $PostPassHoldSeconds
