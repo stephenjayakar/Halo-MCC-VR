@@ -7502,6 +7502,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactAnimatedBodyHits{0};
     std::atomic<uint64_t> g_halo3ContactUnsupportedShapes{0};
     std::atomic<uint64_t> g_halo3ContactUnreliableNormalRejects{0};
+#include "halo3_contact_replay_probe.inl"
     std::atomic<uint64_t> g_halo3ContactEnemySustainedMelees{0};
     std::atomic<uint64_t> g_halo3ContactEnemyFallbackNormalMelees{0};
     std::atomic<uint64_t> g_halo3ContactEnemyAssistHits{0};
@@ -17559,8 +17560,14 @@ namespace
                     // only for moving the rendered kinematic weapon back out;
                     // it must never drive a native rigid-body impulse.
                     if (!enemyMeleeWithoutReliableNormal)
+                    {
                         g_halo3ContactUnreliableNormalRejects.fetch_add(
                             1, std::memory_order_relaxed);
+                        Halo3CaptureContactReplay(nowMs, weaponHandle, closestHandle,
+                            closestTargetShapeSource, closest.fraction, worldScale,
+                            previousWeaponTransform, intendedWeaponTransform,
+                            closestTargetTransform, closestWeaponShape, closestTargetShape);
+                    }
                 }
                 closestWeaponPoint = PhysicalContactConvexSupport(
                     closestWeaponShape, intendedWeaponTransform,
@@ -18722,6 +18729,7 @@ namespace
         Halo3LogNpcShoveProbe();
         Halo3LogClearanceProbe();
         VR_LogNullControllerPathStatus();
+        Halo3LogContactReplays();
         if (VR_UsesFixedControllerDebugPose())
         {
             float basis[9]{}, position[3]{}, scale = 0;
