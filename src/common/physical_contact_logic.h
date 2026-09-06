@@ -112,6 +112,16 @@ inline bool PhysicalContactRecoveryNeedsRetreat(
         PhysicalContactLengthSquared(consumedOffset) > 1.0e-12f;
 }
 
+// Recovery invalidates old contact publications, not contact processing.
+// The existing until timestamp now rate-limits worker-history reset requests;
+// a sample from the next tick may be consumed before that cooldown expires.
+inline bool PhysicalContactSampleAfterHandRecovery(
+    uint64_t sampleMs, uint64_t recoveryUntilMs)
+{
+    return !recoveryUntilMs ||
+        (recoveryUntilMs >= 500 && sampleMs > recoveryUntilMs - 500);
+}
+
 inline float PhysicalContactLength(PhysicalContactVec3 v)
 {
     return std::sqrt(PhysicalContactLengthSquared(v));

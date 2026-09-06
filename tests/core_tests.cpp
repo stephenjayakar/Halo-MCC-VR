@@ -260,6 +260,23 @@ __declspec(noinline) static void TestRecordedSolidOverlap()
 
 static void TestHandRecoveryRetreatPolicy()
 {
+    // First Guardian headset reset. Old/same-tick approvals must not restore
+    // the rejected pose; next-tick contact must work within the 500 ms cooldown.
+    constexpr uint64_t guardianRecoveryMs = 80885953;
+    constexpr uint64_t guardianUntil = guardianRecoveryMs + 500;
+    Check(!PhysicalContactSampleAfterHandRecovery(guardianRecoveryMs-1, guardianUntil) &&
+          !PhysicalContactSampleAfterHandRecovery(guardianRecoveryMs, guardianUntil),
+        "Guardian recovery rejects pre-reset and same-tick publications");
+    Check(PhysicalContactSampleAfterHandRecovery(guardianRecoveryMs+1, guardianUntil) &&
+          PhysicalContactSampleAfterHandRecovery(guardianUntil-1, guardianUntil) &&
+          PhysicalContactSampleAfterHandRecovery(guardianUntil, guardianUntil),
+        "fresh contact resumes immediately without waiting for recovery cooldown");
+    Check(!PhysicalContactSampleAfterHandRecovery(guardianUntil, guardianUntil+500) &&
+          PhysicalContactSampleAfterHandRecovery(guardianUntil+1, guardianUntil+500),
+        "a second recovery rejects the prior recovery's publications");
+    Check(PhysicalContactSampleAfterHandRecovery(1, 0) &&
+          !PhysicalContactSampleAfterHandRecovery(1, 499),
+        "initial recovery state admits samples and malformed recovery time rejects");
     Check(!PhysicalContactRecoveryNeedsRetreat(false, false, false, true, {}),
         "known uncorrected free-space recovery resumes after cooldown");
     Check(PhysicalContactRecoveryNeedsRetreat(true, false, false, true, {}),

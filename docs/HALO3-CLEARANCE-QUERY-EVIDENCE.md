@@ -485,3 +485,41 @@ MCC/SteamVR and restored the original settings hash
 175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E.
 The live game configuration remained byte-identical, SHA-256
 C570089F47A17AE8645310C02688CA1454E1A02C9239BC24C5CC316E4DA94946.
+
+### Guardian headset rejection: recovery pauses contact (2026-09-06 UTC)
+
+The user rejected `8436e79` in Guardian Forge: weapons clipped through most
+walls and usually failed to nudge objects, with only intermittent interaction.
+The closed session is preserved under
+`out/headset-sessions/20260905-guardian-user-feedback/`, including config,
+identity JSON and analyzer output. Log SHA-256:
+`D0949973804A0131606542DB0DAA25402662AA93952993CCF67816A918180688`.
+Installed DLL SHA-256:
+`0417F56851CC5ED100618E88DA3044B0DCF96A4A1615D5D484ABC7C2EFDE4615`.
+Steam, SteamVR/OpenXR 2.17.8, Oculus headset path, 120 Hz panel. The config
+hash remains the one above. The sword experiment was not enabled.
+
+The monotonic recovery counter reached 112. Source inspection confirms each
+request caused the contact worker to return until at least 500 ms elapsed and,
+for constrained poses, until the render-side retreat condition was satisfied.
+The same state disabled rendered collision guarding and offset consumption.
+This deliberately allowed raw tracking through walls/objects during recovery.
+It is a concrete defect consistent with intermittent interaction; it does not
+prove the cause of every reported wall miss. Per-contact counters reset during
+recovery, so analyzer maxima must not be mistaken for session totals.
+
+The failed contact-wide pause is disabled as its own behavioral rollback,
+retaining its dormant code behind `kEnableHalo3LegacyRecoveryContactPause`.
+The 30 cm whole-palette reset remains. Its 500 ms timer only rate-limits new
+worker-history reset requests; worker sampling, native contact and the render
+guard continue. Pre-reset and same-tick approvals, cached palettes and hand
+offsets are rejected by timestamp. A fresh sample may be consumed on the next
+tick without waiting 500 ms or requiring retreat. The cold log explicitly
+reports `contactPause=0`. Tests use the first recorded Guardian recovery tick
+to check stale/same-tick rejection, next-tick admission during the cooldown,
+and a second reset invalidating prior publications.
+
+This rollback is not a promise of zero wall clipping. Resetting a weapon to a
+hand already deep inside a surface remains an unresolved placement case, and
+native collision coverage, current-pose approval and prop response still need
+Guardian runtime/headset verification. The accepted pointer is unchanged.
