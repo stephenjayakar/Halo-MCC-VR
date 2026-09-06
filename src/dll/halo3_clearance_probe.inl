@@ -125,9 +125,42 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     }
 }
 
-// Worker-only native adapter. The gather uses explicit owner exclusion because
-// the retail convenience movement wrapper drops that argument. See the pinned
-// first-contact ABI and record writes in HALO3-NATIVE-VOLUME-EVIDENCE.md.
+// The caller must own and validate the immutable features for this entire call.
+// This function performs only the audited math query, with no world gathering,
+// active-mask access or player/object lookup. It is not yet called by rendering.
+PhysicalContactVolumeCast Halo3CastVolumeFeatures(const void* features,
+    PhysicalContactVec3 start,PhysicalContactVec3 motion)
+{
+    PhysicalContactVolumeCast result{};
+    if (!features || !g_halo3VolumeFirstHit || !PhysicalContactFinite(start) ||
+        !PhysicalContactFinite(motion)) return result;
+    alignas(16) unsigned char record[48+64];
+    memset(record,0xCD,sizeof(record));
+    __try
+    {
+        result.hit=g_halo3VolumeFirstHit(features,&start.x,&motion.x,record);
+        memcpy(&result.fraction,record+0x10,4);
+        PhysicalContactVec3 point{}; memcpy(&point,record+0x14,sizeof(point));
+        if (!std::isfinite(result.fraction) || result.fraction<0 || result.fraction>1 ||
+            !PhysicalContactFinite(point) ||
+            PhysicalContactLength(point-(start+motion*result.fraction))>.001f) return {};
+        if (result.hit)
+        {
+            memcpy(&result.normal,record+0x20,sizeof(result.normal));
+            float distance=0; memcpy(&distance,record+0x2C,4);
+            if (!PhysicalContactFinite(result.normal) || !std::isfinite(distance) ||
+                std::abs(PhysicalContactLengthSquared(result.normal)-1)>.002f) return {};
+        }
+        for (size_t i=48;i<sizeof(record);++i) if (record[i]!=0xCD) return {};
+        result.valid=true;
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return {}; }
+    return result;
+}
+
+// Worker-only gather adapter. Explicit owner exclusion is required because the
+// retail convenience movement wrapper drops it. Evidence and record layout:
+// HALO3-NATIVE-VOLUME-EVIDENCE.md.
 PhysicalContactVolumeCast Halo3CastNativeVolume(PhysicalContactVec3 start,
     PhysicalContactVec3 motion, float radius, int32_t ignored, uint64_t flags)
 {
@@ -139,8 +172,7 @@ PhysicalContactVolumeCast Halo3CastNativeVolume(PhysicalContactVec3 start,
     const float searchRadius=radius+PhysicalContactLength(motion)*.5f;
     if (!PhysicalContactFinite(center) || !std::isfinite(searchRadius) || searchRadius>20) return result;
     alignas(16) unsigned char features[0xC490];
-    alignas(16) unsigned char record[48+64];
-    memset(features,0xCD,sizeof(features)); memset(record,0xCD,sizeof(record));
+    memset(features,0xCD,sizeof(features));
     __try
     {
         const uint32_t active=*g_halo3ClearanceActiveMask;
@@ -148,24 +180,12 @@ PhysicalContactVolumeCast Halo3CastNativeVolume(PhysicalContactVec3 start,
         const bool gathered=g_halo3ClearanceGather(flags,&center.x,searchRadius,0,radius,ignored,-1,features);
         uint16_t counts[3]{}; memcpy(counts,features,sizeof(counts));
         // A full feature category may be truncated. It is not a clear result.
-        if (counts[0]>=256 || counts[1]>=256 || counts[2]>=256) return result;
+        if (!Halo3VolumeFeaturesValid(features,sizeof(features))) return result;
         for (size_t i=0xC408;i<sizeof(features);++i) if (features[i]!=0xCD) return result;
         if (gathered)
         {
-            result.hit=g_halo3VolumeFirstHit(features,&start.x,&motion.x,record);
-            memcpy(&result.fraction,record+0x10,4);
-            PhysicalContactVec3 point{}; memcpy(&point,record+0x14,sizeof(point));
-            if (!std::isfinite(result.fraction) || result.fraction<0 || result.fraction>1 ||
-                !PhysicalContactFinite(point) ||
-                PhysicalContactLength(point-(start+motion*result.fraction))>.001f) return {};
-            if (result.hit)
-            {
-                memcpy(&result.normal,record+0x20,sizeof(result.normal));
-                float distance=0; memcpy(&distance,record+0x2C,4);
-                if (!PhysicalContactFinite(result.normal) || !std::isfinite(distance) ||
-                    std::abs(PhysicalContactLengthSquared(result.normal)-1)>.002f) return {};
-            }
-            for (size_t i=48;i<sizeof(record);++i) if (record[i]!=0xCD) return {};
+            result=Halo3CastVolumeFeatures(features,start,motion);
+            if (!result.valid) return result;
         }
         else if (counts[0] || counts[1] || counts[2]) return {};
         if (active!=*g_halo3ClearanceActiveMask) return {};

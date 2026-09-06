@@ -42,6 +42,7 @@
 #include "../common/odst_vehicle_logic.h"
 #include "../common/physical_contact_logic.h"
 #include "../common/physical_contact_volume_sweep.h"
+#include "../common/halo3_volume_feature_logic.h"
 #include "../common/scope_logic.h"
 #include "../common/weapon_aim_logic.h"
 

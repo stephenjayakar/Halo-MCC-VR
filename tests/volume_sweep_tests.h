@@ -1,8 +1,98 @@
 #pragma once
 #include "physical_contact_volume_sweep.h"
+#include "halo3_volume_feature_logic.h"
+#include "physical_contact_snapshot.h"
+#include <thread>
+
+static void TestContactSnapshotLifetime()
+{
+    struct Payload { uint64_t version=0; std::array<uint64_t,64> words{}; };
+    PhysicalContactSnapshot<Payload> snapshots;
+    Check(!snapshots.read(),"empty geometry snapshot does not masquerade as a clear world");
+    const auto publish=[&](uint64_t version) {
+        auto write=snapshots.write();
+        if (!write) return false;
+        write.get().version=version;
+        write.get().words.fill(version);
+        return write.publish(version);
+    };
+    Check(publish(1),"first immutable geometry snapshot publishes");
+    auto first=snapshots.read();
+    Check(bool(first) && first.version==1,"reader pins the exact published version");
+    Check(publish(2),"producer can publish while an older snapshot remains pinned");
+    auto second=snapshots.read();
+    Check(publish(3),"three slots permit another publication with two old readers");
+    Check(!publish(4) && first.get().version==1 && second.get().version==2,
+        "slot exhaustion skips publication instead of overwriting a reader's geometry");
+    // Retain old pins in this instance; exercise races in a separate exchange.
+    PhysicalContactSnapshot<Payload> concurrent;
+    std::atomic<uint64_t> next{0},writes{0},reads{0},errors{0};
+    std::atomic<unsigned> writersLeft{2};
+    const auto writer=[&] {
+        for (unsigned i=0;i<4000;++i)
+        {
+            const uint64_t version=next.fetch_add(1)+1;
+            auto claim=concurrent.write();
+            if (!claim) continue;
+            claim.get().version=version; claim.get().words.fill(version);
+            if (claim.publish(version)) writes.fetch_add(1);
+        }
+        writersLeft.fetch_sub(1);
+    };
+    const auto reader=[&] {
+        do
+        {
+            auto claim=concurrent.read();
+            if (!claim) continue;
+            const auto version=claim.version;
+            std::this_thread::yield(); // Writers run while this geometry stays pinned.
+            if (claim.get().version!=version) errors.fetch_add(1);
+            for (auto word:claim.get().words) if (word!=version) errors.fetch_add(1);
+            reads.fetch_add(1);
+        } while (writersLeft.load()!=0);
+    };
+    std::thread readA(reader),readB(reader),writeA(writer),writeB(writer);
+    writeA.join(); writeB.join(); readA.join(); readB.join();
+    Check(writes.load()>0 && reads.load()>0 && errors.load()==0,
+        "concurrent publishers never mutate pinned feature data or mismatch its version");
+    auto latest=concurrent.read();
+    Check(bool(latest),"a final published snapshot remains available after concurrent readers finish");
+    auto old=concurrent.write();
+    Check(bool(old) && !old.publish(1),"late old geometry cannot replace a newer published version");
+}
 
 static void TestPhysicalContactVolumeSweep()
 {
+    TestContactSnapshotLifetime();
+    auto features=std::make_unique<Halo3VolumeFeatures>();
+    Check(Halo3VolumeFeaturesValid(features->bytes.data(),features->bytes.size()),
+        "empty gathered feature snapshots remain valid negative controls");
+    Check(!Halo3VolumeFeaturesValid(features->bytes.data(),features->bytes.size()-1),
+        "truncated feature snapshots cannot be queried");
+    const auto set16=[&](size_t offset,uint16_t value) { std::memcpy(features->bytes.data()+offset,&value,2); };
+    const auto set32=[&](size_t offset,uint32_t value) { std::memcpy(features->bytes.data()+offset,&value,4); };
+    set16(0,256);
+    Check(!Halo3VolumeFeaturesValid(features->bytes.data(),features->bytes.size()),
+        "a saturated native feature category cannot claim complete coverage");
+    set16(0,1); set32(8+0x20,0x7FC00000);
+    Check(!Halo3VolumeFeaturesValid(features->bytes.data(),features->bytes.size()),
+        "nonfinite sphere radius cannot enter cached native math");
+    *features={}; set16(4,1); set16(0x5408+0x28,2); features->bytes[0x5408+0x2A]=1;
+    set32(0x5408+0x2C,8);
+    Check(Halo3VolumeFeaturesValid(features->bytes.data(),features->bytes.size()),
+        "maximum bounded prism polygon and projection indices are admitted");
+    set32(0x5408+0x2C,9);
+    Check(!Halo3VolumeFeaturesValid(features->bytes.data(),features->bytes.size()),
+        "prism polygon overflow cannot read beyond its embedded points");
+    set32(0x5408+0x2C,8); set16(0x5408+0x28,3);
+    Check(!Halo3VolumeFeaturesValid(features->bytes.data(),features->bytes.size()),
+        "prism projection index cannot escape the audited read-only axis table");
+    set16(0x5408+0x28,2); features->bytes[0x5408+0x2A]=2;
+    Check(!Halo3VolumeFeaturesValid(features->bytes.data(),features->bytes.size()),
+        "prism projection orientation cannot select an unproved table row");
+    features->bytes[0x5408+0x2A]=1; set32(0x5408+0x30+7*8+4,0x7F800000);
+    Check(!Halo3VolumeFeaturesValid(features->bytes.data(),features->bytes.size()),
+        "every referenced polygon coordinate must remain finite");
     const auto rotate = [](PhysicalContactTransform t, PhysicalContactVec3 axis, float angle) {
         t.forward=PhysicalContactRotateAxisAngle(t.forward,axis,angle);
         t.left=PhysicalContactRotateAxisAngle(t.left,axis,angle);

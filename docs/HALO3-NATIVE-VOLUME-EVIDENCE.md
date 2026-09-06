@@ -343,3 +343,63 @@ the caller's hand-distance limit. It returns the last swept pose plus a recovery
 flag for an unreachable target; it never teleports to the inside-wall hand pose.
 An outer rendering policy still has to implement that recovery. Both CTest
 suites pass; this helper has not yet been used by the installed runtime.
+
+### Snapshot machinery prepared for integration
+
+`Halo3CastVolumeFeatures` now separates the audited first-contact math from
+`Halo3CastNativeVolume`, which retains the worker-only gather and active-mask
+checks. The new helper takes caller-owned validated feature memory. It has no
+world gather, active-mask read or object lookup. It is still only reached from
+the opt-in worker probe; it is not called by rendering yet.
+
+`Halo3VolumeFeaturesValid` bounds the three outer categories and the nested
+prism accesses used by the reviewed primitive math: projection word at `+28`,
+orientation byte at `+2A`, polygon count at `+2C`, and embedded 2D points from
+`+30` in each 112-byte record. It admits projection 0..2, orientation 0..1 and
+0..8 points, so neither the read-only axis table nor embedded polygon can be
+indexed out of the reviewed range. All referenced geometry floats must be
+finite and bounded; sphere/cylinder radii must be nonnegative. Saturated outer
+categories remain unknown. These are conservative admission checks for copied
+snapshots; the new nested checks still need a retail probe result.
+
+`PhysicalContactSnapshot<T>` supplies three fixed slots with pinned immutable
+reads, bounded writer reservations, and monotonic publication versions. A slot
+is published before its writer reservation is released, closing the window in
+which a second producer could overwrite unpublished data. A reader pins a slot
+and rechecks its publication descriptor before accessing its payload. Slot
+exhaustion or contention returns no snapshot instead of blocking or overwriting
+a reader. RAII handles release reservations on early returns; no geometry is
+copied on the reader path and no allocation is performed by the exchange.
+
+Tests cover empty/truncated/saturated/malformed feature storage, nested polygon
+and projection bounds, readers held across successive publications, exhausted
+slots, late old versions, and two concurrent readers with two concurrent
+producers. Release compilation and both CTest suites pass. The core suite also
+passed 20 repeated runs to vary the new concurrency test's scheduling. This is
+implementation and stress evidence, not a proof of every possible schedule or
+an in-game rendering result. No package was installed for this preparation;
+installed source remains `068d808...` and normal headset settings are unchanged.
+
+Remaining integration obligations, not verified findings:
+
+- Gather complete world/instance features on the simulation worker, grouped by
+  exact expanded sphere radius, within a region containing every accepted sweep.
+  The point-inside/empty-feature seed stays on that worker too.
+- Tie each cache to scene generation/active structure, object-update epoch,
+  weapon identity, scale and bounded local node deformation. A copied feature
+  set alone gives neither lifetime nor whole-weapon coverage permission.
+- Run the first-contact math on pinned immutable features for the current
+  tracked pose. Keep a last clear pose and never accept an untested fractional
+  rotation, expired region or inside-wall hand reset.
+- Constrain the proposal before the worker's movable-object contact test, then
+  constrain the final palette again after body-follow mutations. Otherwise a
+  stopped visible gun could still apply forces to a target behind the wall, or
+  a later body-follow correction could move it through world geometry.
+- Preserve nudging/melee as separate object transactions. Current fresh-region
+  admission includes world geometry; changing it to object-only clearance is
+  valid only while a working world-volume guard owns the final palette. Existing
+  worker-approved free-space palettes must not continue adding the measured age.
+- Resolve unreachable hand targets without leaving a gun far away or resetting
+  it inside a solid. A hand more than the permitted distance inside the wall
+  cannot have both a visible solid weapon outside it and an unrestricted reset
+  to the hand; that fallback still needs implementation and headset evaluation.
