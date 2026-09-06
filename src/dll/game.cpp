@@ -15228,6 +15228,19 @@ namespace
                 Halo3PublishWorldVolume(nowMs,generation,weaponHandle,proposalRenderTag,unitHandle,
                     weaponShape,visibleNodes.data(),visibleNodeCount,worldScale);
                 Halo3AuditWorldDraw(nowMs,generation,weaponHandle,unitHandle,weaponData,worldScale);
+                bool awaitingWorldSeed=false;
+                Halo3WorldVolumeOwns(generation,weaponHandle,nowMs,&awaitingWorldSeed);
+                if (awaitingWorldSeed)
+                {
+                    // The hidden raw palette is still needed above to build
+                    // today's cover and prove withdrawal. It is not a physical
+                    // weapon pose: do not shove/melee through the obstruction,
+                    // or sweep from this unproved root on the recovery tick.
+                    // Do not reset the world cache; that would prevent reseeding.
+                    g_halo3ContactPreviousPoseValid=false;
+                    g_halo3ContactPreviousPoseMs=0;
+                    return;
+                }
             }
             if (!collisionShape && !physicsFallback)
             {

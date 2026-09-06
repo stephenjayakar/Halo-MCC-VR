@@ -1960,3 +1960,23 @@ unchanged. The next behavioral candidate must address no-seed draw disposition
 and continuity when a full cover cannot recover within the visible leash,
 using this exact replay to avoid another guessed recovery distance. Tighter
 cover geometry may also matter, but is not established by this capture alone.
+
+### 2026-09-06 pending candidate: retain ownership while awaiting a seed
+
+The captured fbf4d7f no-seed case previously returned disposition0 and allowed
+legacy recovery to publish a penetrating draw (audit59 inside10/10). Change
+that single recovery transaction to disposition2: keep raw request publication,
+hide the final draw, and preserve the current cache while the worker continues
+independent full-cover seed checks. A current unseeded cache still owns world
+contact; it is not permission to use the legacy wall/leash fallback. The worker
+returns after cover construction/audit while awaiting a seed, invalidating only
+previous physical sweep history so an invisible raw pose cannot shove/melee or
+become a recovery-tick sweep origin. Missing-seed diagnostics retain priority
+over generic hidden/clock records, preserving the harness stall check.
+
+No seed radius, feature membership, native binding, skin, leash, query budget,
+or accepted-build pointer changes. Existing bounded recovery remains intact.
+Partition mode is enabled only by its existing explicit environment opt-in.
+This is a pending behavioral candidate, not a headset acceptance or a completed
+collision solution. Required live evidence: sustained visible paired contact,
+obstructed no-seed handling, and withdrawal returning to a clear visible pose.

@@ -77,15 +77,15 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     constexpr bool kEnableHalo3WorldVolumeExperiment = false;
     const bool worldFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_VOLUME", value, 2) == 1 && value[0] == L'1';
-    // Disabled after bounded changed-cover depenetration found no clear seed
-    // at Guardian's angled doorway and the unowned sword draw penetrated.
-    constexpr bool kEnableHalo3WorldPartitionsExperiment = false;
+    // Explicit candidate: an unseeded current cover retains world ownership
+    // and hides until full-cover withdrawal is independently clear.
+    constexpr bool kEnableHalo3WorldPartitionsExperiment = true;
     const bool partitionsFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS", value, 2) == 1 && value[0] == L'1';
     const DWORD replayPathLength=GetEnvironmentVariableW(L"HALOMCCVR_H3_WORLD_REPLAY_PATH",nullptr,0);
     const bool replayRequested=replayPathLength>1 && replayPathLength<=MAX_PATH;
     const bool partitions = (kEnableHalo3WorldPartitionsExperiment || replayRequested) && partitionsFlag;
-    if (partitions && replayRequested)
+    if (partitions && replayRequested && !kEnableHalo3WorldPartitionsExperiment)
         LOG("H3 world recovery replay: explicit diagnostic reproduction of failed partition behavior; not a headset candidate");
     if (partitionsFlag && !kEnableHalo3WorldPartitionsExperiment && !replayRequested)
         LOG("H3 world partitions EXPERIMENT disabled after Guardian sword reset recovery failure; prior contact path retained; VR unchanged");

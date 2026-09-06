@@ -127,8 +127,8 @@ void Halo3ObserveWorldHandoff(uint64_t nowMs,uint64_t serial,uint64_t originMs,
     // Failures retain priority over clock cases. Decisions are unchanged here.
     const bool newer=after.cacheMs>nowMs && after.cacheMs<=after.evaluationMs;
     const uint32_t category=proposal && !final ? 0u :
-        (final!=2 && gap>.30f ? 1u : (newer ? 4u :
-        (final==2 ? 2u : (after.reason==5 ? 5u : 3u))));
+        (final!=2 && gap>.30f ? 1u : (after.reason==5 ? 5u :
+        (newer ? 4u : (final==2 ? 2u : 3u))));
     g_halo3WorldHandoffCounts[category].fetch_add(1,std::memory_order_relaxed);
     const uint32_t limit=category<2 || category>=4 ? 16u : 4u;
     if (g_halo3WorldHandoffReservations[category].load(std::memory_order_relaxed)>=limit) return;
@@ -628,16 +628,26 @@ void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
     if (write.publish(version)) g_halo3WorldBuilds.fetch_add(1,std::memory_order_relaxed);
 }
 
-bool Halo3WorldVolumeOwns(uint32_t generation,int32_t weapon,uint64_t nowMs)
+bool Halo3WorldVolumeOwns(uint32_t generation,int32_t weapon,uint64_t nowMs,
+    bool* awaitingSeed=nullptr)
 {
+    if (awaitingSeed) *awaitingSeed=false;
     if (!g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) ||
         g_halo3WorldGatherOnly.load(std::memory_order_acquire)) return false;
     auto cache=g_halo3WorldCaches.read();
     if (!cache) return false;
     const auto& c=cache.get();
-    return c.seeded && c.generation==generation && c.weapon==weapon &&
+    const bool owns=c.generation==generation && c.weapon==weapon &&
         c.reset==g_halo3WorldReset.load(std::memory_order_acquire) &&
         nowMs>=c.ms && nowMs-c.ms<=20 && c.epoch==g_halo3ClearanceEpoch.load(std::memory_order_acquire);
+    if (owns && awaitingSeed && !c.seeded)
+    {
+        auto safe=g_halo3WorldPoses.read();
+        *awaitingSeed=!(safe && safe.get().generation==generation && safe.get().reset==c.reset &&
+            safe.get().weapon==weapon && safe.get().tag==c.tag && safe.get().shape==c.shape &&
+            safe.get().active==c.active);
+    }
+    return owns;
 }
 
 // Returns 0 before ownership, 1 for a swept/held physical pose, 2 when the
@@ -686,7 +696,19 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
         safe.get().weapon==weapon && safe.get().tag==tag && safe.get().shape==c.shape &&
         safe.get().active==c.active;
     observation.safe=haveSafe;
-    if (!c.seeded && !haveSafe) { observation.reason=5; return 0; }
+    if (!c.seeded && !haveSafe)
+    {
+        // A complete gather with no clear placement is obstructed recovery,
+        // not loss of world ownership. Keep publishing the tracked request so
+        // withdrawal can independently seed the full current cover. Returning
+        // zero here let the legacy leash draw an untested root through solids.
+        // These matrices are shape/recovery input only; the worker suppresses
+        // physical interactions until a seed exists, and final drawing hides.
+        observation.reason=5;
+        g_halo3WorldHolds.fetch_add(1,std::memory_order_relaxed);
+        g_halo3WorldHidden.fetch_add(1,std::memory_order_relaxed);
+        return 2;
+    }
     auto pose=haveSafe ? safe.get().root : c.seed;
     // A worker's independently clear recovery seed supersedes an over-leash
     // old pose. It never authorizes a reset at an untested raw hand position.
