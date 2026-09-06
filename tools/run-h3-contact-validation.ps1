@@ -41,7 +41,8 @@ param(
     [switch]$ProbeClearance,
     [switch]$FreshRegion,
     [switch]$KeyboardGamepad,
-    [switch]$SelectionProbe
+    [switch]$SelectionProbe,
+    [switch]$BladeGeometry
 )
 
 # Runs one Halo 3 physical-contact transaction through SteamVR's null driver.
@@ -62,6 +63,9 @@ if ($FreshRegion -and $Test -ne 'controller-contact') {
 }
 if ($SelectionProbe -and $Test -ne 'controller-contact') {
     throw 'SelectionProbe requires the normal controller-contact path.'
+}
+if ($BladeGeometry -and $Test -ne 'controller-contact') {
+    throw 'BladeGeometry requires the normal controller-contact path.'
 }
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -549,6 +553,16 @@ if (-not $ExternalMenuControl) {
 if (Get-Process $mccProcessName -ErrorAction SilentlyContinue) {
     throw 'Close MCC before starting unattended validation.'
 }
+# A running client can still be at its sign-in screen. Do not switch SteamVR
+# into null mode until the Steam edition has an actual account session.
+$steamSession = Get-ItemProperty 'HKCU:\Software\Valve\Steam\ActiveProcess' -ErrorAction SilentlyContinue
+$steamClient = if ($steamSession -and $steamSession.pid) {
+    Get-Process -Id $steamSession.pid -ErrorAction SilentlyContinue
+}
+if (-not $steamClient -or $steamClient.ProcessName -ne 'steam' -or
+    -not $steamSession.ActiveUser) {
+    throw 'Steam is not signed in. Sign in before running MCC validation; SteamVR settings have not been changed.'
+}
 
 $installRoot = $steamInstallRoots | Where-Object {
     Test-Path -LiteralPath (Join-Path $_ 'MCC\Binaries\Win64\MCC-Win64-Shipping.exe')
@@ -581,6 +595,7 @@ $failure = $null
 $debugVariables = @(
     'HALOMCCVR_DEBUG_KEYBOARD_GAMEPAD',
     'HALOMCCVR_H3_SWORD_SELECTION_PROBE',
+    'HALOMCCVR_H3_SWORD_BLADE_EXPERIMENT',
     'HALOMCCVR_H3_AIM_DEBUG_POSE',
     'HALOMCCVR_H3_CONTACT_DEBUG_RIG',
     'HALOMCCVR_H3_CONTACT_DEBUG_SCOOP',
@@ -647,6 +662,7 @@ try {
     if ($TestHandRecovery) { $env:HALOMCCVR_H3_CONTACT_DEBUG_HAND_RECOVERY = '1' }
     if ($KeyboardGamepad) { $env:HALOMCCVR_DEBUG_KEYBOARD_GAMEPAD = '1' }
     if ($SelectionProbe) { $env:HALOMCCVR_H3_SWORD_SELECTION_PROBE = '1' }
+    if ($BladeGeometry) { $env:HALOMCCVR_H3_SWORD_BLADE_EXPERIMENT = '1' }
     if ($ProbeClearance) { $env:HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE = '1' }
     if ($FreshRegion) { $env:HALOMCCVR_H3_CONTACT_FRESH_REGION = '1' }
     if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
@@ -945,6 +961,9 @@ public static class HaloMccVrContactInput {
             throw 'Halo 3 visible-weapon-gap recorded an exact visible-geometry penetration.'
         }
         (Test-ValidationResult $text $Test) -and
+            (-not $BladeGeometry -or
+             ($text -match 'H3 sword EXPERIMENT: observations=[1-9][0-9]* paired=[1-9][0-9]* appends=[1-9][0-9]* stale=[0-9]+ rejected=0 active=1' -and
+              $text -match 'H3 physical contact status:.*weaponTriangles=256 ')) -and
             (-not $SelectionProbe -or
              ($text -match 'H3 selection PROBE status: enabled=1 calls=[1-9][0-9]* changes=[1-9][0-9]* rejected=[0-9]+ faults=0' -and
               $text -match 'H3 selection PROBE record:.*matchesDrawn=1 drawnSerial=[1-9][0-9]*')) -and
@@ -968,6 +987,11 @@ public static class HaloMccVrContactInput {
     if ($SelectionProbe -and ($text -match 'H3 selection PROBE status:.*faults=[1-9][0-9]*' -or
         $text -notmatch 'H3 selection PROBE record:.*matchesDrawn=1 drawnSerial=[1-9][0-9]*')) {
         throw 'Selection probe faulted or did not pair a selection with the published final palette.'
+    }
+    if ($BladeGeometry -and ($text -match 'H3 selection PROBE status:.*faults=[1-9][0-9]*' -or
+        $text -match 'H3 sword EXPERIMENT:.*rejected=[1-9][0-9]*' -or
+        $text -notmatch 'H3 physical contact status:.*weaponTriangles=256 ')) {
+        throw 'Sword geometry did not remain fault-free with the complete handle and blade mesh.'
     }
     if ($FreshRegion -and $text -match 'H3 fresh region EXPERIMENT status:.*faults=[1-9][0-9]*') {
         throw 'Fresh-region experiment faulted; its rendering permission disabled itself.'
@@ -1056,6 +1080,7 @@ $result = [ordered]@{
     hand_recovery_requested = [bool]$TestHandRecovery
     keyboard_gamepad_requested = [bool]$KeyboardGamepad
     selection_probe_requested = [bool]$SelectionProbe
+    blade_geometry_requested = [bool]$BladeGeometry
     post_pass_hold_seconds = $PostPassHoldSeconds
     fresh_region_requested = [bool]$FreshRegion
     source_commit = $runtimeSourceCommit

@@ -648,3 +648,53 @@ stock-weapon structural identity check; it is not a promise about arbitrary
 custom models. The read-only live probe now preserves the render definition's
 first fourteen u32 values so the corresponding retail header can be checked
 before relying on a checksum field offset.
+
+## Opt-in runtime blade candidate
+
+`HALOMCCVR_H3_SWORD_BLADE_EXPERIMENT=1` (harness `-BladeGeometry`) enables the
+already-verified native selection-count hook plus the new blade shape append.
+Normal launches remain unchanged. Runtime identification uses the official
+census's unique two-region/two-node structure and both loaded inverse matrices:
+identity root, identity child basis/scale with x=-0.11773931980133057. It does
+not use a fixed map tag index or the still-unverified checksum offset. Arbitrary
+custom models with the same structure/inverses have not been audited.
+
+The observation must match the primary prepared full render tag, an actual
+weapon object, and the exact last-drawn palette. It publishes generation,
+render datum, weapon handle, weapon definition, inverse matrix, selected mesh
+state and time using atomics and one non-waiting CAS publication attempt.
+Only selections `[0,1]` with two matrices authorize the blade. Readers make at
+most three snapshot attempts and require the same generation, active weapon,
+prepared render and object definition, plus age no greater than 50 ms. A
+missing, mismatched, unpaired, stale or unavailable selection retains the
+existing handle; the cold status reports observations, paired captures, appends,
+stale reads and rejected geometry. Observation exceptions still disable the
+optional hook's observation alone, letting any old authorization expire.
+
+This is a bounded last-observed selection policy, not a same-frame guarantee:
+each consumer rebuilds geometry from its supplied current/proposed palette's
+blade matrix using the freshly observed selection descriptor. The first switch
+capture cannot authorize blades until it pairs. Animation/selection changes
+between native observations remain an explicit runtime acceptance concern.
+
+The shared held-weapon shape reader appends the blade for worker contact and
+render separation paths; target-object shape calls (`allowFirstPermutation`)
+do not gain first-person blade geometry. All 134 handle/prong positions fit the
+existing 256 wall-plane capacity; the 64-sample detail budget does not truncate
+authored vertices. Two prong groups plus the handle produce 256 triangles.
+Physics thresholds, NPC damage policy, recovery and camera ownership are
+unchanged. Geometry construction failures preserve the valid handle counts.
+
+The candidate is not runtime-tested yet. The header-inspection attempts using
+the unchanged installed `bf488fd` failed before reaching Halo 3: first Steam
+was closed, then MCC exited code 1 while Steam had no signed-in account.
+Results `20260906-051131315Z-controller-contact-result.json` and
+`20260906-051351144Z-controller-contact-result.json` are under `out/debug-openxr`;
+the second preserved log SHA-256 is
+`3ED529FE23FAB601AB1EEB59E7951133146FEEF1F64B95B69837482B68442C20`.
+The cause of the second process exit is not proven by its exit code alone.
+Steam subsequently showed the `Sign in to Steam` window and registry
+`ActiveUser=0`; the user was asked to sign in. Both harness cleanup runs
+restored the original SteamVR settings hash. The harness now checks Steam's
+active process/account before making any SteamVR changes; the signed-out
+rejection and unchanged settings hash were verified locally.

@@ -33,6 +33,7 @@
 #include "../common/halo3_aim_assist_logic.h"
 #include "../common/halo3_direct_weapon_aim_logic.h"
 #include "../common/halo3_theater_logic.h"
+#include "../common/halo3_sword_contact_logic.h"
 #include "../common/halo3_vehicle_logic.h"
 #include "../common/hud_layout_logic.h"
 #include "../common/input_logic.h"
@@ -8355,6 +8356,10 @@ namespace
         return result;
     }
 
+    bool Halo3ContactObjectDataForHandle(int32_t objectHandle,
+        unsigned char*& objectData,uint8_t* objectKind);
+    #include "halo3_sword_runtime.inl"
+
     // Official H3EK collision-model field tables prove the loaded layouts:
     // model collision datum +0x1C; collision regions block +0x20; 0x10-byte
     // region; 0x28-byte permutation; 0x64-byte BSP; and the BSP vertex block
@@ -8656,8 +8661,12 @@ namespace
                 }
             }
         }
-        return PhysicalContactCompoundValid(output) &&
+        const bool valid = PhysicalContactCompoundValid(output) &&
             (!triangleMesh || PhysicalContactTriangleMeshValid(*triangleMesh));
+        if (valid && !allowFirstPermutation)
+            Halo3AppendLiveSwordGeometry(objectData,visibleNodes,visibleNodeCount,
+                visibleRoot,output,triangleMesh);
+        return valid;
     }
 
     // These accessors mirror object_get_center_of_mass and the native point

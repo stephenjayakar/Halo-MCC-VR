@@ -65,6 +65,8 @@ void Halo3ObserveSelection(uint32_t tag, const uint16_t* meshes, int32_t matrixC
         if (!entry) return;
         key.weapon = *reinterpret_cast<const int32_t*>(entry + 4);
         memcpy(key.meshes, meshes, key.regions * sizeof(uint16_t));
+        Halo3ObserveSwordSelection(tag,key.weapon,key.regions,key.nodes,matrixCount,
+            meshes,entry,definition);
         // Keep the first selection and its first exact published-palette match.
         // A switch's first palette may not match the contact publication;
         // selection-only deduplication would hide every later settled match.
@@ -158,12 +160,15 @@ void Halo3LogSelectionProbe()
         g_halo3SelectionProbeEnabled.load(), (unsigned long long)g_halo3SelectionProbeCalls.load(),
         (unsigned long long)g_halo3SelectionProbeReservations.load(),
         (unsigned long long)g_halo3SelectionProbeRejected.load(), (unsigned long long)g_halo3SelectionProbeFaults.load());
+    Halo3LogSwordGeometry();
 }
 
 void Halo3InstallSelectionProbe(uintptr_t base, size_t size)
 {
-    wchar_t flag[2]{};
-    if (GetEnvironmentVariableW(L"HALOMCCVR_H3_SWORD_SELECTION_PROBE", flag, 2) != 1 || flag[0] != L'1') return;
+    wchar_t flag[2]{}, bladeFlag[2]{};
+    const bool capture = GetEnvironmentVariableW(L"HALOMCCVR_H3_SWORD_SELECTION_PROBE",flag,2)==1 && flag[0]==L'1';
+    const bool blade = GetEnvironmentVariableW(L"HALOMCCVR_H3_SWORD_BLADE_EXPERIMENT",bladeFlag,2)==1 && bladeFlag[0]==L'1';
+    if (!capture && !blade) return;
     const auto unique = [=](const char* pattern) {
         const uintptr_t hit = sig::Find(base, size, pattern);
         return hit && !sig::Find(hit + 1, base + size - hit - 1, pattern) ? hit : uintptr_t{0};
@@ -204,6 +209,7 @@ void Halo3InstallSelectionProbe(uintptr_t base, size_t size)
         LOG("H3 selection PROBE unavailable: hook enable failed; camera/contact unchanged");
         return;
     }
-    LOG("H3 selection PROBE installed at +0x%llX caller=+0x%llX palette=+0x%llX; capture only, no collision changes",
-        (unsigned long long)(leaf-base), (unsigned long long)(caller-base), (unsigned long long)(palette-base));
+    g_halo3SwordExperiment.store(blade,std::memory_order_release);
+    LOG("H3 selection PROBE installed at +0x%llX caller=+0x%llX palette=+0x%llX; sword geometry experiment=%d",
+        (unsigned long long)(leaf-base), (unsigned long long)(caller-base), (unsigned long long)(palette-base),blade);
 }
