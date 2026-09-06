@@ -38,7 +38,8 @@ param(
 
     [switch]$ExternalMenuControl,
     [switch]$TestHandRecovery,
-    [switch]$ProbeClearance
+    [switch]$ProbeClearance,
+    [switch]$FreshRegion
 )
 
 # Runs one Halo 3 physical-contact transaction through SteamVR's null driver.
@@ -53,6 +54,9 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($TestHandRecovery -and $Test -notin @('visible-weapon-gap', 'controller-contact')) {
     throw 'TestHandRecovery requires visible-weapon-gap or controller-contact.'
+}
+if ($FreshRegion -and $Test -ne 'controller-contact') {
+    throw 'FreshRegion requires the normal controller-contact path, not a synthetic contact fixture.'
 }
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -582,7 +586,8 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_HAND_RECOVERY',
     'HALOMCCVR_H3_CONTACT_DEBUG_ROTATING'
     'HALOMCCVR_H3_CONTACT_DEBUG_NPC_SHOVE'
-    'HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE'
+    'HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE',
+    'HALOMCCVR_H3_CONTACT_FRESH_REGION'
 )
 $savedEnvironment = @{}
 foreach ($name in $debugVariables) {
@@ -634,6 +639,7 @@ try {
     }
     if ($TestHandRecovery) { $env:HALOMCCVR_H3_CONTACT_DEBUG_HAND_RECOVERY = '1' }
     if ($ProbeClearance) { $env:HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE = '1' }
+    if ($FreshRegion) { $env:HALOMCCVR_H3_CONTACT_FRESH_REGION = '1' }
     if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
         $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT = '1'
@@ -930,6 +936,8 @@ public static class HaloMccVrContactInput {
             throw 'Halo 3 visible-weapon-gap recorded an exact visible-geometry penetration.'
         }
         (Test-ValidationResult $text $Test) -and
+            (-not $FreshRegion -or
+             $text -match 'H3 fresh region EXPERIMENT status: enabled=1 queries=[1-9][0-9]* clears=[1-9][0-9]* frames=[1-9][0-9]* shapeRejects=[0-9]+ faults=0') -and
             (-not $ProbeClearance -or
              $text -match 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0') -and
             (-not $TestHandRecovery -or
@@ -941,6 +949,9 @@ public static class HaloMccVrContactInput {
         Start-Sleep -Seconds $PostPassHoldSeconds
     }
     $text = Get-NewLogText $runtimeLog $startedUtc
+    if ($FreshRegion -and $text -match 'H3 fresh region EXPERIMENT status:.*faults=[1-9][0-9]*') {
+        throw 'Fresh-region experiment faulted; its rendering permission disabled itself.'
+    }
     if ($ProbeClearance -and ($text -match 'H3 clearance PROBE sample:.*(?:bounds=0|faulted=1)' -or
         $text -notmatch 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0')) {
         throw 'Clearance probe did not complete 32 bounded, fault-free observations.'
@@ -1023,6 +1034,7 @@ $result = [ordered]@{
     requested_scenario = $Scenario
     passed = $passed
     hand_recovery_requested = [bool]$TestHandRecovery
+    fresh_region_requested = [bool]$FreshRegion
     source_commit = $runtimeSourceCommit
     validator_source_commit = $validatorCommit
     installed_dll_sha256 = $testedDllHash

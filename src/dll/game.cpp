@@ -968,6 +968,10 @@ namespace
     // palette instead of showing a penetrating pose for one reactive frame.
     Halo3VisibleWeaponPosePublication g_halo3ProposedWeaponPose;
     Halo3VisibleWeaponPosePublication g_halo3ApprovedWeaponPose;
+    std::atomic<uint64_t> g_halo3ClearanceEpoch{1};
+    bool Halo3AllowFreshRegion(uint32_t generation, uint64_t approvedSerial,
+        uint64_t nowMs, const BoneMatrix* approved, const BoneMatrix* proposed,
+        uint32_t nodeCount);
     std::atomic<uint64_t> g_halo3VisibleWeaponProposalSerial{0};
     std::atomic<int32_t> g_halo3ContactActiveWeaponHandle{-1};
     std::atomic<uint64_t> g_halo3ContactApprovedPalettes{0};
@@ -6040,9 +6044,13 @@ namespace
                         static_cast<uint32_t>(renderNodeCount),
                         previousNodeCount, proposalSerial, previousSerial,
                         previousMs, nowMs);
+                const bool freshRegion = compatibleApproval && !approvedCorrected &&
+                    !candidateCorrectionApplied && Halo3AllowFreshRegion(
+                        contactGeneration, approvedSerial, nowMs, approvedNodes.data(),
+                        destination, static_cast<uint32_t>(renderNodeCount));
                 const PhysicalContactPaletteDisposition paletteDisposition =
                     PhysicalContactPaletteDispositionForRender(
-                        guardActive, compatibleApproval,
+                        guardActive && !freshRegion, compatibleApproval,
                         compatiblePrevious);
                 const bool useApproval = paletteDisposition ==
                     PhysicalContactPaletteDisposition::Approved;
@@ -6057,10 +6065,11 @@ namespace
                 uint64_t displayedSerial = proposalSerial;
                 bool displayedCorrected = false;
                 // 0 = outside the contact guard, 1 = worker-approved,
-                // 2 = last same-weapon palette, 3 = raw unproved proposal.
+                // 2 = last same-weapon palette, 3 = raw unproved proposal,
+                // 4 = experimental native empty-region allowance.
                 uint32_t renderProof = 0;
                 if (guardActive)
-                    renderProof = useApproval ? 1u :
+                    renderProof = freshRegion ? 4u : useApproval ? 1u :
                         (compatiblePrevious ? 2u : 3u);
                 if (useApproval)
                 {
@@ -13370,6 +13379,8 @@ namespace
     // The original always runs after a failure.
     void __fastcall Halo3ObjectsUpdateHook()
     {
+        // Never carry a clear-region allowance across a native object update.
+        g_halo3ClearanceEpoch.fetch_add(1, std::memory_order_acq_rel);
         bool deferredNpcShove = false;
         int32_t deferredNpcPlayer = -1;
         bool deferredWorldVelocity = false;
@@ -16476,6 +16487,19 @@ namespace
                     visibleNodeCount, proposalRenderTag, weaponHandle,
                     proposalSerial, nowMs,
                     PhysicalContactLengthSquared(approvedOffset) > 1.0e-10f);
+                if (g_halo3FreshRegionEnabled.load(std::memory_order_acquire))
+                {
+                    const float bound = std::max(
+                        PhysicalContactCompoundBoundRadius(weaponShape),
+                        PhysicalContactTriangleMeshValid(weaponTriangleMesh)
+                            ? PhysicalContactTriangleMeshBoundRadius(weaponTriangleMesh) : 0.0f)
+                        * weaponTransform.scale;
+                    Halo3PublishFreshRegion(nowMs, generation, proposalSerial,
+                        {approvedNodes[0].translation[0], approvedNodes[0].translation[1],
+                         approvedNodes[0].translation[2]}, bound, worldScale, unitHandle,
+                        !debugRig && collisionShape &&
+                        PhysicalContactLengthSquared(approvedOffset) <= 1.0e-10f);
+                }
                 g_halo3ContactApprovedPalettes.fetch_add(
                     1, std::memory_order_relaxed);
             };

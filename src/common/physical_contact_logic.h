@@ -302,6 +302,49 @@ inline PhysicalContactVec3 PhysicalContactInverseTransformPoint(
     return PhysicalContactInverseTransformVector(t, world - t.position);
 }
 
+// A native empty sphere encloses a shape about its root. Reusing it permits
+// rigid hand motion, not a scale change or a different animation of the shape.
+inline bool PhysicalContactNodeRigidlyUnchanged(
+    const PhysicalContactTransform& oldRoot, const PhysicalContactTransform& root,
+    const PhysicalContactTransform& oldNode, const PhysicalContactTransform& node)
+{
+    const auto rigid = [](const PhysicalContactTransform& t) {
+        return PhysicalContactTransformFinite(t) &&
+            std::abs(PhysicalContactLengthSquared(t.forward) - 1.0f) < 0.001f &&
+            std::abs(PhysicalContactLengthSquared(t.left) - 1.0f) < 0.001f &&
+            std::abs(PhysicalContactLengthSquared(t.up) - 1.0f) < 0.001f &&
+            std::abs(PhysicalContactDot(t.forward, t.left)) < 0.001f &&
+            std::abs(PhysicalContactDot(t.forward, t.up)) < 0.001f &&
+            std::abs(PhysicalContactDot(t.left, t.up)) < 0.001f;
+    };
+    if (!rigid(oldRoot) || !rigid(root) || !rigid(oldNode) || !rigid(node) ||
+        std::abs(oldRoot.scale - root.scale) > 0.00001f ||
+        std::abs(oldNode.scale - node.scale) > 0.00001f)
+        return false;
+    const auto close = [](PhysicalContactVec3 a, PhysicalContactVec3 b) {
+        return PhysicalContactLengthSquared(a - b) < 1.0e-8f;
+    };
+    return close(PhysicalContactInverseTransformPoint(oldRoot, oldNode.position),
+                 PhysicalContactInverseTransformPoint(root, node.position)) &&
+        close(PhysicalContactInverseTransformVector(oldRoot, oldNode.forward),
+              PhysicalContactInverseTransformVector(root, node.forward)) &&
+        close(PhysicalContactInverseTransformVector(oldRoot, oldNode.left),
+              PhysicalContactInverseTransformVector(root, node.left)) &&
+        close(PhysicalContactInverseTransformVector(oldRoot, oldNode.up),
+              PhysicalContactInverseTransformVector(root, node.up));
+}
+
+inline bool PhysicalContactFreshRegionContains(
+    uint64_t sampledEpoch, uint64_t currentEpoch, uint64_t sampleMs, uint64_t nowMs,
+    PhysicalContactVec3 center, float rootAllowance, PhysicalContactVec3 root)
+{
+    return sampledEpoch && sampledEpoch == currentEpoch && sampleMs &&
+        nowMs >= sampleMs && nowMs - sampleMs <= 20 &&
+        PhysicalContactFinite(center) && PhysicalContactFinite(root) &&
+        std::isfinite(rootAllowance) && rootAllowance > 0.0f &&
+        PhysicalContactLengthSquared(root - center) < rootAllowance * rootAllowance;
+}
+
 struct PhysicalContactRigidBodyFollow
 {
     bool valid = false;

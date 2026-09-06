@@ -399,3 +399,31 @@ is not a renderer lifetime bound; its misleading comment was corrected.
 Allowing fresh tracking still requires conservative geometry coverage and
 rendered dynamic-object freshness; moving the simulation phase alone did not
 resolve either requirement.
+
+### Opt-in fresh-region rendering experiment
+
+The verifier now additionally checks the RIP-relative active-mask reads at
+retail 1FCB20 and 1FE899; both resolve to 46B70A8. Runtime binding resolves
+those operands from the uniquely matched entries and requires agreement.
+Zero or high unsupported bits in the active mask reject a region.
+
+HALOMCCVR_H3_CONTACT_FRESH_REGION=1 enables an experimental rendering path;
+normal launches leave it disabled. The simulation worker uses the tested
+point and gather calls with structure, instances and all object categories.
+It queries a sphere enclosing the current compound/triangle collision shape,
+plus 0.30 m root travel and 0.25 m reserve. Only a clear point and empty gather
+permit fresh tracking. Corrected contact poses never issue this permission.
+The permission matches the exact approved serial and title generation, expires
+after 20 ms, and is invalidated before the next objects_update begins. The
+renderer additionally requires rigidly unchanged per-node geometry and scale.
+Its read uses atomic fields with bounded seqlock checks, without native queries,
+allocation or file I/O in the render hook. Query faults disable this experiment
+alone. Otherwise the existing approval/hold/contact recovery path remains.
+
+The reserve is a test parameter, not a proven bound on every dynamic object or
+render interpolation. The shape is the existing authored collision shape;
+this experiment does not add missing sword-blade geometry. Native collection
+exclusions and intermediate capacity coverage remain limitations. The option
+must not become a default merely because a free-space admission test passes.
+The harness -FreshRegion option runs only the normal controller-contact path
+and requires actual queries, clear regions, rendered fresh frames and no fault.

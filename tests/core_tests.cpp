@@ -9162,6 +9162,28 @@ int main()
                   retreat({.11f, 0, 0}, {NAN, 0, 0}),
                   "Recovery follows diagonal correction direction and retains an escape for invalid correction data");
         }
+        {
+            PhysicalContactTransform oldRoot{}, oldNode{}, root{}, node{};
+            oldNode.position = {.2f, .1f, 0};
+            root.position = {1, 2, 0};
+            root.forward = {0, 1, 0}; root.left = {-1, 0, 0};
+            node = root; node.position = {.9f, 2.2f, 0};
+            Check(PhysicalContactNodeRigidlyUnchanged(oldRoot, root, oldNode, node),
+                  "Fresh-region shape identity permits rigid rotation and translation");
+            node.position.x += .002f;
+            Check(!PhysicalContactNodeRigidlyUnchanged(oldRoot, root, oldNode, node),
+                  "Fresh-region shape identity rejects changed child animation");
+            node.position.x -= .002f; node.scale = 2;
+            Check(!PhysicalContactNodeRigidlyUnchanged(oldRoot, root, oldNode, node),
+                  "Fresh-region shape identity rejects scaling");
+            Check(PhysicalContactFreshRegionContains(7, 7, 1000, 1020, {}, .1f, {.09f, 0, 0}) &&
+                  !PhysicalContactFreshRegionContains(7, 8, 1000, 1001, {}, .1f, {}) &&
+                  !PhysicalContactFreshRegionContains(7, 7, 1000, 1021, {}, .1f, {}) &&
+                  !PhysicalContactFreshRegionContains(7, 7, 1000, 999, {}, .1f, {}) &&
+                  !PhysicalContactFreshRegionContains(7, 7, 1000, 1001, {}, .1f, {.1f, 0, 0}) &&
+                  !PhysicalContactFreshRegionContains(0, 0, 1000, 1001, {}, .1f, {}),
+                  "Fresh-region permission is bounded by native epoch, time, and strict spatial containment");
+        }
         Check(PhysicalContactApprovedPaletteCompatible(
                   kActiveWeaponRenderTag, kActiveWeaponRenderTag,
                   0x12340001, 0x12340001, 5, 5, 30, 11, 1000, 5000) &&

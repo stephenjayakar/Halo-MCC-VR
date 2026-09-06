@@ -65,12 +65,21 @@ def verify(official, retail):
         ('retail', 0x340E46, 'f2 0f 11 45 50')):
         if modules[label].get_data(site, 5) != bytes.fromhex(pattern):
             raise ValueError(f'{label}: later position write mismatch')
+    mask_slots = []
+    for site, prefix in ((0x1FCB20, '8b 3d'), (0x1FE899, '8b 05')):
+        ins = modules['retail'].get_data(site, 6)
+        if ins[:2] != bytes.fromhex(prefix):
+            raise ValueError('Active structure mask read mismatch')
+        mask_slots.append(site + 6 + struct.unpack('<i', ins[2:])[0])
+    if mask_slots != [0x46B70A8, 0x46B70A8]:
+        raise ValueError('Point and gather do not share the verified active mask')
     result.update({
         'gather_calls': {k: {hex(a): hex(b) for a, b in v.items()} for k, v in calls.items()},
         'gather_unique_patterns': {hex(a): b for a, b in patterns.items()},
         'retail_feature_gather_candidate': '0x1fe800',
         'native_radius_inflation_world_units': 0.0625,
         'retail_later_object_stage': '0x3408f0',
+        'retail_active_structure_mask': hex(mask_slots[0]),
         'objects_update_is_last_position_update': False,
         'limitations': result['limitations'] + [
             'Retail gather consumes the first ignored-object argument; do not assume two exclusions.',
