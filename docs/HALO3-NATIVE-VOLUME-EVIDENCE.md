@@ -611,3 +611,58 @@ null disabled, forced driver empty, real headset required. The accepted pointer
 has not advanced and WorldVolume remains opt-in. Campaign, instance/rock
 coverage, sword animation, physical items, NPC shove/melee and headset feel
 remain necessary before enabling this as the normal interaction path.
+
+### Floodgate setup attempt: no contact positive control
+
+Run `out/debug-openxr/20260906-090054092Z-controller-contact-result.json`
+used the same installed 143f3a3 DLL, Steam / SteamVR null / Null Model Number,
+with WorldVolume enabled and BladeGeometry disabled. Log SHA:
+`9B7150270FB39B2DAE25A9E76505C9B6879813CA8443A9A11C924208BCB8BCA0`.
+The existing Resume automation loaded the Floodgate outdoor rock area holding
+the sword. A 350 ms diagnostic Y pulse did not visibly switch weapons. The
+screenshot after movement still showed the sword, so a rifle test must not be
+inferred from the delivered input. The audited mesh had 12 triangles: this run
+cannot establish blade coverage.
+
+The harness timed out without its required two visible positive paired audits.
+Last preserved counters: 84,980 admitted solves, zero blocks, 3,758 holds,
+341 hidden submissions, 745 shape rejects, 96 seeds, zero unknown queries,
+budget exhaustion or native faults. This is an inconclusive setup attempt,
+not a passed Campaign collision test or evidence of rock penetration. Shape
+rejections during this run merit a separate animation/recovery investigation;
+the counts alone do not establish their cause or headset visibility.
+
+Before launch, the current profile and three paired Campaign save files were
+copied and hash verified under
+`out/test-runs/20260906-090053-before-world-volume-campaign/manifest.json`.
+After harness cleanup closed MCC, post-test files were preserved there under
+`post-test/`, then all four pre-test files were restored and independently
+hash verified. `post-test/restoration.json` records both versions. SteamVR
+settings independently matched the previous real-headset hash, with null off,
+forced driver empty and requireHmd true. No code behavior or accepted pointer
+changed for this attempt.
+
+The immediate retry with BladeGeometry enabled did not reach gameplay:
+`out/debug-openxr/20260906-090915485Z-controller-contact-result.json`, log SHA
+`74234DF8C2C91221A8DF9F524DB9C1715FFF1D4B9EAF216AD38E57143881EEF3`.
+The Halo 3 Campaign screen exposed Quickstart/Missions/Playlists but no Resume
+(`20260906-091105136Z-menu-ocr/0000-091105286Z.jpg`). The observer closed MCC
+through CloseMainWindow without choosing a mission; the harness exited through
+its cleanup path. This is a menu/setup failure, not a blade runtime result.
+
+All three checkpoint files still matched the pre-test snapshots. The profile
+binary had changed, but read-only zlib decoding at byte 44 and recursive JSON
+comparison found no semantic differences from the pre-test profile. Therefore
+neither successful byte restoration nor the historical difficulty explanation
+proves Resume availability in this attempt. No older profile was substituted
+and no profile was reconstructed. The cause remains unresolved.
+
+The retry's files and observed Steam remote-cache metadata were preserved under
+`out/test-runs/20260906-090053-before-world-volume-campaign/post-menu-retry/`.
+All four current pre-test originals were then restored and hash verified again;
+the restoration report is in that directory. MCC/SteamVR are closed. Normal VR
+settings again independently match
+`298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`, null disabled,
+forced driver empty, requireHmd true. Before further Campaign tests, resolve
+Resume availability and expand the save-isolation procedure if another file or
+cached state is shown to participate. Do not claim the restored menu works.
