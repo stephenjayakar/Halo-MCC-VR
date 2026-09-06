@@ -58,3 +58,80 @@ made the complete test executable pass without increasing its stack reserve.
 No candidate from the failed packaging attempt was installed. The subsequent
 candidate also adds cold cumulative command/moving-sample/peak-speed logging
 to distinguish command receipt from observation by the collision motion reader.
+
+## First live motion check, September 5, 18:16–18:21 PDT
+
+Source `d7191516029b54d9e553c8d6d7a3c1a0715a6701`, package
+`out/candidates/d719151-h3-physical-contact-20260906-011513701Z`, passed the
+complete Release build/tests and installed with DLL SHA-256
+`80339EAC9E94701E940BB9BAFB055A91D6AEFAAEF204149EC75F239CE01D2D05`.
+Only the E: Steam edition is present; other configured edition paths were absent.
+
+The normal controller-contact harness entered Forge Construct with SteamVR's
+Null Model Number. Nine addressed pose commands were accepted. Collision's
+motion reader observed 533 moving samples, a slow push peak of 0.4686 m/s,
+fast push peak of 2.2500 m/s, and rotation peak of 1.7254 rad/s. Hand recovery
+reported zero resets and zero missing poses. The fresh-region experiment was
+off. No target contact occurred, so this is motion-scaffold validation only.
+
+Result: `out/debug-openxr/20260906-011618587Z-controller-contact-result.json`.
+Preserved runtime log SHA-256:
+`692D0F3B4ED5999F09F3F45ACE5729E121035ACBE43E8F4B27B6F15FC5904B18`.
+Video: `out/demos/20260906-012027-forge-commanded-hand-motion/raw.mp4`,
+SHA-256 `36F11D004C2BB56C261F58DE24CFA74DA7A1A441B6B86A663C4A1FFFC5F35990`.
+Eight sampled frames show the live weapon translating/rotating and returning
+to rest. They do not establish frame-by-frame continuity or physical contact.
+
+The harness exited normally. Independent checks found MCC and SteamVR stopped,
+null disabled, forcedDriver empty and requireHmd true. SteamVR settings exactly
+matched the pre-run hash
+`175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`;
+the installed DLL and configuration hashes were unchanged. This is not headset
+acceptance and does not advance CURRENT-STATE.
+
+## Live wall pressure and recovery, September 5, 18:22–18:29 PDT
+
+Same installed d719151 candidate, normal contact path, fresh-region off,
+Steam edition / SteamVR / Null Model Number. Result:
+`out/debug-openxr/20260906-012224159Z-controller-contact-result.json`.
+Runtime log SHA-256:
+`721CE3C603CEC5A27FD856A0D9F7713CB1431185A6CA184779F01A86F4593BE6`.
+Fourteen pose commands produced 878 observed moving samples, peak linear
+speed 3.4989 m/s and peak angular speed 0.9086 rad/s, with no missing poses.
+
+Construct spawned the player at (8.9613, -6.8211, 12.5159), recentered yaw
+98.6 degrees. After a 350 ms D step, two side reaches to LOCAL X=1.3 m
+(2200 ms and 600 ms, each followed by a 2200 ms return) produced 156 native
+wall blocks, 49 hits and zero hand resets before the camera turn. The side
+view loses the weapon during part of its travel and is not a clear showcase.
+
+Six addressed 15-degree right turns faced the nearby wall. Forward pushes
+from Z=-0.65 to -1.05 m (1500 ms and 300 ms), return motions and a 25-degree
+yaw rotation exercised visible frontal pressure. A later shorter push to
+Z=-0.80 m also crossed the recovery threshold because the resting pose was
+already constrained by the wall. Three recovery records were observed,
+all corrected=1 with target=FFFFFFFF (world), with tracked-to-final distances
+of approximately 0.306, 0.323 and 0.301 m. Thus the 30 cm hand limit did
+activate on real wall constraints. This does not establish that the snaps
+look acceptable or that all rendered weapon geometry stays outside the wall.
+Afterward, the weapon returned to its resting visible pose. No prop impulse
+or melee occurred in this run; a later walk passed the nearby crate rather
+than establishing a controlled contact test.
+
+Both 40-second videos have eight-frame review sheets and explicit limitations:
+
+- `out/demos/20260906-012507-forge-commanded-side-wall-contact/raw.mp4`,
+  SHA-256 `1C56C7E606CB8F93895FC2512F04309EE11D0248C98B1D35B82F6D13177F803E`.
+- `out/demos/20260906-012614-forge-commanded-frontal-wall-contact/raw.mp4`,
+  SHA-256 `BEDA238FA6DBBAD3B992C1B09218845A3576D29D31AD02D85E41212BE1D682D1`.
+
+The harness completed and restored the identical normal SteamVR settings hash
+listed above; MCC and SteamVR were stopped. Neither the harness admission
+result nor these diagnostic clips is full interaction or headset acceptance.
+
+Next controlled contact work should align the hand, view and a selected live
+prop before recording. Read-only object snapshots can supply candidate
+positions, but TLS enumeration sometimes finds both live simulation/render
+tables and must not silently select one. Explicit table addresses are only
+valid while still enumerated. The existing probe rejected ambiguity and an
+expired table as intended during these runs.
