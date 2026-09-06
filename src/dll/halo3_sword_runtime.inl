@@ -50,7 +50,11 @@ void Halo3ObserveSwordSelection(uint32_t tag, int32_t weapon, int regions, int n
     uint32_t count=0;
     uint16_t drawnTag=0xFFFF;
     int32_t drawnWeapon=-1;
-    const bool paired = Halo3ReadWeaponPose(g_halo3LastDrawnWeaponPose,basis,position,scale,ms,
+    // Compare the exact submitted matrices, including deliberate draw hiding.
+    // The consumer still builds the full blade from its unscaled physical
+    // palette. Comparing against that physical palette here caused hiding to
+    // remove blade geometry and permit handle-only seeds inside the wall.
+    const bool paired = Halo3ReadWeaponPose(g_halo3SubmittedWeaponPose,basis,position,scale,ms,
         drawn,&count,&drawnTag,&drawnWeapon,&serial) && count==2 &&
         drawnTag==static_cast<uint16_t>(tag) && drawnWeapon==weapon &&
         !memcmp(drawn,entry+12,2*sizeof(BoneMatrix));

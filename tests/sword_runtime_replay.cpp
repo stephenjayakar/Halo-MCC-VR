@@ -11,7 +11,7 @@
 struct BoneMatrix { float scale, rotation[9], translation[3]; };
 static_assert(sizeof(BoneMatrix)==52);
 struct Halo3VisibleWeaponPosePublication { static constexpr size_t kMaximumNodes=16; };
-Halo3VisibleWeaponPosePublication g_halo3LastDrawnWeaponPose;
+Halo3VisibleWeaponPosePublication g_halo3SubmittedWeaponPose;
 std::atomic<uint32_t> g_halo3RuntimeGeneration{1};
 std::atomic<int32_t> g_halo3ContactActiveWeaponHandle{static_cast<int32_t>(0xE46400B3u)};
 std::atomic<uint32_t> g_halo3ContactPreparedRenderDatum{0xEF060D90u};
@@ -20,6 +20,7 @@ uint32_t objectDefinition=0x12345678; // Deliberately synthetic; not an engine b
 void* tagDataPointer=tagData;
 void** g_halo3TagDataBase=&tagDataPointer;
 BoneMatrix pose[2]{};
+BoneMatrix submittedPose[2]{};
 uint64_t fakeNow=1000;
 uint32_t poseCount=2;
 uint16_t poseTag=0x0D90;
@@ -38,7 +39,7 @@ bool Halo3ReadWeaponPose(Halo3VisibleWeaponPosePublication&,float*,float*,float&
     uint64_t& ms,BoneMatrix* nodes,uint32_t* count,uint16_t* tag,int32_t* weapon,uint64_t* serial)
 {
     ms=fakeNow; *serial=14202; *count=poseCount; *tag=poseTag; *weapon=poseWeapon;
-    std::memcpy(nodes,pose,sizeof(pose));
+    std::memcpy(nodes,submittedPose,sizeof(submittedPose));
     if (changeGenerationDuringRead) ++g_halo3RuntimeGeneration;
     return readPose;
 }
@@ -67,6 +68,7 @@ static void Check(bool result,const char* name)
 static void SetPose(unsigned index)
 {
     std::memcpy(pose,kSwordRuntimePoses[index],sizeof(pose));
+    std::memcpy(submittedPose,pose,sizeof(pose));
     std::memcpy(entryData+12,pose,sizeof(pose));
 }
 static void Reset()
@@ -141,13 +143,24 @@ int main()
         Check(g_halo3SwordPaired==1 && g_halo3SwordAppends==1,"paired/appended counters");
     }
     Reset(); Observe(); Append(true,"initial equipped sword");
-    pose[1].translation[0]+=.001f; Observe(); Append(false,"unpaired switch revokes blade");
+    submittedPose[1].translation[0]+=.001f; Observe(); Append(false,"unpaired switch revokes blade");
     SetPose(1); Observe(); Append(true,"settled re-equip restores blade");
     Observe(1,0xFFFF,1); Append(false,"hidden first region revokes blade");
     Observe(); Append(true,"visible blade restored");
     Observe(2,0,0xFFFF); Append(false,"hidden second region");
     Observe(1); Append(false,"missing native matrix");
     Observe(); Append(true,"restored native selection");
+
+    // Reproduce the runtime hiding boundary: actual draw scales collapse,
+    // but collision retains the full physical palette and selected blades.
+    Reset(); Observe(); Append(true,"visible before world hiding");
+    for (auto& node:submittedPose) node.scale=.000001f;
+    std::memcpy(entryData+12,submittedPose,sizeof(submittedPose));
+    Observe(); Append(true,"hidden final draw retains full physical blades");
+    Check(pose[0].scale>.01f && pose[1].scale>.01f,"physical scales were not collapsed");
+    submittedPose[1].translation[0]+=.001f;
+    Observe(); Append(false,"hidden draw still requires exact pairing");
+    SetPose(1); Observe(); Append(true,"withdrawal returns to visible full blade");
 
     Reset(); Observe(); fakeNow+=50; Append(true,"50 ms freshness boundary");
     ++fakeNow; Append(false,"51 ms expires");

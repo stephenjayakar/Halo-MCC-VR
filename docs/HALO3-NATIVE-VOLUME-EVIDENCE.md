@@ -1980,3 +1980,45 @@ Partition mode is enabled only by its existing explicit environment opt-in.
 This is a pending behavioral candidate, not a headset acceptance or a completed
 collision solution. Required live evidence: sustained visible paired contact,
 obstructed no-seed handling, and withdrawal returning to a clear visible pose.
+
+### 2026-09-06 13:39Z no-seed ownership run FAILED; sword draw feedback found
+
+Candidate2d04ac7dc04c61da7a68e2253203a15cf528c72d, DLL
+19028D00D015115B3086CCC4AEDA98810BF38E65AAC714A0F8DF4AC7A01F8862,
+package out/candidates/2d04ac7-h3-physical-contact-20260906-133905254Z.
+Steam / SteamVR null / Null Model Number. Result
+out/debug-openxr/20260906-133912537Z-controller-contact-result.json;
+log SHA36275A40153CD5529E41998EB7ADE1119C6C36C5BCA60DC1A8AA2AA104C131BD.
+Guardian upper blue fixture room; W1800 then W500/E1500 picked up sword.
+Controller X-.35/Y-.18/Z-1.25 at13:43:41.335Z, W450 at13:43:57 into
+right angled pillar. At13:44:15.687Z withdrew controller to Z-.65.
+Audit48 caught visible draw1 raw/submitted inside800/181, crossings144/232,
+gap0.24596m, triangles256/256. Harness stopped and restored normal VR.
+The attempted subsequent S400/neutral controller command found MCC already
+closed; that full withdrawal did NOT execute. No video was made. 49 audits,
+zero positive visible pairs. Last preserved world counters: caches7039,
+seeds6, frames41666, blocks3873, holds344, hidden7454, missingSeed139,
+no faults, unknown casts, region misses, invalid casts, or budget exhaustion.
+Independent exact snapshot replay:131 callbacks,35 expanded-boundary rejects,
+96 clear sphere checks,25 cover spheres,9 regions,0 missing/native rejects,
+no recovery and no exhausted budget. Snapshot SHA
+F1F2AF5478E0D83A131526AFCA1E700B9DED5B956C48F196A9C230F2D8FAE76E.
+Disabled failed partitions as own commit580d0bb before the next change.
+
+The log proves a separate blade-selection feedback boundary: before hiding,
+sword active1/256 triangles; throughout hidden audits40-47, sword active0 and
+12 handle-only triangles; on withdrawal audit48, active1/256 triangles return.
+Code confirms why: Halo3ObserveSwordSelection memcmp paired the native final
+draw against g_halo3LastDrawnWeaponPose, but that publication intentionally
+preceded worldFinal==2 scale suppression. This is an exact mismatch whenever
+hidden. Halo3AppendLiveSwordGeometry then omitted the blade. Consequently
+world seed/cover work during hiding could use handle-only geometry. This
+observed state change and code path establish a feedback defect; they do not
+prove all remaining native sweep mathematics correct.
+
+Next candidate pairs selection with a separate publication of exact final
+draw matrices after suppression. Physical pose/aim publications stay unscaled.
+The blade remains contingent on exact tag/weapon/native selection pairing and
+freshness. The runtime replay test exercises visible -> hidden -> visible,
+retained full-size blade geometry, and rejection of a changed hidden matrix.
+Native bindings, collision feature math and visible leash stay unchanged.

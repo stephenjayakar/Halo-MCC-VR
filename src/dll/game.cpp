@@ -969,6 +969,10 @@ namespace
     // or a final target read cannot be proved. Never publish a hidden palette
     // here: hands-only rendering is much worse than holding a safe pose.
     Halo3VisibleWeaponPosePublication g_halo3LastDrawnWeaponPose;
+    // Exact final draw matrices, including temporary world-contact hiding.
+    // Selection pairing only: physical collision and aim keep the unscaled
+    // publications above. A hidden draw must not revoke the sword's blade.
+    Halo3VisibleWeaponPosePublication g_halo3SubmittedWeaponPose;
     // The render hook publishes the newest raw palette here before drawing.
     // The camera/gameplay worker collision-checks it and publishes a corrected
     // copy to the approval slot. Rendering can then hold the last proven-safe
@@ -4834,6 +4838,7 @@ namespace
                 // still-fresh final palette while the new one is publishing.
                 Halo3ClearWeaponPose(g_halo3VisibleWeaponPose);
                 Halo3ClearWeaponPose(g_halo3LastDrawnWeaponPose);
+                Halo3ClearWeaponPose(g_halo3SubmittedWeaponPose);
                 Halo3ClearWeaponPose(g_halo3ProposedWeaponPose);
                 // The gameplay worker is the sole writer for the approval
                 // slot. Clearing the active handle invalidates it here; the
@@ -6494,6 +6499,10 @@ namespace
                 // the leash or the current animated shape cannot be proved.
                 if (worldFinal==2)
                     for (int node=0;node<renderNodeCount;++node) destination[node].scale=0.000001f;
+                if (renderNodeCount==2)
+                    Halo3PublishWeaponPose(g_halo3SubmittedWeaponPose,destination,
+                        renderNodeCount,tag,activeWeaponHandle,proposalSerial,nowMs,
+                        displayedCorrected,nullptr,displayedOriginMs);
             }
         }
 
@@ -13314,6 +13323,7 @@ namespace
             -1, std::memory_order_release);
         Halo3ClearWeaponPose(g_halo3ApprovedWeaponPose);
         Halo3ClearWeaponPose(g_halo3LastDrawnWeaponPose);
+        Halo3ClearWeaponPose(g_halo3SubmittedWeaponPose);
         g_halo3ContactPreviousPoseValid = false;
         g_halo3ContactPreviousPoseMs = 0;
         g_halo3ContactWallOffset = {};

@@ -77,9 +77,9 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     constexpr bool kEnableHalo3WorldVolumeExperiment = false;
     const bool worldFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_VOLUME", value, 2) == 1 && value[0] == L'1';
-    // Disabled after 2d04ac7 retained no-seed ownership but exposed a seeded
-    // sword mesh intersection during Guardian withdrawal (audit48 draw1).
-    constexpr bool kEnableHalo3WorldPartitionsExperiment = false;
+    // Explicit candidate: sword selection pairs with the actual final draw
+    // while full physical blade geometry survives temporary world hiding.
+    constexpr bool kEnableHalo3WorldPartitionsExperiment = true;
     const bool partitionsFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS", value, 2) == 1 && value[0] == L'1';
     const DWORD replayPathLength=GetEnvironmentVariableW(L"HALOMCCVR_H3_WORLD_REPLAY_PATH",nullptr,0);
