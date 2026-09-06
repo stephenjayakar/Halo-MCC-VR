@@ -837,3 +837,74 @@ check bounded merging, region-budget failure, changed scale, mismatched query
 radii, nonfinite bounds and capsules escaping a region. Both existing CTests
 passed before packaging. Runtime capacity, timing, visible collision and
 recovery acceptance remain unproven for this candidate.
+
+#### 4500848 Floodgate partition test: contact evidence, overall failure
+
+Source `4500848e99e8d4b9449826798ebd749f01f047c2`; package
+`out/candidates/4500848-h3-physical-contact-20260906-094857046Z`.
+Installed DLL independently verified as
+`05D62920B16436075613F3B5BE3061D93B6926B1EE7F96F98CDE012EB1EC4393`.
+Both CTests passed. E: Steam was installed; the alternate Steam and Store
+roots were absent. Launcher and configuration remained unchanged.
+
+Run `out/debug-openxr/20260906-095009422Z-controller-contact-result.json`
+used Campaign / Floodgate, Steam / SteamVR null / Null Model Number, with
+WorldPartitions, BladeGeometry and KeyboardGamepad. Preserved log SHA-256:
+`3686A80D28D769501146C7162CD1E7AF77C9F183EC4188E9B247713CF0356877`.
+A 500 ms D approach reached the adjacent rock. Of 32 visible paired mesh
+audits, 20 found requested geometry inside the world and submitted geometry
+with zero tested interior points and zero tested edge crossings. Full sword
+samples contained 256 triangles in each palette. Stable contact samples had
+136-139 requested interior points and 84 directed edge crossings, versus zero
+for both submitted counts. Maximum positive correction was 0.25718 m. All
+audits were valid and fault-free. Parsed records are in
+`out/research/20260906-native-volume/partitioned-sword-audit.json`.
+This is sampled geometry evidence, not exhaustive surface or headset acceptance.
+
+The completed partition run recorded 10,072 gathers across 90,341 regions,
+zero capacity rejections, invalid gathers, plan failures or invalid native
+casts. Peak native counts were 15 spheres / 34 cylinders / 36 prisms, below
+the previous whole-query 256-prism failure. Mean gather time was 271.5 us,
+maximum 2,755.5 us. Final solver totals were 55,593 admitted solves, 4,961
+blocks, 4,803 holds, 318 hidden submissions, 452 unknown results, 1,261 shape
+rejects and zero native faults or exhausted query budgets. There were 452
+region misses. Those later recovery/shape failures remain unexplained; the
+successful capacity result does not establish reliable tracking.
+
+The run **failed overall**: the final post-pass hold lost its pass condition.
+The last contact status was `base-gate`, with no native samples or weapon
+triangles; the failure screenshot shows the world without first-person weapon
+or HUD after combat. That is insufficient to establish the exact cause. Do
+not relabel this a passing run or relax the final check. A 500 ms A retreat
+preceded that failure, but combat confounded the visual release observation.
+
+The actual blade visibly stayed displaced from the rock while its electric
+effects remained near the original hand pose. This is an unfinished visual
+defect. The paired mesh audit also cost up to 25,485.2 us on the worker; it
+must become an explicit diagnostic before production enablement. These data
+do not establish a headset latency improvement. Props, NPC shoves, melee and
+Guardian regression were not tested with this artifact.
+
+Actual footage is preserved in
+`out/demos/20260906-095156-floodgate-partitioned-sword-rock-test/raw.mp4`
+(SHA `D96D4380E5AAE5B17FE559EF62CD3B2DDA1C89CDF6D7CD7F2ABD2516A7E1CBF0`).
+`blade-contact-partial-demo.mp4` in that directory trims seconds 6-24 and
+adds captions explicitly identifying the unfinished effects. Its SHA is
+`DF8435525A40E7835FD3C221305F2D7DF1576EF2FDB984647E3B413B612AD0FB`.
+It shows approach/contact, not retreat, nudging or a fully working system.
+An encoded contact frame was inspected. No synthetic geometry, motion or
+timing was added. Details and limitations are in `demo-evidence.json`.
+
+Original Campaign files were restored from the current pre-test snapshot,
+recorded in `post-partitioned-sword-test/restoration.json`. A start-screen
+launch/ordinary close refreshed Steam metadata. The final MenuOnly check
+showed Resume at `20260906-100433027Z-menu-ocr/0000-100433184Z.jpg` and entered
+no mission; that screenshot was inspected. Its surrounding harness
+`20260906-100005420Z` intentionally failed menu control when MCC was closed,
+and is not an interaction test. All four original file hashes and Steam
+metadata match in
+`out/test-runs/20260906-resume-cache-check/final-partition-menu-cache.json`.
+MCC and SteamVR are closed. Normal VR settings independently match
+`298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`:
+null disabled, forced driver empty, requireHmd true. The partition and blade
+experiments remain off in ordinary launches. The accepted pointer is unchanged.
