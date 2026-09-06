@@ -38,6 +38,7 @@ std::atomic<uint64_t> g_halo3FreshRegionShapeRejects{0};
 struct Halo3FreshRegionPublication
 {
     std::atomic<uint32_t> sequence{0}, generation{0};
+    std::atomic<bool> objectOnly{false};
     std::atomic<uint64_t> epoch{0}, serial{0}, sampleMs{0};
     std::atomic<float> x{0}, y{0}, z{0}, allowance{0};
 } g_halo3FreshRegion;
@@ -59,15 +60,18 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     g_halo3ClearanceProbeEnabled.store(false, std::memory_order_release);
     g_halo3FreshRegionEnabled.store(false, std::memory_order_release);
     g_halo3VolumeProbeEnabled.store(false, std::memory_order_release);
+    g_halo3WorldVolumeEnabled.store(false, std::memory_order_release);
     g_halo3ClearanceActiveMask = nullptr;
     wchar_t value[2]{};
     const bool probeRequested = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE", value, 2) == 1 && value[0] == L'1';
     const bool volumeRequested = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_DEBUG_VOLUME", value, 2) == 1 && value[0] == L'1';
+    const bool worldRequested = GetEnvironmentVariableW(
+        L"HALOMCCVR_H3_CONTACT_WORLD_VOLUME", value, 2) == 1 && value[0] == L'1';
     constexpr bool kEnableHalo3FreshRegionExperiment = true;
-    const bool freshRequested = kEnableHalo3FreshRegionExperiment && GetEnvironmentVariableW(
-        L"HALOMCCVR_H3_CONTACT_FRESH_REGION", value, 2) == 1 && value[0] == L'1';
+    const bool freshRequested = worldRequested || (kEnableHalo3FreshRegionExperiment && GetEnvironmentVariableW(
+        L"HALOMCCVR_H3_CONTACT_FRESH_REGION", value, 2) == 1 && value[0] == L'1');
     if (!probeRequested && !freshRequested && !volumeRequested)
         return;
     const auto unique = [&](const char* pattern) -> uintptr_t {
@@ -110,7 +114,7 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
         LOG("H3 fresh region EXPERIMENT: %s; full shape bound + 0.30m motion + 0.25m reserve; 20ms/one object epoch; native-query coverage remains under test",
             g_halo3FreshRegionEnabled.load() ? "enabled" : "disabled: active structure binding unavailable");
     }
-    if (volumeRequested && g_halo3ClearanceActiveMask)
+    if ((volumeRequested || worldRequested) && g_halo3ClearanceActiveMask)
     {
         const uintptr_t solver = unique("48 8B C4 4C 89 40 18 55 53 56 57 41 54 41 55 41 56 41 57 48 8D A8 38 FF FF FF 48 81 EC 88 01 00 00");
         const uintptr_t firstHit = unique("48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 55 41 54 41 55 41 56 41 57 48 8B EC 48 81 EC 80 00 00 00 0F 29 70 C8 4D 8B F0 F3 0F 10 35 97 BC 5F 00 4C 8B FA");
@@ -118,8 +122,12 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
         {
             g_halo3VolumeSolve = reinterpret_cast<Halo3VolumeSolveFn>(solver);
             g_halo3VolumeFirstHit = reinterpret_cast<Halo3VolumeFirstHitFn>(firstHit);
-            g_halo3VolumeProbeEnabled.store(true, std::memory_order_release);
-            LOG("H3 volume PROBE enabled: 32 native sphere-motion observations; no production pose changes");
+            g_halo3VolumeProbeEnabled.store(volumeRequested, std::memory_order_release);
+            g_halo3WorldVolumeEnabled.store(worldRequested, std::memory_order_release);
+            if (volumeRequested)
+                LOG("H3 volume PROBE enabled: 32 native sphere-motion observations; no production pose changes");
+            if (worldRequested)
+                LOG("H3 world volume EXPERIMENT enabled: worker geometry, current-pose rigid sweep/slide, 30cm clear-only recovery; headset acceptance pending");
         }
         else LOG("H3 volume PROBE disabled: unique verified solver unavailable; VR unchanged");
     }
@@ -127,7 +135,7 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
 
 // The caller must own and validate the immutable features for this entire call.
 // This function performs only the audited math query, with no world gathering,
-// active-mask access or player/object lookup. It is not yet called by rendering.
+// active-mask access or player/object lookup.
 PhysicalContactVolumeCast Halo3CastVolumeFeatures(const void* features,
     PhysicalContactVec3 start,PhysicalContactVec3 motion)
 {
@@ -218,6 +226,8 @@ bool Halo3NativeVolumeSeedClear(PhysicalContactVec3 center,float radius,int32_t 
     }
     __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
+
+#include "halo3_world_volume.inl"
 
 void Halo3ProbeWeaponVolume(Halo3VolumeProbeRecord& r,
     const PhysicalContactCompoundShape& shape, PhysicalContactTransform from,
@@ -352,7 +362,7 @@ void Halo3RunVolumeProbe(uint64_t nowMs, PhysicalContactVec3 surface,
 
 void Halo3PublishFreshRegion(uint64_t nowMs, uint32_t generation, uint64_t serial,
     PhysicalContactVec3 center, float bound, float worldScale, int32_t ignored,
-    bool eligible)
+    bool eligible,bool worldOwned=false)
 {
     if (!g_halo3FreshRegionEnabled.load(std::memory_order_acquire))
         return;
@@ -376,7 +386,7 @@ void Halo3PublishFreshRegion(uint64_t nowMs, uint32_t generation, uint64_t seria
         if (active && !(active & 0xFFFF0000u))
         {
             g_halo3FreshRegionQueries.fetch_add(1, std::memory_order_relaxed);
-            constexpr uint64_t flags = 9ull | (0x7FFFull << 32);
+            const uint64_t flags = (worldOwned ? 0ull : 9ull) | (0x7FFFull << 32);
             int32_t type = 0;
             const bool interior = g_halo3ClearancePoint(flags, &center.x, ignored, -1, &type);
             const bool gathered = g_halo3ClearanceGather(flags, &center.x, radius,
@@ -400,6 +410,7 @@ void Halo3PublishFreshRegion(uint64_t nowMs, uint32_t generation, uint64_t seria
         return;
     out.sequence.fetch_add(1, std::memory_order_acq_rel);
     out.generation.store(generation, std::memory_order_relaxed);
+    out.objectOnly.store(worldOwned,std::memory_order_relaxed);
     out.serial.store(serial, std::memory_order_relaxed);
     out.sampleMs.store(nowMs, std::memory_order_relaxed);
     out.x.store(center.x, std::memory_order_relaxed);
@@ -413,7 +424,7 @@ void Halo3PublishFreshRegion(uint64_t nowMs, uint32_t generation, uint64_t seria
 
 bool Halo3AllowFreshRegion(uint32_t generation, uint64_t approvedSerial,
     uint64_t nowMs, const BoneMatrix* approved, const BoneMatrix* proposed,
-    uint32_t nodeCount)
+    uint32_t nodeCount,bool worldOwned)
 {
     if (!g_halo3FreshRegionEnabled.load(std::memory_order_acquire) ||
         !approved || !proposed || !nodeCount || nodeCount > 16)
@@ -421,6 +432,7 @@ bool Halo3AllowFreshRegion(uint32_t generation, uint64_t approvedSerial,
     const auto& pub = g_halo3FreshRegion;
     const uint32_t seq = pub.sequence.load(std::memory_order_acquire);
     if (seq & 1u) return false;
+    if (pub.objectOnly.load(std::memory_order_relaxed) && !worldOwned) return false;
     const uint64_t epoch = pub.epoch.load(std::memory_order_relaxed);
     const uint64_t ms = pub.sampleMs.load(std::memory_order_relaxed);
     const PhysicalContactVec3 center{pub.x.load(std::memory_order_relaxed),
@@ -504,6 +516,7 @@ void Halo3RunClearanceProbe(uint64_t nowMs, PhysicalContactVec3 center,
 
 void Halo3LogClearanceProbe()
 {
+    Halo3LogWorldVolume();
     for (uint32_t index = 0; index < g_halo3VolumeProbeRecords.size(); ++index)
     {
         uint32_t ready = 2;

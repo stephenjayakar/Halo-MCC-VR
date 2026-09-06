@@ -41,6 +41,7 @@ param(
     [switch]$ProbeClearance,
     [switch]$ProbeVolume,
     [switch]$FreshRegion,
+    [switch]$WorldVolume,
     [switch]$KeyboardGamepad,
     [switch]$SelectionProbe,
     [switch]$BladeGeometry
@@ -56,6 +57,7 @@ param(
 # never headset acceptance.
 
 $ErrorActionPreference = 'Stop'
+if ($WorldVolume -and $Test -ne 'controller-contact') { throw 'WorldVolume requires the normal controller-contact path.' }
 if ($ProbeVolume -and $Test -ne 'wall') { throw 'ProbeVolume requires the native-surface wall fixture.' }
 if ($TestHandRecovery -and $Test -notin @('visible-weapon-gap', 'controller-contact')) {
     throw 'TestHandRecovery requires visible-weapon-gap or controller-contact.'
@@ -612,7 +614,8 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_NPC_SHOVE'
     'HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE',
     'HALOMCCVR_H3_CONTACT_DEBUG_VOLUME',
-    'HALOMCCVR_H3_CONTACT_FRESH_REGION'
+    'HALOMCCVR_H3_CONTACT_FRESH_REGION',
+    'HALOMCCVR_H3_CONTACT_WORLD_VOLUME'
 )
 $savedEnvironment = @{}
 foreach ($name in $debugVariables) {
@@ -669,6 +672,7 @@ try {
     if ($ProbeClearance) { $env:HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE = '1' }
     if ($ProbeVolume) { $env:HALOMCCVR_H3_CONTACT_DEBUG_VOLUME = '1' }
     if ($FreshRegion) { $env:HALOMCCVR_H3_CONTACT_FRESH_REGION = '1' }
+    if ($WorldVolume) { $env:HALOMCCVR_H3_CONTACT_WORLD_VOLUME = '1' }
     if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
         $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT = '1'
@@ -973,6 +977,8 @@ public static class HaloMccVrContactInput {
               $text -match 'H3 selection PROBE record:.*matchesDrawn=1 drawnSerial=[1-9][0-9]*')) -and
             (-not $FreshRegion -or
              $text -match 'H3 fresh region EXPERIMENT status: enabled=1 queries=[1-9][0-9]* clears=[1-9][0-9]* frames=[1-9][0-9]* shapeRejects=[0-9]+ faults=0') -and
+            (-not $WorldVolume -or
+             $text -match 'H3 world volume EXPERIMENT: enabled=1 caches=[1-9][0-9]* seeds=[1-9][0-9]* frames=[1-9][0-9]* blocks=[1-9][0-9]* .*faults=0') -and
             (-not $ProbeClearance -or
              $text -match 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0') -and
             (-not $ProbeVolume -or
@@ -1003,6 +1009,9 @@ public static class HaloMccVrContactInput {
     }
     if ($FreshRegion -and $text -match 'H3 fresh region EXPERIMENT status:.*faults=[1-9][0-9]*') {
         throw 'Fresh-region experiment faulted; its rendering permission disabled itself.'
+    }
+    if ($WorldVolume -and $text -match 'H3 world volume EXPERIMENT:.*faults=[1-9][0-9]*') {
+        throw 'Current-pose world-volume experiment recorded a native query fault.'
     }
     if ($ProbeClearance -and ($text -match 'H3 clearance PROBE sample:.*(?:bounds=0|faulted=1)' -or
         $text -notmatch 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0')) {
@@ -1095,6 +1104,7 @@ $result = [ordered]@{
     selection_probe_requested = [bool]$SelectionProbe
     blade_geometry_requested = [bool]$BladeGeometry
     volume_probe_requested = [bool]$ProbeVolume
+    world_volume_requested = [bool]$WorldVolume
     post_pass_hold_seconds = $PostPassHoldSeconds
     fresh_region_requested = [bool]$FreshRegion
     source_commit = $runtimeSourceCommit

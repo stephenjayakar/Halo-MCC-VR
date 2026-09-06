@@ -43,6 +43,7 @@
 #include "../common/physical_contact_logic.h"
 #include "../common/physical_contact_volume_sweep.h"
 #include "../common/halo3_volume_feature_logic.h"
+#include "../common/physical_contact_snapshot.h"
 #include "../common/scope_logic.h"
 #include "../common/weapon_aim_logic.h"
 
@@ -974,9 +975,13 @@ namespace
     Halo3VisibleWeaponPosePublication g_halo3ProposedWeaponPose;
     Halo3VisibleWeaponPosePublication g_halo3ApprovedWeaponPose;
     std::atomic<uint64_t> g_halo3ClearanceEpoch{1};
+    std::atomic<bool> g_halo3WorldVolumeEnabled{false};
+    std::atomic<uint32_t> g_halo3WorldReset{1};
+    int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int32_t weapon,
+        uint32_t generation,uint64_t serial,uint64_t nowMs,const BoneMatrix* tracked,bool publishRequest);
     bool Halo3AllowFreshRegion(uint32_t generation, uint64_t approvedSerial,
         uint64_t nowMs, const BoneMatrix* approved, const BoneMatrix* proposed,
-        uint32_t nodeCount);
+        uint32_t nodeCount,bool worldOwned=false);
     std::atomic<uint64_t> g_halo3VisibleWeaponProposalSerial{0};
     std::atomic<int32_t> g_halo3ContactActiveWeaponHandle{-1};
     std::atomic<uint64_t> g_halo3ContactApprovedPalettes{0};
@@ -5998,6 +6003,24 @@ namespace
                 const int32_t activeWeaponHandle =
                     g_halo3ContactActiveWeaponHandle.load(
                         std::memory_order_acquire);
+                int worldProposal=0;
+                if (haveTrackedNodes && proposalConsumedOffsetValid)
+                {
+                    auto worldNodes=trackedNodes;
+                    worldProposal=Halo3ConstrainWorldVolume(worldNodes.data(),renderNodeCount,tag,
+                        activeWeaponHandle,g_halo3RuntimeGeneration.load(std::memory_order_acquire),
+                        proposalSerial,nowMs,trackedNodes.data(),true);
+                    if (worldProposal)
+                    {
+                        for (int node=0;node<renderNodeCount;++node)
+                        {
+                            destination[node]=worldNodes[node];
+                            destination[node].translation[0]+=proposalConsumedOffset.x;
+                            destination[node].translation[1]+=proposalConsumedOffset.y;
+                            destination[node].translation[2]+=proposalConsumedOffset.z;
+                        }
+                    }
+                }
                 Halo3PublishWeaponPose(
                     g_halo3ProposedWeaponPose, destination,
                     static_cast<uint32_t>(renderNodeCount), tag,
@@ -6120,7 +6143,7 @@ namespace
                     compatibleApproval && !approvedCorrected &&
                     !candidateCorrectionApplied && Halo3AllowFreshRegion(
                         contactGeneration, approvedSerial, nowMs, approvedNodes.data(),
-                        destination, static_cast<uint32_t>(renderNodeCount));
+                        destination, static_cast<uint32_t>(renderNodeCount),worldProposal!=0);
                 const PhysicalContactPaletteDisposition paletteDisposition =
                     PhysicalContactPaletteDispositionForRender(
                         guardActive && !freshRegion, compatibleApproval,
@@ -6331,7 +6354,7 @@ namespace
                         g_halo3ContactHandLeashMissingPose).fetch_add(
                             1, std::memory_order_relaxed);
                 }
-                if (guardActive && haveTrackedNodes &&
+                if (guardActive && !worldProposal && haveTrackedNodes &&
                     PhysicalContactHandLeashExceeded(
                         {trackedNodes[0].translation[0], trackedNodes[0].translation[1],
                          trackedNodes[0].translation[2]},
@@ -6391,6 +6414,14 @@ namespace
                     displayedCorrected = false;
                     renderProof = 3;
                 }
+                const int worldFinal=guardActive && haveTrackedNodes
+                    ? Halo3ConstrainWorldVolume(destination,renderNodeCount,tag,activeWeaponHandle,
+                        contactGeneration,proposalSerial,nowMs,trackedNodes.data(),false) : 0;
+                if (worldFinal && PhysicalContactLengthSquared({
+                        destination[0].translation[0]-trackedNodes[0].translation[0],
+                        destination[0].translation[1]-trackedNodes[0].translation[1],
+                        destination[0].translation[2]-trackedNodes[0].translation[2]})>1.e-10f)
+                    displayedCorrected=true;
                 if (renderProof == 1)
                     g_halo3ContactRenderApprovedPalettes.fetch_add(
                         1, std::memory_order_relaxed);
@@ -6427,6 +6458,11 @@ namespace
                 Halo3MeasureSameFrameRotatingGap(
                     activeWeaponHandle, destination,
                     static_cast<uint32_t>(renderNodeCount), nowMs);
+                // Keep the swept physical palette for collision/aim history.
+                // Only the draw is hidden while an obstructed hand is beyond
+                // the leash or the current animated shape cannot be proved.
+                if (worldFinal==2)
+                    for (int node=0;node<renderNodeCount;++node) destination[node].scale=0.000001f;
             }
         }
 
@@ -13221,6 +13257,7 @@ namespace
 
     void Halo3ResetPhysicalContact(uint32_t debugReason = 0)
     {
+        g_halo3WorldReset.fetch_add(1,std::memory_order_acq_rel);
         g_halo3ContactDebugLastResetReason.store(
             debugReason, std::memory_order_relaxed);
         g_halo3ContactDebounce.Reset();
@@ -15150,6 +15187,9 @@ namespace
             g_halo3ContactWeaponTriangles.store(
                 collisionShape ? weaponTriangleMesh.triangleCount : 0u,
                 std::memory_order_relaxed);
+            if (collisionShape && !debugRig)
+                Halo3PublishWorldVolume(nowMs,generation,weaponHandle,proposalRenderTag,unitHandle,
+                    weaponShape,visibleNodes.data(),visibleNodeCount,worldScale);
             if (!collisionShape && !physicsFallback)
             {
                 g_halo3ContactUnsupportedShapes.fetch_add(
@@ -15769,11 +15809,12 @@ namespace
             int32_t cachedWallObjectHandle = -1;
             bool cachedWallObjectValid = false;
             bool cachedWallObjectBlocks = false;
+            const bool worldVolumeOwns=Halo3WorldVolumeOwns(generation,weaponHandle,nowMs);
             const auto nativeHitBlocksWall =
                 [&](const Halo3CollisionResult& native) -> bool
             {
                 if (native.type >= 0 && native.type < 4)
-                    return true;
+                    return !worldVolumeOwns;
                 if (native.type != 4 || native.objectHandle == -1)
                     return false;
                 if (cachedWallObjectValid &&
@@ -16611,7 +16652,8 @@ namespace
                         {approvedNodes[0].translation[0], approvedNodes[0].translation[1],
                          approvedNodes[0].translation[2]}, bound, worldScale, unitHandle,
                         !debugRig && collisionShape &&
-                        PhysicalContactLengthSquared(approvedOffset) <= 1.0e-10f);
+                        PhysicalContactLengthSquared(approvedOffset) <= 1.0e-10f,
+                        worldVolumeOwns);
                 }
                 g_halo3ContactApprovedPalettes.fetch_add(
                     1, std::memory_order_relaxed);

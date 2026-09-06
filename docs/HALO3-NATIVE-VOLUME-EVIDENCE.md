@@ -403,3 +403,49 @@ Remaining integration obligations, not verified findings:
   it inside a solid. A hand more than the permitted distance inside the wall
   cannot have both a visible solid weapon outside it and an unrestricted reset
   to the hand; that fallback still needs implementation and headset evaluation.
+
+## Current-pose world-volume candidate (opt-in, September 6)
+
+`HALOMCCVR_H3_CONTACT_WORLD_VOLUME=1` now connects the previously probed
+native first-contact math to normal controller rendering. The validation
+harness exposes this as `-WorldVolume` for `controller-contact` only. Normal
+headset launches leave it off until this integration has runtime evidence.
+
+The simulation worker builds an enclosing cover from the existing authored
+collision compound, groups spheres by child radius, and gathers structure and
+instance features with flags 9. Each immutable cache includes exact radii,
+active structure, scene/reset/weapon identity, reference nodes and object epoch.
+Rendering pins that cache and sweeps/slides the current rigid weapon pose, with
+a maximum of 192 casts per solve. It never invokes native world gathering or
+point queries from the palette hook. Cache admission requires the current
+object epoch and at most 20 ms age; a cast must fit entirely inside the region.
+
+A 10 mm geometry reserve encloses small numerical/animation differences. All
+nodes must pass the existing strict local-pose check plus an explicit lever
+and scaled-basis deformation bound using at most half that reserve. Substantial
+animation changes rebuild the cover and require a new clear seed. This is an
+initial conservative policy that may reject more poses than necessary.
+
+The raw controller palette is published separately. World correction precedes
+worker proposals (preserving only the paired legacy body/object translation),
+and a second sweep follows the final body-follow mutations. While a seeded,
+current world cache owns this weapon, legacy native structure hits are ignored;
+fixed objects and decorator handling remain. Object-only empty-region admission
+is permitted only alongside the world guard, to avoid retaining the measured
+worker approval delay in otherwise clear space.
+
+The last swept root is retained for the same world/shape identity. An expired
+cache holds it briefly; an unproved changed shape, a cache older than 100 ms, or
+a hand farther than 30 cm hides the draw. Physical history remains separate
+from the collapsed draw palette. A far-away hand can reset only after worker
+point/empty-feature checks independently establish its entire cover as clear.
+This clear-only recovery is a teleport, not a claim of a swept path through the
+intervening wall. The existing raw inside-wall leash reset is bypassed while
+the new guard owns the proposal. Map/weapon/contact resets invalidate ownership.
+
+Cold status counters report admitted sweeps, blocking, holding, hiding, shape
+rejections, unknown queries and native faults. QPC mean/max solve cost measures
+the math path separately. The harness requires actual blocked current-pose
+sweeps before passing; it still does not establish visible nonpenetration,
+contact feel, prop impulses, all maps, sword animation, or headset acceptance.
+Those are runtime tests, not conclusions from compilation.
