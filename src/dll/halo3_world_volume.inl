@@ -19,8 +19,10 @@ struct Halo3WorldVolumeCache
     std::array<BoneMatrix,16> nodes{};
     std::array<float,4> radii{};
     std::array<Halo3VolumeFeatures,4> features{};
+    PhysicalContactVolumeRegions regions{};
+    std::array<Halo3VolumeFeatures,PhysicalContactVolumeRegions::kMaximumRegions> regionFeatures{};
     PhysicalContactTransform seed{};
-    bool seeded{};
+    bool seeded{},partitioned{};
 };
 struct Halo3WorldVolumePose
 {
@@ -38,6 +40,11 @@ std::atomic<uint64_t> g_halo3WorldBlocks{0},g_halo3WorldHolds{0},g_halo3WorldHid
 std::atomic<uint64_t> g_halo3WorldUnknown{0},g_halo3WorldShapeRejects{0},g_halo3WorldFaults{0};
 std::atomic<uint64_t> g_halo3WorldQueries{0},g_halo3WorldExhausted{0};
 std::atomic<uint64_t> g_halo3WorldSolveMaxTicks{0},g_halo3WorldSolveTicks{0},g_halo3WorldSolveCount{0};
+std::atomic<uint64_t> g_halo3WorldPartitionCalls{0},g_halo3WorldPartitionRegions{0};
+std::atomic<uint64_t> g_halo3WorldPartitionCapacity{0},g_halo3WorldPartitionInvalid{0};
+std::atomic<uint64_t> g_halo3WorldPartitionPlansFailed{0},g_halo3WorldPartitionMisses{0},g_halo3WorldPartitionCastInvalid{0};
+std::atomic<uint64_t> g_halo3WorldPartitionTicks{0},g_halo3WorldPartitionMaxTicks{0};
+std::array<std::atomic<uint32_t>,3> g_halo3WorldPartitionPeakCounts{};
 struct Halo3WorldDraw
 {
     uint32_t generation{},reset{},count{},tag{};
@@ -276,6 +283,51 @@ bool Halo3WorldGather(Halo3WorldVolumeCache& c,int32_t ignored)
       Halo3ObserveWorldGather(c,0,6,0,false,nullptr); return false; }
 }
 
+// One simulation-context gather per small region. Nothing is published unless
+// every region is complete and the active structure is unchanged. No native
+// gather, allocation or feature copying occurs in the renderer.
+bool Halo3GatherWorldPartitions(Halo3WorldVolumeCache& c,int32_t ignored)
+{
+    alignas(16) unsigned char memory[0xC490];
+    __try
+    {
+        c.active=*g_halo3ClearanceActiveMask;
+        if (!c.active || (c.active&0xFFFF0000u) || !c.regions.count ||
+            c.regions.count>c.regions.kMaximumRegions) return false;
+        for (uint32_t index=0;index<c.regions.count;++index)
+        {
+            const auto& region=c.regions.regions[index];
+            memset(memory,0xCD,sizeof(memory));
+            const bool gathered=g_halo3ClearanceGather(9,&region.center.x,region.radius,0,
+                region.expansion,ignored,-1,memory);
+            g_halo3WorldPartitionRegions.fetch_add(1,std::memory_order_relaxed);
+            uint16_t counts[3]{}; memcpy(counts,memory,sizeof(counts));
+            for (unsigned category=0;category<3;++category)
+            {
+                uint32_t peak=g_halo3WorldPartitionPeakCounts[category].load(std::memory_order_relaxed);
+                for (unsigned attempt=0;counts[category]>peak && attempt<3;++attempt)
+                    if (g_halo3WorldPartitionPeakCounts[category].compare_exchange_weak(
+                            peak,counts[category],std::memory_order_relaxed)) break;
+            }
+            uint32_t validation=0;
+            if (!Halo3VolumeFeaturesValid(memory,sizeof(memory),&validation))
+            {
+                (validation>>16==2 ? g_halo3WorldPartitionCapacity : g_halo3WorldPartitionInvalid)
+                    .fetch_add(1,std::memory_order_relaxed);
+                return false;
+            }
+            if (!gathered && (counts[0] || counts[1] || counts[2]))
+            { g_halo3WorldPartitionInvalid.fetch_add(1,std::memory_order_relaxed); return false; }
+            for (size_t i=0xC408;i<sizeof(memory);++i) if (memory[i]!=0xCD)
+            { g_halo3WorldPartitionInvalid.fetch_add(1,std::memory_order_relaxed); return false; }
+            memcpy(c.regionFeatures[index].bytes.data(),memory,0xC408);
+        }
+        return c.active==*g_halo3ClearanceActiveMask;
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    { g_halo3WorldFaults.fetch_add(1,std::memory_order_relaxed); return false; }
+}
+
 void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
     uint16_t tag,int32_t ignored,const PhysicalContactCompoundShape& shape,
     const BoneMatrix* nodes,uint32_t count,float worldScale)
@@ -294,6 +346,8 @@ void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
     if (!write) return;
     auto& c=write.get();
     c.seeded=false;
+    c.partitioned=g_halo3WorldPartitions.load(std::memory_order_acquire);
+    c.regions.count=0;
     c.generation=generation; c.reset=reset; c.weapon=weapon; c.tag=tag; c.count=count;
     c.worldScale=worldScale; c.skin=.005f*worldScale;
     c.ms=nowMs; c.epoch=g_halo3ClearanceEpoch.load(std::memory_order_acquire);
@@ -337,16 +391,38 @@ void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
     const auto raw=Halo3WorldTransform(r.nodes[0]);
     c.center=raw.position;
     c.regionRadius=c.bound+.60f*worldScale+c.skin;
-    if (!Halo3WorldGather(c,ignored))
+    auto safe=g_halo3WorldPoses.read();
+    const bool sameSafe=safe && safe.get().generation==generation && safe.get().reset==reset &&
+        safe.get().weapon==weapon && safe.get().tag==tag && safe.get().shape==c.shape;
+    bool gathered=false;
+    if (c.partitioned)
+    {
+        LARGE_INTEGER begin{},end{}; QueryPerformanceCounter(&begin);
+        // Beyond the leash the previous behavior already requires an
+        // independently clear raw seed. Plan around that proposed recovery;
+        // it still cannot become a seed until the tests below prove it clear.
+        const auto from=sameSafe && PhysicalContactLength(safe.get().root.position-raw.position)<=.30f*worldScale
+            ? safe.get().root : raw;
+        const bool planned=PhysicalContactBuildVolumeRegions(c.cover,from,raw,c.skin,
+            .40f*worldScale,.20f*worldScale,.08f*worldScale,c.regions);
+        if (!planned) g_halo3WorldPartitionPlansFailed.fetch_add(1,std::memory_order_relaxed);
+        else gathered=Halo3GatherWorldPartitions(c,ignored);
+        QueryPerformanceCounter(&end);
+        const auto ticks=static_cast<uint64_t>(std::max<LONGLONG>(0,end.QuadPart-begin.QuadPart));
+        g_halo3WorldPartitionCalls.fetch_add(1,std::memory_order_relaxed);
+        g_halo3WorldPartitionTicks.fetch_add(ticks,std::memory_order_relaxed);
+        auto peak=g_halo3WorldPartitionMaxTicks.load(std::memory_order_relaxed);
+        for (unsigned attempt=0;ticks>peak && attempt<3;++attempt)
+            if (g_halo3WorldPartitionMaxTicks.compare_exchange_weak(peak,ticks,std::memory_order_relaxed)) break;
+    }
+    else gathered=Halo3WorldGather(c,ignored);
+    if (!gathered)
     { g_halo3WorldUnknown.fetch_add(1,std::memory_order_relaxed); return; }
     // Observation mode deliberately stops before seed testing/publication:
     // neither a known-clear seed nor a permission can escape this probe.
     if (g_halo3WorldGatherOnly.load(std::memory_order_acquire))
     { g_halo3WorldBuilds.fetch_add(1,std::memory_order_relaxed); return; }
-    auto safe=g_halo3WorldPoses.read();
-    const bool carry=safe && safe.get().generation==generation && safe.get().reset==reset &&
-        safe.get().weapon==weapon && safe.get().tag==tag && safe.get().shape==c.shape &&
-        safe.get().active==c.active;
+    const bool carry=sameSafe && safe.get().active==c.active;
     if (carry)
     {
         c.seed=safe.get().root;
@@ -428,6 +504,18 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
     if (fresh)
     {
         const auto cast=[&](PhysicalContactVec3 start,PhysicalContactVec3 motion,float radius) {
+            if (c.partitioned)
+            {
+                for (uint32_t index=0;index<c.regions.count;++index)
+                {
+                    if (!PhysicalContactVolumeRegionContains(c.regions.regions[index],start,start+motion,radius)) continue;
+                    const auto result=Halo3CastVolumeFeatures(c.regionFeatures[index].bytes.data(),start,motion);
+                    if (!result.valid) g_halo3WorldPartitionCastInvalid.fetch_add(1,std::memory_order_relaxed);
+                    return result;
+                }
+                g_halo3WorldPartitionMisses.fetch_add(1,std::memory_order_relaxed);
+                return PhysicalContactVolumeCast{};
+            }
             if (std::max(PhysicalContactLength(start-c.center),PhysicalContactLength(start+motion-c.center))+
                     radius>c.regionRadius) return PhysicalContactVolumeCast{};
             for (uint32_t group=0;group<c.groups;++group)
@@ -493,6 +581,16 @@ void Halo3LogWorldVolume()
         g_halo3WorldUnknown.load(),g_halo3WorldShapeRejects.load(),g_halo3WorldQueries.load(),
         g_halo3WorldExhausted.load(),g_halo3WorldFaults.load());
     LARGE_INTEGER frequency{}; QueryPerformanceFrequency(&frequency);
+    const auto partitionCalls=g_halo3WorldPartitionCalls.load();
+    if (partitionCalls && frequency.QuadPart>0)
+        LOG("H3 world partitions: calls=%llu regions=%llu capacity=%llu invalid=%llu planFailures=%llu regionMisses=%llu castInvalid=%llu peaks=%u/%u/%u meanGatherUs=%.1f maxGatherUs=%.1f",
+            partitionCalls,g_halo3WorldPartitionRegions.load(),g_halo3WorldPartitionCapacity.load(),
+            g_halo3WorldPartitionInvalid.load(),g_halo3WorldPartitionPlansFailed.load(),
+            g_halo3WorldPartitionMisses.load(),g_halo3WorldPartitionCastInvalid.load(),
+            g_halo3WorldPartitionPeakCounts[0].load(),g_halo3WorldPartitionPeakCounts[1].load(),
+            g_halo3WorldPartitionPeakCounts[2].load(),
+            g_halo3WorldPartitionTicks.load()*1.e6/frequency.QuadPart/partitionCalls,
+            g_halo3WorldPartitionMaxTicks.load()*1.e6/frequency.QuadPart);
     const auto count=g_halo3WorldSolveCount.load();
     if (frequency.QuadPart>0 && count)
         LOG("H3 world volume timing: solves=%llu meanUs=%.1f maxUs=%.1f",

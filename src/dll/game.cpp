@@ -42,6 +42,7 @@
 #include "../common/odst_vehicle_logic.h"
 #include "../common/physical_contact_logic.h"
 #include "../common/physical_contact_volume_sweep.h"
+#include "../common/physical_contact_volume_regions.h"
 #include "../common/halo3_volume_feature_logic.h"
 #include "../common/physical_contact_snapshot.h"
 #include "../common/scope_logic.h"
@@ -977,6 +978,7 @@ namespace
     std::atomic<uint64_t> g_halo3ClearanceEpoch{1};
     std::atomic<bool> g_halo3WorldVolumeEnabled{false};
     std::atomic<bool> g_halo3WorldGatherOnly{false};
+    std::atomic<bool> g_halo3WorldPartitions{false};
     std::atomic<uint32_t> g_halo3WorldReset{1};
     int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int32_t weapon,
         uint32_t generation,uint64_t serial,uint64_t nowMs,const BoneMatrix* tracked,bool publishRequest);

@@ -795,3 +795,45 @@ MCC/SteamVR are closed, null is disabled, forced driver empty and requireHmd
 true. Resume restoration is now verified. WorldVolume remains disabled;
 normal launches do not enable WorldGather or BladeGeometry. The accepted
 pointer has not advanced.
+
+### Partitioned swept-sphere candidate
+
+The 0b4eebf probe established that the large full-weapon query reaches the
+native 256-prism capacity near the Floodgate rock. The replacement experimental
+backend is enabled separately by `HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS=1`
+(`-WorldPartitions` in the harness). The old whole-weapon backend remains
+disabled; normal launches still opt into neither path.
+
+`physical_contact_volume_regions.h` builds bounded balls around each cover
+sphere's short motion segments, using the existing shortest rigid arc. The
+segment bound includes its chord, analytic arc error, exact expanded sphere
+radius and a 40 cm motion reserve. Center travel steps are at most 20 cm;
+merging is limited to an additional 8 cm over the per-radius bound. Up to 96
+regions may be emitted. A plan that exceeds its bounds returns no partial
+coverage. Each region is gathered independently using the same verified
+flags-9 native query and existing capacity/nested-field/canary guards. A
+capacity failure never becomes a clear result. The previous global gather and
+observation-only probe remain available as dormant/reference code.
+
+All regions must complete in the same active structure before the immutable
+cache can publish. The renderer selects a region only when its expansion
+exactly matches the cast radius and both endpoint spheres are wholly inside
+the region. Convexity of the query ball then covers the entire swept capsule.
+It queries only cached native math. No feature copy, gather or allocation was
+added to the render hook. Missing containment and invalid native math have
+separate counters, as do region-plan failures and capacity rejections. Worker
+planning/gather time is measured independently of render sweep time.
+
+The previous scene/shape/epoch/age guards, sweep/slide algorithm and clear-only
+30 cm recovery are retained. Beyond that leash, the worker plans at the raw
+pose proposed for recovery, but the existing independent clearance tests must
+still establish the seed. An uncleared raw pose is not a teleport permission.
+The ordinary world-gather observation mode still cannot publish seeds or take
+pose ownership.
+
+Offline coverage tests sample complete reserve balls along coupled translation
+and rotations up to a half-turn, including two-prong cover geometry. They also
+check bounded merging, region-budget failure, changed scale, mismatched query
+radii, nonfinite bounds and capsules escaping a region. Both existing CTests
+passed before packaging. Runtime capacity, timing, visible collision and
+recovery acceptance remain unproven for this candidate.

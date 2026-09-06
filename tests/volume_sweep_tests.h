@@ -1,5 +1,6 @@
 #pragma once
 #include "physical_contact_volume_sweep.h"
+#include "physical_contact_volume_regions.h"
 #include "halo3_volume_feature_logic.h"
 #include "physical_contact_snapshot.h"
 #include <thread>
@@ -61,8 +62,74 @@ static void TestContactSnapshotLifetime()
     Check(bool(old) && !old.publish(1),"late old geometry cannot replace a newer published version");
 }
 
+static void TestPhysicalContactVolumeRegions()
+{
+    PhysicalContactVolumeCover cover{};
+    for (unsigned side=0;side<2;++side) for (unsigned i=0;i<10;++i)
+        cover.spheres[cover.count++]={{i*.12f,side ? -.08f : .08f,0},.075f,static_cast<uint16_t>(side)};
+    for (float angle : {0.f,.2f,1.5f,3.14159265f})
+    {
+        PhysicalContactTransform from{},to{};
+        from.position={-7,-8,-4}; to=from; to.position=to.position+PhysicalContactVec3{.2f,-.1f,.1f};
+        const auto axis=PhysicalContactNormalize({1,2,-3});
+        to.forward=PhysicalContactRotateAxisAngle(from.forward,axis,angle);
+        to.left=PhysicalContactRotateAxisAngle(from.left,axis,angle);
+        to.up=PhysicalContactRotateAxisAngle(from.up,axis,angle);
+        PhysicalContactVolumeRegions regions{};
+        const bool built=PhysicalContactBuildVolumeRegions(cover,from,to,.005f,.4f,.2f,.08f,regions);
+        Check(built,"spatial regions cover a two-prong weapon's coupled translation and rotation");
+        if (!built) continue;
+        PhysicalContactVolumePath path{};
+        Check(PhysicalContactBuildVolumePath(from,to,path),"region coverage reference path is rigid");
+        bool allCovered=true;
+        for (unsigned step=0;step<=400 && allCovered;++step)
+        {
+            const auto pose=PhysicalContactVolumePathAt(path,step/400.f);
+            for (unsigned sphere=0;sphere<cover.count && allCovered;++sphere)
+            {
+                const auto& s=cover.spheres[sphere];
+                const auto center=PhysicalContactTransformPoint(pose,s.center);
+                bool covered=false;
+                for (unsigned index=0;index<regions.count;++index)
+                {
+                    const auto& region=regions.regions[index];
+                    // Independent point-on-arc check includes the full reserve
+                    // ball, not just the center or the planning chords.
+                    if (region.expansion==s.radius*pose.scale+.005f &&
+                        PhysicalContactLength(center-region.center)+region.expansion+.4f<=region.radius+2.e-6f)
+                    { covered=true; break; }
+                }
+                allCovered=covered;
+            }
+        }
+        Check(allCovered,"every sampled rotational arc ball and its entire motion reserve fit a complete region");
+        bool bounded=true;
+        for (unsigned i=0;i<regions.count;++i)
+            bounded=bounded && regions.regions[i].radius<.67f;
+        Check(bounded,"region merging cannot grow back into the oversized whole-weapon query");
+    }
+    PhysicalContactVolumeRegions regions{};
+    PhysicalContactTransform from{},to{}; to.position={0,.2f,0};
+    Check(!PhysicalContactBuildVolumeRegions(cover,from,to,.005f,.4f,.2f,.08f,regions,1) && !regions.count,
+        "region budget exhaustion never returns a partially covered weapon as complete");
+    to.scale=2;
+    Check(!PhysicalContactBuildVolumeRegions(cover,from,to,.005f,.4f,.2f,.08f,regions),
+        "region planning cannot silently interpolate a changed weapon scale");
+    const PhysicalContactVolumeRegion region{{0,0,0},.6f,.1f};
+    Check(PhysicalContactVolumeRegionContains(region,{-.4f,0,0},{.4f,0,0},.1f),
+        "a region admits a fully enclosed swept capsule");
+    Check(!PhysicalContactVolumeRegionContains(region,{-.4f,0,0},{.55f,0,0},.1f),
+        "an endpoint outside the contracted region cannot claim cached coverage");
+    Check(!PhysicalContactVolumeRegionContains(region,{0,0,0},{.1f,0,0},.100001f),
+        "a sphere cannot use geometry expanded for a different radius");
+    auto invalid=region; invalid.radius=std::numeric_limits<float>::quiet_NaN();
+    Check(!PhysicalContactVolumeRegionContains(invalid,{0,0,0},{0,0,0},.1f),
+        "invalid cached bounds cannot authorize a zero-motion query");
+}
+
 static void TestPhysicalContactVolumeSweep()
 {
+    TestPhysicalContactVolumeRegions();
     TestContactSnapshotLifetime();
     auto features=std::make_unique<Halo3VolumeFeatures>();
     Check(Halo3VolumeFeaturesValid(features->bytes.data(),features->bytes.size()),

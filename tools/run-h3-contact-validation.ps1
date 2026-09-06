@@ -42,6 +42,7 @@ param(
     [switch]$ProbeVolume,
     [switch]$FreshRegion,
     [switch]$WorldVolume,
+    [switch]$WorldPartitions,
     [switch]$WorldGather,
     [switch]$KeyboardGamepad,
     [switch]$SelectionProbe,
@@ -58,6 +59,7 @@ param(
 # never headset acceptance.
 
 $ErrorActionPreference = 'Stop'
+if ($WorldPartitions) { $WorldVolume=$true }
 if ($WorldVolume -and $Test -ne 'controller-contact') { throw 'WorldVolume requires the normal controller-contact path.' }
 if ($WorldGather -and ($Test -ne 'controller-contact' -or $WorldVolume -or $FreshRegion -or $ProbeVolume)) {
     throw 'WorldGather is an observation-only controller-contact probe; do not combine with world/fresh-region/volume experiments.'
@@ -632,6 +634,7 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_VOLUME',
     'HALOMCCVR_H3_CONTACT_FRESH_REGION',
     'HALOMCCVR_H3_CONTACT_WORLD_VOLUME',
+    'HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS',
     'HALOMCCVR_H3_CONTACT_DEBUG_WORLD_GATHER'
 )
 $savedEnvironment = @{}
@@ -689,7 +692,8 @@ try {
     if ($ProbeClearance) { $env:HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE = '1' }
     if ($ProbeVolume) { $env:HALOMCCVR_H3_CONTACT_DEBUG_VOLUME = '1' }
     if ($FreshRegion) { $env:HALOMCCVR_H3_CONTACT_FRESH_REGION = '1' }
-    if ($WorldVolume) { $env:HALOMCCVR_H3_CONTACT_WORLD_VOLUME = '1' }
+    if ($WorldPartitions) { $env:HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS = '1' }
+    elseif ($WorldVolume) { $env:HALOMCCVR_H3_CONTACT_WORLD_VOLUME = '1' }
     if ($WorldGather) { $env:HALOMCCVR_H3_CONTACT_DEBUG_WORLD_GATHER = '1' }
     if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
@@ -988,6 +992,8 @@ public static class HaloMccVrContactInput {
             throw 'Halo 3 visible-weapon-gap recorded an exact visible-geometry penetration.'
         }
         (Test-ValidationResult $text $Test) -and
+            (-not $WorldPartitions -or
+             $text -match 'H3 world partitions: calls=[1-9][0-9]* regions=[1-9][0-9]* capacity=0 invalid=0 planFailures=0 ') -and
             (-not $WorldGather -or
              ($text -match 'H3 world gather PROBE: index=[0-9]+ .*reason=0 validation=0x00000000 ' -and
               $text -match 'H3 world gather PROBE: index=[0-9]+ .*reason=[1-6] ' -and
@@ -1038,6 +1044,9 @@ public static class HaloMccVrContactInput {
     }
     if ($WorldVolume -and -not (Test-WorldMeshAudit $text)) {
         throw 'World-volume audit did not prove the requested two visible raw/submitted counterfactual observations.'
+    }
+    if ($WorldPartitions -and $text -match 'H3 world partitions:.*(?:capacity|invalid|planFailures|castInvalid)=[1-9][0-9]*') {
+        throw 'Partitioned world collision recorded incomplete gathering, a failed region plan, or invalid native sweep math.'
     }
     if ($WorldGather -and ($text -match 'H3 world volume EXPERIMENT:.*(?:seeds|frames|blocks|holds|hidden)=[1-9][0-9]*' -or
         $text -match 'H3 world volume EXPERIMENT:.*faults=[1-9][0-9]*' -or
@@ -1136,6 +1145,7 @@ $result = [ordered]@{
     blade_geometry_requested = [bool]$BladeGeometry
     volume_probe_requested = [bool]$ProbeVolume
     world_volume_requested = [bool]$WorldVolume
+    world_partitions_requested = [bool]$WorldPartitions
     world_gather_requested = [bool]$WorldGather
     post_pass_hold_seconds = $PostPassHoldSeconds
     fresh_region_requested = [bool]$FreshRegion
