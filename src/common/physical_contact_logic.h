@@ -2168,6 +2168,29 @@ inline PhysicalContactCompoundHit PhysicalContactSweepCompound(
     return closest;
 }
 
+// Used only after the triangle-surface path misses. Preserve the existing
+// end-pose solid-overlap admission and selected child pair, but recover that
+// pair's swept plane when the previous pose was clear. End-to-end testing of
+// the current pose alone incorrectly labels newly entered solids pre-existing.
+inline PhysicalContactCompoundHit PhysicalContactSweepCurrentCompoundOverlap(
+    const PhysicalContactCompoundShape& weapon,
+    const PhysicalContactTransform& previousWeaponTransform,
+    const PhysicalContactTransform& currentWeaponTransform,
+    const PhysicalContactCompoundShape& target,
+    const PhysicalContactTransform& targetTransform)
+{
+    PhysicalContactCompoundHit overlap = PhysicalContactSweepCompound(
+        weapon, currentWeaponTransform, currentWeaponTransform,
+        target, targetTransform);
+    if (!overlap.hit) return overlap;
+    const PhysicalContactConvexHit swept = PhysicalContactSweepConvex(
+        weapon.children[overlap.weaponChild], previousWeaponTransform,
+        currentWeaponTransform, target.children[overlap.targetChild], targetTransform);
+    if (swept.hit && swept.normalReliable)
+        static_cast<PhysicalContactConvexHit&>(overlap) = swept;
+    return overlap;
+}
+
 struct PhysicalContactTriangleMeshHit : PhysicalContactConvexHit
 {
     uint16_t weaponTriangle = 0;

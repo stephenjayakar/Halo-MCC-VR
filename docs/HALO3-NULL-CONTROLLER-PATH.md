@@ -193,3 +193,55 @@ Z=-1.6001 without contacting MCC. The live test used -1.59 after the rejection.
 The harness exited normally; MCC/SteamVR stopped and the exact original normal
 SteamVR settings hash was restored. This remains diagnostic evidence, not
 headset acceptance or successful prop interaction.
+
+## Numerical replay identifies lost motion history, 18:45–18:52 PDT
+
+Capture source `0c73680918b26a42c88933e65c17b6f3329cd018`, DLL
+`06409C4B9BA061B2C6841BA2BE30AF510EDE0FEB07FD7BB0A671F7387CEF0060`,
+package `out/candidates/0c73680-h3-physical-contact-20260906-014500058Z`.
+Build/tests passed and all installed editions were checked (only E: Steam
+present). The opt-in capture publishes at most two bounded selected-shape and
+transform snapshots from simulation to the cold logger, with no I/O in the
+contact callback. Normal headset behavior is unchanged by the capture.
+
+Normal Forge Construct contact, Steam / SteamVR / Null Model Number, fresh
+region off. Result: `out/debug-openxr/20260906-014522304Z-controller-contact-result.json`.
+Log SHA-256 `6BA2E42421E62C298BD7EFC07807C52D5357ECEF6C3D4D65A289B5422038B33E`.
+The live target was the upright sniper rifle E29C002D at
+(4.291724, 6.488910, 11.641370). Hand placement and repeated gentle pushes
+produced three native impulses, zero melee, and eighteen rejected normals.
+This establishes some impulse delivery, not a polished or repeatable shove.
+The 40-second repeat recording is
+`out/demos/20260906-015004-forge-sniper-contact-replay/raw.mp4`, SHA-256
+`81BE9D53A87C5F57A15E6250D89D9BEAA507BBC4A2719FF5F514C24FCB9062F1`.
+
+`tools/extract-h3-contact-replay.py` extracts only complete bounded captures,
+rejects missing vertices, emits JSON and a standalone CMake/C++ replay, and
+restricts generated files to out/. It has no process access. Both captures
+use a 20-vertex weapon convex and 44-vertex target convex (source=1), so they
+came from the solid-overlap fallback, not a selected triangle-surface pair.
+The preserved JSON is `out/debug-openxr/replay-0c73680/capture.json`, SHA-256
+`ED170A832D468915F21A5E867F620B983CC90B0C7AE4D148E38658D43F1201BF`.
+
+The standalone replay proved that BOTH prior poses were clear and both
+intended poses overlapped. Sweeping the recorded pair returned reliable
+normals, at fractions 0.597265601 and 0.695703149, approximately
+(0.9075, 0.3930, 0.1481). The live fallback instead reported fraction=0 and
+unreliable because it tested intended-to-intended. Thus these two rejections
+were not actually pre-existing overlap: the fallback discarded motion history.
+This does not retrospectively prove the same cause for the earlier Brute
+weapon rejection, whose geometry was not captured.
+
+The following candidate corrects only the two Halo 3 solid-overlap fallbacks.
+It retains the existing current-overlap gate and selected convex child pair,
+then sweeps that pair from the actual previous transform. Only a reliable
+swept plane replaces the static fallback result. Truly pre-existing overlap
+retains its unreliable normal; clear end poses do not gain admission from a
+swept convex proxy. Exact captured fixtures in
+`tests/fixtures/h3_solid_overlap_replay.h` cover both failures, genuine initial
+overlap and clear-end/pass-through exclusions. Live acceptance of the fix is
+still required; the capture run above predates the behavioral change.
+
+After the capture run, MCC/SteamVR were stopped and the original normal
+SteamVR settings hash was independently verified restored. Accepted pointer
+unchanged.

@@ -16993,12 +16993,14 @@ namespace
                         else if (!requiresNativeConfirmation)
                         {
                             // Triangle surfaces do not report a solid that is
-                            // already wholly contained. Admit the exact convex
-                            // overlap for visual separation only; a reliable
-                            // swept plane is still required for native impulse.
+                            // already wholly contained. Require the current
+                            // exact solid overlap, then retain the selected
+                            // pair's real motion history for a swept plane.
+                            // A truly pre-existing overlap still cannot supply
+                            // a new native impulse normal.
                             const PhysicalContactCompoundHit solidOverlap =
-                                PhysicalContactSweepCompound(
-                                    weaponShape, intendedWeaponTransform,
+                                PhysicalContactSweepCurrentCompoundOverlap(
+                                    weaponShape, previousWeaponTransform,
                                     intendedWeaponTransform, targetShape,
                                     authoredTargetTransform);
                             if (solidOverlap.hit)
@@ -17084,8 +17086,8 @@ namespace
                         else
                         {
                             const PhysicalContactCompoundHit solidOverlap =
-                                PhysicalContactSweepCompound(
-                                    weaponShape, intendedWeaponTransform,
+                                PhysicalContactSweepCurrentCompoundOverlap(
+                                    weaponShape, previousWeaponTransform,
                                     intendedWeaponTransform, targetShape,
                                     authoredTargetTransform);
                             if (solidOverlap.hit)

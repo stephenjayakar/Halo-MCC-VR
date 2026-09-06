@@ -8,6 +8,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -29,6 +30,7 @@
 #include "sigscan.h"
 #include "odst_vehicle_logic.h"
 #include "physical_contact_logic.h"
+#include "fixtures/h3_solid_overlap_replay.h"
 #include "null_controller_path.h"
 #include "reach_adapter.h"
 #include "reach_chud_logic.h"
@@ -217,9 +219,48 @@ __declspec(noinline) static void TestNullControllerPath()
     }
 }
 
+__declspec(noinline) static void TestRecordedSolidOverlap()
+{
+    auto weapon = std::make_unique<PhysicalContactCompoundShape>();
+    auto target = std::make_unique<PhysicalContactCompoundShape>();
+    for (unsigned index = 0; index < 2; ++index)
+    {
+        PhysicalContactTransform previous{}, intended{}, targetTransform{};
+        LoadH3SolidOverlapReplay(index, previous, intended, targetTransform,
+            weapon->children[0], target->children[0]);
+        weapon->childCount = target->childCount = 1;
+        Check(!PhysicalContactCompoundsIntersect(*weapon, previous, *target, targetTransform),
+            "recorded rejection began outside the selected target convex");
+        const auto oldOverlap = PhysicalContactSweepCompound(
+            *weapon, intended, intended, *target, targetTransform);
+        Check(oldOverlap.hit && !oldOverlap.normalReliable,
+            "end-pose-only fallback reproduces the recorded unreliable normal");
+        const auto swept = PhysicalContactSweepCurrentCompoundOverlap(
+            *weapon, previous, intended, *target, targetTransform);
+        Check(swept.hit && swept.normalReliable && swept.fraction > .5f && swept.fraction < .8f,
+            "recorded newly entered solid retains its proven swept plane");
+        Check(PhysicalContactDot(swept.normal, { .9075f, .3930f, .1481f }) > .999f,
+            "recorded swept normal matches independent numerical replay");
+        const auto preexisting = PhysicalContactSweepCurrentCompoundOverlap(
+            *weapon, intended, intended, *target, targetTransform);
+        Check(preexisting.hit && !preexisting.normalReliable,
+            "truly pre-existing overlap does not gain an impulse normal");
+        const auto clear = PhysicalContactSweepCurrentCompoundOverlap(
+            *weapon, intended, previous, *target, targetTransform);
+        Check(!clear.hit, "solid fallback still requires current overlap");
+        auto from = intended, to = intended;
+        from.position.x -= 1.0f; to.position.x += 1.0f;
+        Check(PhysicalContactSweepCompound(*weapon, from, to, *target, targetTransform).hit,
+            "pass-through control crosses the captured convex");
+        Check(!PhysicalContactSweepCurrentCompoundOverlap(*weapon, from, to, *target, targetTransform).hit,
+            "solid fallback does not admit a merely swept convex with a clear end pose");
+    }
+}
+
 int main()
 {
     TestNullControllerPath();
+    TestRecordedSolidOverlap();
     {
         const auto shove = PhysicalContactNpcShoveDelta({0.4f, 0, 0}, {0.4f, 0, 0}, {-1, 0, 0}, 1.5f, 1.0f/60, 1);
         Check(shove.x > 0 && shove.x <= 0.15f && shove.z == 0, "Slow inward NPC contact produces bounded horizontal motor input");
