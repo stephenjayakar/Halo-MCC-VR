@@ -732,3 +732,66 @@ the gather side only; it does not yet classify the separate render-cast
 rejections. Its pass condition requires successful and rejected observations,
 zero pose/seed/hide counters, no native faults and no mesh audit. Passing means
 the failure was observed with that isolation, not that collision was fixed.
+
+#### Capacity rejection reproduced without world pose ownership
+
+Source `0b4eebf120429aece12daaf81af8c36df516fb1d`; package
+`out/candidates/0b4eebf-h3-physical-contact-20260906-092523568Z`.
+Installed DLL independently checked:
+`EAA624C0A1CBBDA24E91A80207AEAC852BF874557E247B3E06B8AEED1F27C0BD`.
+Launcher/config unchanged. Both CTests passed. E: Steam was installed; alternate
+Steam and Store roots were absent. Prior artifact/log preserved in
+`out/deploy-backups/5387326-steam-before-0b4eebf-20260906-092524624Z`.
+
+Run `out/debug-openxr/20260906-092644623Z-controller-contact-result.json`
+passed the observation-only criterion, Steam / SteamVR null / Null Model Number,
+Floodgate, sword blade enabled. Log SHA:
+`350C767A91598FEAA9C0539D33C8F86888041F2D3B6B8381F25654D29F2105EC`.
+The scene screenshot is
+`20260906-092847351Z-floodgate-gather-only-rock/0000-092847618Z.jpg`.
+The same 1,200 ms D approach reached the nearby rock. All sixteen recorded
+rejections were reason 2, validation `0x00020000`: feature-category capacity.
+Native return was true, group zero, active structure `0x18`. Counts were
+128-143 spheres, 144-153 cylinders and exactly 256 prisms. Search radius was
+0.581567-0.581570 world units, expansion 0.035001, bound approximately 0.381919.
+This proves the capacity guard rejected a full prism array, not that a specific
+surface beyond that array was omitted. Never accept a full/truncated array as
+complete coverage merely to clear this guard.
+
+The four success controls occurred during initial handle-only preparation and
+had empty arrays; they do not establish successful full-blade gathering at the
+rock. Subsequent full-blade appends and 256-triangle status were recorded. Final
+totals: 3,512 successful gathers, 759 rejected gathers, zero seeds, solver
+frames, blocks, holds, hidden submissions, cast queries, shape rejects, budget
+exhaustion and native faults. No paired mesh audit ran. Retreat/respawn restored
+successful gathering without further rejected counts in the final interval.
+Parsed records: `out/research/20260906-native-volume/gather-capacity-audit.json`.
+The next design must bound spatial query size while retaining coverage for
+every admitted swept sphere; smaller queries are a direction, not yet a fix.
+
+For save restoration, a start-screen-only launch followed by ordinary window
+closure refreshed all four Steam metadata entries to the original file sizes
+and hashes. The subsequent menu showed Resume and loaded the original
+checkpoint. `out/test-runs/20260906-resume-cache-check/after-menu-refresh.json`
+records the match. That refresh run intentionally stopped before title entry:
+`20260906-092542315Z-controller-contact-result.json` reports menu-control
+failure and is not an interaction test. The resume helper now supports
+`-MenuOnly` to verify Resume without entering Campaign; a recognized menu
+without Resume reports an immediate failure without choosing Quickstart.
+
+After the observation run, the current four originals were restored again
+(`post-gather-observation/restoration.json`). A start-screen-only refresh run
+(`20260906-093054800Z`) synchronized Steam's cached metadata. The final
+`-MenuOnly` check exited successfully with Resume visible at
+`20260906-093351192Z-menu-ocr/0000-093351341Z.jpg`; that actual frame was also
+inspected. No mission was entered. The surrounding harness
+(`20260906-093237472Z`) intentionally reports menu-control failure because the
+observer then closed MCC; it is not an interaction-validation result.
+Final `out/test-runs/20260906-resume-cache-check/final-menu-cache.json` proves
+all four live files still match the original SHA-256 values and Steam's cached
+sizes/SHA-1 values after closure. Normal VR settings independently match
+`298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`.
+MCC/SteamVR are closed, null is disabled, forced driver empty and requireHmd
+true. Resume restoration is now verified. WorldVolume remains disabled;
+normal launches do not enable WorldGather or BladeGeometry. The accepted
+pointer has not advanced.

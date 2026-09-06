@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateRange(30,300)][int]$TimeoutSeconds = 120)
+param([ValidateRange(30,300)][int]$TimeoutSeconds = 120,[switch]$MenuOnly)
 # State-driven shell navigation, using captured-frame OCR and addressed window
 # messages. Unknown pages receive no input. This never chooses a new mission.
 $ErrorActionPreference = 'Stop'
@@ -24,8 +24,17 @@ while ([DateTime]::UtcNow -lt $deadline) {
     elseif ($text -match 'HALO 3' -and $text -match 'BUILT IN') {
         $state='halo3-built-in'; $keys=@('Up','Up','Up','Up','Up','Up','Up','Enter')
     }
-    elseif ($lastState -eq 'halo3-built-in' -and $text -match 'RESUME' -and $text -match 'QUICKSTART' -and $text -match 'MISSIONS' -and $text -match 'HALO 3') {
-        $state='halo3-resume'; $keys=@('Up','Up','Up','Up','Enter')
+    elseif ($lastState -eq 'halo3-built-in' -and $text -match 'QUICKSTART' -and $text -match 'MISSIONS' -and $text -match 'HALO 3') {
+        if ($text -match 'RESUME') {
+            if ($MenuOnly) {
+                Write-Host "Observed Halo 3 Resume available ($frame). MenuOnly: no mission started."
+                exit 0
+            }
+            $state='halo3-resume'; $keys=@('Up','Up','Up','Up','Enter')
+        }
+        else {
+            throw "Observed Halo 3 Campaign menu without Resume ($frame). No mission started; check checkpoint files and Steam cached metadata."
+        }
     }
     if ($state -and $state -ne $lastState) {
         Write-Host "Observed MCC menu: $state ($frame)"
