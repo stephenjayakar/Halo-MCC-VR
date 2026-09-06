@@ -98,7 +98,8 @@ void Halo3ObserveWorldGather(const Halo3WorldVolumeCache& c,uint32_t group,
 void Halo3PublishWorldDraw(const BoneMatrix* nodes,const BoneMatrix* tracked,uint32_t count,
     uint16_t tag,int32_t weapon,uint32_t generation,uint64_t serial,uint64_t ms,int disposition)
 {
-    if (!g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) ||
+    if (!g_halo3WorldMeshAuditEnabled.load(std::memory_order_acquire) ||
+        !g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) ||
         g_halo3WorldGatherOnly.load(std::memory_order_acquire) || !nodes || !tracked ||
         !count || count>16) return;
     auto write=g_halo3WorldDraws.write();
@@ -190,7 +191,11 @@ void Halo3CheckWorldDrawMesh(const Halo3WorldDraw& d,const unsigned char* weapon
 void Halo3AuditWorldDraw(uint64_t nowMs,uint32_t generation,int32_t weapon,int32_t ignored,
     const unsigned char* weaponData,float worldScale)
 {
-    if (!g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) ||
+    // The paired 256-triangle sword audit measured up to 25.5 ms. Keep its
+    // native queries and render-side diagnostic snapshots out of ordinary use.
+    // Neither this record nor the audit enable flag grants solver ownership.
+    if (!g_halo3WorldMeshAuditEnabled.load(std::memory_order_acquire) ||
+        !g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) ||
         g_halo3WorldGatherOnly.load(std::memory_order_acquire) ||
         !std::isfinite(worldScale) || worldScale<.05f || worldScale>2) return;
     static uint64_t lastMs=0,lastSerial=0;

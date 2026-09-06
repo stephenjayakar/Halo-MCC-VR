@@ -635,6 +635,7 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_FRESH_REGION',
     'HALOMCCVR_H3_CONTACT_WORLD_VOLUME',
     'HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS',
+    'HALOMCCVR_H3_CONTACT_DEBUG_WORLD_MESH',
     'HALOMCCVR_H3_CONTACT_DEBUG_WORLD_GATHER'
 )
 $savedEnvironment = @{}
@@ -694,6 +695,9 @@ try {
     if ($FreshRegion) { $env:HALOMCCVR_H3_CONTACT_FRESH_REGION = '1' }
     if ($WorldPartitions) { $env:HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS = '1' }
     elseif ($WorldVolume) { $env:HALOMCCVR_H3_CONTACT_WORLD_VOLUME = '1' }
+    # Collision qualification retains the independent paired-mesh evidence.
+    # These audit-enabled runs must not be presented as ordinary tracking cost.
+    if ($WorldVolume) { $env:HALOMCCVR_H3_CONTACT_DEBUG_WORLD_MESH = '1' }
     if ($WorldGather) { $env:HALOMCCVR_H3_CONTACT_DEBUG_WORLD_GATHER = '1' }
     if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
@@ -986,7 +990,8 @@ public static class HaloMccVrContactInput {
         $text = Get-NewLogText $runtimeLog $startedUtc
         $useSameFrameGapCounters = $Test -eq 'rotating-body-gap'
         if (-not (Get-UniqueMccWindowProcess)) { throw 'MCC closed during contact validation.' }
-        $worldMeshPassed = -not $WorldVolume -or (Test-WorldMeshAudit $text)
+        $worldMeshPassed = -not $WorldVolume -or (
+            $text -match 'H3 world mesh AUDIT mode: enabled=1;' -and (Test-WorldMeshAudit $text))
         if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
             (Test-VisibleWeaponGapFailure $text $useSameFrameGapCounters)) {
             throw 'Halo 3 visible-weapon-gap recorded an exact visible-geometry penetration.'
@@ -1042,7 +1047,8 @@ public static class HaloMccVrContactInput {
     if ($WorldVolume -and $text -match 'H3 world volume EXPERIMENT:.*faults=[1-9][0-9]*') {
         throw 'Current-pose world-volume experiment recorded a native query fault.'
     }
-    if ($WorldVolume -and -not (Test-WorldMeshAudit $text)) {
+    if ($WorldVolume -and ($text -notmatch 'H3 world mesh AUDIT mode: enabled=1;' -or
+            -not (Test-WorldMeshAudit $text))) {
         throw 'World-volume audit did not prove the requested two visible raw/submitted counterfactual observations.'
     }
     if ($WorldPartitions -and $text -match 'H3 world partitions:.*(?:capacity|invalid|planFailures|castInvalid)=[1-9][0-9]*') {
@@ -1146,6 +1152,7 @@ $result = [ordered]@{
     volume_probe_requested = [bool]$ProbeVolume
     world_volume_requested = [bool]$WorldVolume
     world_partitions_requested = [bool]$WorldPartitions
+    world_mesh_audit_requested = [bool]$WorldVolume
     world_gather_requested = [bool]$WorldGather
     post_pass_hold_seconds = $PostPassHoldSeconds
     fresh_region_requested = [bool]$FreshRegion

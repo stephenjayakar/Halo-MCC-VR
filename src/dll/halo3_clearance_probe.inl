@@ -63,6 +63,7 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     g_halo3WorldVolumeEnabled.store(false, std::memory_order_release);
     g_halo3WorldGatherOnly.store(false, std::memory_order_release);
     g_halo3WorldPartitions.store(false, std::memory_order_release);
+    g_halo3WorldMeshAuditEnabled.store(false, std::memory_order_release);
     g_halo3ClearanceActiveMask = nullptr;
     wchar_t value[2]{};
     const bool probeRequested = GetEnvironmentVariableW(
@@ -78,6 +79,8 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     const bool partitions = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS", value, 2) == 1 && value[0] == L'1';
     const bool worldRequested = (kEnableHalo3WorldVolumeExperiment && worldFlag) || partitions;
+    const bool meshAuditRequested = GetEnvironmentVariableW(
+        L"HALOMCCVR_H3_CONTACT_DEBUG_WORLD_MESH", value, 2) == 1 && value[0] == L'1';
     if (worldFlag && !kEnableHalo3WorldVolumeExperiment && !partitions)
         LOG("H3 world volume EXPERIMENT disabled after Floodgate sword gather/cast failures; prior contact path retained; VR unchanged");
     const bool gatherOnly = GetEnvironmentVariableW(
@@ -138,6 +141,8 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
             g_halo3VolumeProbeEnabled.store(volumeRequested, std::memory_order_release);
             g_halo3WorldGatherOnly.store(gatherOnly, std::memory_order_release);
             g_halo3WorldPartitions.store(partitions, std::memory_order_release);
+            g_halo3WorldMeshAuditEnabled.store(worldRequested && !gatherOnly && meshAuditRequested,
+                std::memory_order_release);
             g_halo3WorldVolumeEnabled.store(worldRequested || gatherOnly, std::memory_order_release);
             if (gatherOnly)
                 LOG("H3 world gather PROBE enabled: raw-pose worker observations only; no world pose ownership, no mesh audit, no weapon hiding");
@@ -147,6 +152,9 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
                 LOG("H3 world volume EXPERIMENT enabled: worker geometry, current-pose rigid sweep/slide, 30cm clear-only recovery; headset acceptance pending");
             if (partitions)
                 LOG("H3 world partitions EXPERIMENT enabled: swept-sphere regions, exact expansion and capsule containment, native capacity guards retained");
+            if (worldRequested)
+                LOG("H3 world mesh AUDIT mode: enabled=%d; diagnostic only, no solver permission; audit timings are not ordinary tracking timings",
+                    g_halo3WorldMeshAuditEnabled.load() ? 1 : 0);
         }
         else LOG("H3 volume PROBE disabled: unique verified solver unavailable; VR unchanged");
     }

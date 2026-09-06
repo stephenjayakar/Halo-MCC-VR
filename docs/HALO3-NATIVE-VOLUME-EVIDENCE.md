@@ -908,3 +908,28 @@ MCC and SteamVR are closed. Normal VR settings independently match
 `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`:
 null disabled, forced driver empty, requireHmd true. The partition and blade
 experiments remain off in ordinary launches. The accepted pointer is unchanged.
+
+### Separate the measured mesh audit from ordinary collision work
+
+The 4500848 contact run measured the paired sword audit at up to 25,485.2 us;
+the actual current-pose solve recorded a mean of 18.0 us and maximum 580.0 us
+over 56,045 attempts. These are different tasks. No causal attribution of all
+headset lag or of later shape/region rejects follows from those timings.
+
+`HALOMCCVR_H3_CONTACT_DEBUG_WORLD_MESH=1` now separately opts into the existing
+paired draw audit. It defaults off and only arms with successful world bindings,
+world pose ownership requested, and observation-only WorldGather disabled.
+Both the render-side diagnostic palette publication and worker-side native
+mesh queries return before touching their snapshots when this flag is off.
+The observation implementation is retained. No solver, seed, cache coverage,
+age, shape, recovery, or visibility permission consumes the audit flag.
+This is a diagnostic scheduling change, not a new collision solver candidate
+stacked over the incomplete Floodgate run.
+
+The validation harness explicitly sets/restores this flag for WorldVolume and
+WorldPartitions and requires the enabled marker as well as its existing paired
+mesh criterion. It records the audit request in the result JSON. Qualification
+is not weakened to pass without geometric evidence. Audit-enabled run timings
+must not be presented as ordinary tracking performance. A live audit-off
+comparison and headset latency acceptance remain outstanding; the experimental
+world and blade paths still default off.

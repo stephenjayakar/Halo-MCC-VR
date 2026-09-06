@@ -979,6 +979,7 @@ namespace
     std::atomic<bool> g_halo3WorldVolumeEnabled{false};
     std::atomic<bool> g_halo3WorldGatherOnly{false};
     std::atomic<bool> g_halo3WorldPartitions{false};
+    std::atomic<bool> g_halo3WorldMeshAuditEnabled{false};
     std::atomic<uint32_t> g_halo3WorldReset{1};
     int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int32_t weapon,
         uint32_t generation,uint64_t serial,uint64_t nowMs,const BoneMatrix* tracked,bool publishRequest);
