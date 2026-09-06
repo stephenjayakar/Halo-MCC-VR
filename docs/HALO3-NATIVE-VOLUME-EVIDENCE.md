@@ -517,3 +517,29 @@ leave WorldVolume off. The accepted pointer is unchanged. Clearer visible
 contact tests, Campaign/instance coverage, sword animation, props/NPCs and
 headset acceptance remain open; this is a successful initial integration
 probe, not a ready-for-headset or completed-goal claim.
+
+## Paired submitted-mesh audit (September 6)
+
+The world-volume experiment now records up to 32 independent worker audits of
+exact paired tracked/submitted palettes, captured immediately before the draw
+is hidden for recovery. At most four unconstrained and four hidden samples
+consume the bounded array; visible corrected poses retain the remaining slots.
+The worker reconstructs the authored collision triangle mesh for each palette,
+tests every vertex and triangle centroid with the native point-inside query,
+and tests every triangle edge in both directions with the native line query.
+Flags 9 select structure and instances. Active structure/reset identity is
+checked around the query sequence. No result changes a rendering permission.
+
+The validator now requires two visible (not hidden recovery) paired observations
+where the requested mesh has points inside native solids and the submitted mesh
+has neither sampled point interiors nor edge crossings. A native fault or a
+valid visible submitted-mesh intersection fails the run. The checks are not a
+complete triangle-vs-world overlap algorithm; unsampled face interiors and the
+difference between authored collision and fully rendered/skinned geometry
+remain limitations. They are independent evidence beyond the solver's own
+blocked counter, with exact sampled counts and query cost logged.
+
+Inspection also found existing opt-in turn controls: `send-mcc-keys.ps1 -Keys
+TurnRight` / `TurnLeft` enqueue 15-degree steps consumed by ordinary VR turning.
+The null controller pose continues through the same yaw reference. Mouse look
+is not needed to frame the test and no new camera override has been added.

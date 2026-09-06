@@ -38,6 +38,42 @@ std::atomic<uint64_t> g_halo3WorldBlocks{0},g_halo3WorldHolds{0},g_halo3WorldHid
 std::atomic<uint64_t> g_halo3WorldUnknown{0},g_halo3WorldShapeRejects{0},g_halo3WorldFaults{0};
 std::atomic<uint64_t> g_halo3WorldQueries{0},g_halo3WorldExhausted{0};
 std::atomic<uint64_t> g_halo3WorldSolveMaxTicks{0},g_halo3WorldSolveTicks{0},g_halo3WorldSolveCount{0};
+struct Halo3WorldDraw
+{
+    uint32_t generation{},reset{},count{},tag{};
+    int32_t weapon{-1};
+    uint64_t serial{},ms{};
+    int disposition{};
+    std::array<BoneMatrix,16> nodes{},tracked{};
+};
+PhysicalContactSnapshot<Halo3WorldDraw> g_halo3WorldDraws;
+struct Halo3WorldMeshAudit
+{
+    uint64_t ms{},serial{};
+    uint32_t triangles[2]{},inside[2]{},crossings[2]{};
+    PhysicalContactVec3 roots[2]{};
+    float gapMeters{},edgeRemainderMeters[2]{};
+    double microseconds{};
+    int disposition{};
+    bool valid{},faulted{};
+};
+std::array<Halo3WorldMeshAudit,32> g_halo3WorldMeshAudits{};
+std::array<std::atomic<uint32_t>,32> g_halo3WorldMeshAuditStates{};
+
+void Halo3PublishWorldDraw(const BoneMatrix* nodes,const BoneMatrix* tracked,uint32_t count,
+    uint16_t tag,int32_t weapon,uint32_t generation,uint64_t serial,uint64_t ms,int disposition)
+{
+    if (!g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) || !nodes || !tracked ||
+        !count || count>16) return;
+    auto write=g_halo3WorldDraws.write();
+    if (!write) return;
+    auto& d=write.get();
+    d.generation=generation; d.reset=g_halo3WorldReset.load(std::memory_order_acquire);
+    d.count=count; d.tag=tag; d.weapon=weapon; d.serial=serial; d.ms=ms; d.disposition=disposition;
+    memcpy(d.nodes.data(),nodes,count*sizeof(BoneMatrix));
+    memcpy(d.tracked.data(),tracked,count*sizeof(BoneMatrix));
+    write.publish(serial);
+}
 
 PhysicalContactTransform Halo3WorldTransform(const BoneMatrix& b)
 {
@@ -45,6 +81,101 @@ PhysicalContactTransform Halo3WorldTransform(const BoneMatrix& b)
         {b.rotation[0],b.rotation[1],b.rotation[2]},
         {b.rotation[3],b.rotation[4],b.rotation[5]},
         {b.rotation[6],b.rotation[7],b.rotation[8]},b.scale};
+}
+
+// Independent worker-side observations, not a permission used by the solver.
+// All triangle vertices/centroids and both directions of every edge are tested.
+// This samples the authored collision mesh at the submitted palette; it is not
+// an exhaustive triangle/interior intersection proof or a rendered-mesh census.
+void Halo3CheckWorldDrawMesh(const Halo3WorldDraw& d,const unsigned char* weaponData,
+    int32_t ignored,float worldScale,Halo3WorldMeshAudit& record)
+{
+    static thread_local PhysicalContactCompoundShape shape;
+    static thread_local PhysicalContactTriangleMesh mesh;
+    LARGE_INTEGER begin{},end{},frequency{};
+    QueryPerformanceFrequency(&frequency); QueryPerformanceCounter(&begin);
+    __try
+    {
+        const uint32_t active=g_halo3ClearanceActiveMask ? *g_halo3ClearanceActiveMask : 0;
+        if (!active || (active&0xFFFF0000u) || !g_halo3ClearancePoint || !g_halo3CollisionTestVector) return;
+        for (unsigned pose=0;pose<2;++pose)
+        {
+            const auto* nodes=pose ? d.nodes.data() : d.tracked.data();
+            const auto root=Halo3WorldTransform(nodes[0]);
+            record.roots[pose]=root.position;
+            if (!PhysicalContactVolumeRigid(root) ||
+                !Halo3ContactVisibleCollisionShape(weaponData,nodes,d.count,root,shape,false,nullptr,&mesh) ||
+                !PhysicalContactTriangleMeshValid(mesh)) return;
+            record.triangles[pose]=mesh.triangleCount;
+            for (uint16_t triangle=0;triangle<mesh.triangleCount;++triangle)
+            {
+                PhysicalContactVec3 vertices[4]{};
+                for (unsigned v=0;v<3;++v)
+                    vertices[v]=PhysicalContactTransformPoint(root,mesh.triangles[triangle].vertices[v]);
+                vertices[3]=(vertices[0]+vertices[1]+vertices[2])*(1.f/3.f);
+                for (unsigned v=0;v<4;++v)
+                {
+                    if (!PhysicalContactFinite(vertices[v])) return;
+                    int32_t type=-1;
+                    if (g_halo3ClearancePoint(9,&vertices[v].x,ignored,d.weapon,&type) && type>=0 && type<4)
+                        ++record.inside[pose];
+                }
+                for (unsigned edge=0;edge<3;++edge) for (unsigned reverse=0;reverse<2;++reverse)
+                {
+                    const auto from=vertices[reverse ? (edge+1)%3 : edge];
+                    const auto to=vertices[reverse ? edge : (edge+1)%3];
+                    const auto motion=to-from;
+                    if (PhysicalContactLengthSquared(motion)<1.e-10f) continue;
+                    Halo3CollisionResult hit{}; hit.type=-1; hit.fraction=1;
+                    if (g_halo3CollisionTestVector(9,false,&from.x,&motion.x,ignored,d.weapon,-1,&hit))
+                    {
+                        if (!std::isfinite(hit.fraction) || hit.fraction<0 || hit.fraction>1) return;
+                        // Discard numerical endpoint touches; the cover's skin
+                        // should leave the submitted mesh strictly outside.
+                        if (hit.type>=0 && hit.type<4 && hit.fraction>1.e-4f && hit.fraction<.9999f)
+                        {
+                            ++record.crossings[pose];
+                            record.edgeRemainderMeters[pose]=std::max(record.edgeRemainderMeters[pose],
+                                PhysicalContactLength(motion)*(1-hit.fraction)/worldScale);
+                        }
+                    }
+                }
+            }
+        }
+        record.valid=active==*g_halo3ClearanceActiveMask &&
+            d.generation==g_halo3RuntimeGeneration.load(std::memory_order_acquire) &&
+            d.reset==g_halo3WorldReset.load(std::memory_order_acquire);
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER) { record.faulted=true; }
+    QueryPerformanceCounter(&end);
+    if (frequency.QuadPart>0) record.microseconds=(end.QuadPart-begin.QuadPart)*1.e6/frequency.QuadPart;
+}
+
+void Halo3AuditWorldDraw(uint64_t nowMs,uint32_t generation,int32_t weapon,int32_t ignored,
+    const unsigned char* weaponData,float worldScale)
+{
+    if (!g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) ||
+        !std::isfinite(worldScale) || worldScale<.05f || worldScale>2) return;
+    static uint64_t lastMs=0,lastSerial=0;
+    static unsigned next=0,freeSamples=0,hiddenSamples=0;
+    if (next>=g_halo3WorldMeshAudits.size() || nowMs<lastMs || nowMs-lastMs<250) return;
+    auto draw=g_halo3WorldDraws.read();
+    if (!draw) return;
+    const auto& d=draw.get();
+    if (d.generation!=generation || d.weapon!=weapon || !d.serial || d.serial==lastSerial ||
+        d.reset!=g_halo3WorldReset.load(std::memory_order_acquire) || nowMs<d.ms || nowMs-d.ms>50) return;
+    const float gap=PhysicalContactLength(Halo3WorldTransform(d.nodes[0]).position-
+        Halo3WorldTransform(d.tracked[0]).position)/worldScale;
+    if (!std::isfinite(gap) || (gap<.005f && freeSamples>=4) ||
+        (d.disposition==2 && hiddenSamples>=4)) return;
+    if (gap<.005f) ++freeSamples;
+    if (d.disposition==2) ++hiddenSamples;
+    lastMs=nowMs; lastSerial=d.serial;
+    const unsigned index=next++;
+    auto& record=g_halo3WorldMeshAudits[index];
+    record.ms=nowMs; record.serial=d.serial; record.gapMeters=gap; record.disposition=d.disposition;
+    Halo3CheckWorldDrawMesh(d,weaponData,ignored,worldScale,record);
+    g_halo3WorldMeshAuditStates[index].store(2,std::memory_order_release);
 }
 
 bool Halo3WorldNodesMatch(const Halo3WorldVolumeCache& c,const BoneMatrix* nodes,uint32_t count)
@@ -322,4 +453,14 @@ void Halo3LogWorldVolume()
         LOG("H3 world volume timing: solves=%llu meanUs=%.1f maxUs=%.1f",
             count,g_halo3WorldSolveTicks.load()*1.e6/frequency.QuadPart/count,
             g_halo3WorldSolveMaxTicks.load()*1.e6/frequency.QuadPart);
+    for (uint32_t index=0;index<g_halo3WorldMeshAudits.size();++index)
+    {
+        uint32_t ready=2;
+        if (!g_halo3WorldMeshAuditStates[index].compare_exchange_strong(ready,3,std::memory_order_acquire)) continue;
+        const auto& r=g_halo3WorldMeshAudits[index];
+        LOG("H3 world mesh AUDIT: index=%u ms=%llu serial=%llu draw=%d valid=%d fault=%d triangles=%u/%u inside=%u/%u crossings=%u/%u edgeRemainderM=%.5f/%.5f gapM=%.5f raw=(%.6f %.6f %.6f) submitted=(%.6f %.6f %.6f) costUs=%.1f",
+            index,r.ms,r.serial,r.disposition,r.valid,r.faulted,r.triangles[0],r.triangles[1],
+            r.inside[0],r.inside[1],r.crossings[0],r.crossings[1],r.edgeRemainderMeters[0],r.edgeRemainderMeters[1],
+            r.gapMeters,r.roots[0].x,r.roots[0].y,r.roots[0].z,r.roots[1].x,r.roots[1].y,r.roots[1].z,r.microseconds);
+    }
 }

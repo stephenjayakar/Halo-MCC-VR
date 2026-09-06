@@ -557,6 +557,18 @@ if (-not $ExternalMenuControl) {
 if (Get-Process $mccProcessName -ErrorAction SilentlyContinue) {
     throw 'Close MCC before starting unattended validation.'
 }
+
+function Test-WorldMeshAudit([string]$Text) {
+    if ($Text -match 'H3 world mesh AUDIT: [^\r\n]*fault=1' -or
+        $Text -match 'H3 world mesh AUDIT: [^\r\n]*draw=1 valid=1 fault=0 [^\r\n]*(?:inside=\d+/[1-9]\d*|crossings=\d+/[1-9]\d*)') {
+        throw 'World-volume audit found a native fault or an intersection in the submitted visible collision mesh.'
+    }
+    # At least two visible paired observations in which the requested mesh has
+    # points inside native solids and the submitted mesh has no sampled point
+    # interiors or edge crossings. Hidden recovery roots do not count as demos.
+    return [regex]::Matches($Text,
+        'H3 world mesh AUDIT: [^\r\n]*draw=1 valid=1 fault=0 triangles=\d+/\d+ inside=[1-9]\d*/0 crossings=\d+/0 ').Count -ge 2
+}
 # A running client can still be at its sign-in screen. Do not switch SteamVR
 # into null mode until the Steam edition has an actual account session.
 $steamSession = Get-ItemProperty 'HKCU:\Software\Valve\Steam\ActiveProcess' -ErrorAction SilentlyContinue
@@ -964,6 +976,7 @@ public static class HaloMccVrContactInput {
         $text = Get-NewLogText $runtimeLog $startedUtc
         $useSameFrameGapCounters = $Test -eq 'rotating-body-gap'
         if (-not (Get-UniqueMccWindowProcess)) { throw 'MCC closed during contact validation.' }
+        $worldMeshPassed = -not $WorldVolume -or (Test-WorldMeshAudit $text)
         if ($Test -in @('visible-weapon-gap', 'rotating-body-gap') -and
             (Test-VisibleWeaponGapFailure $text $useSameFrameGapCounters)) {
             throw 'Halo 3 visible-weapon-gap recorded an exact visible-geometry penetration.'
@@ -978,7 +991,7 @@ public static class HaloMccVrContactInput {
             (-not $FreshRegion -or
              $text -match 'H3 fresh region EXPERIMENT status: enabled=1 queries=[1-9][0-9]* clears=[1-9][0-9]* frames=[1-9][0-9]* shapeRejects=[0-9]+ faults=0') -and
             (-not $WorldVolume -or
-             $text -match 'H3 world volume EXPERIMENT: enabled=1 caches=[1-9][0-9]* seeds=[1-9][0-9]* frames=[1-9][0-9]* blocks=[1-9][0-9]* .*faults=0') -and
+             ($worldMeshPassed -and $text -match 'H3 world volume EXPERIMENT: enabled=1 caches=[1-9][0-9]* seeds=[1-9][0-9]* frames=[1-9][0-9]* blocks=[1-9][0-9]* .*faults=0')) -and
             (-not $ProbeClearance -or
              $text -match 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0') -and
             (-not $ProbeVolume -or
@@ -1012,6 +1025,9 @@ public static class HaloMccVrContactInput {
     }
     if ($WorldVolume -and $text -match 'H3 world volume EXPERIMENT:.*faults=[1-9][0-9]*') {
         throw 'Current-pose world-volume experiment recorded a native query fault.'
+    }
+    if ($WorldVolume -and -not (Test-WorldMeshAudit $text)) {
+        throw 'World-volume audit did not prove the requested two visible raw/submitted counterfactual observations.'
     }
     if ($ProbeClearance -and ($text -match 'H3 clearance PROBE sample:.*(?:bounds=0|faulted=1)' -or
         $text -notmatch 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0')) {

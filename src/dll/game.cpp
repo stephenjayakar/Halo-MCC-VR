@@ -979,6 +979,8 @@ namespace
     std::atomic<uint32_t> g_halo3WorldReset{1};
     int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int32_t weapon,
         uint32_t generation,uint64_t serial,uint64_t nowMs,const BoneMatrix* tracked,bool publishRequest);
+    void Halo3PublishWorldDraw(const BoneMatrix* nodes,const BoneMatrix* tracked,uint32_t count,
+        uint16_t tag,int32_t weapon,uint32_t generation,uint64_t serial,uint64_t ms,int disposition);
     bool Halo3AllowFreshRegion(uint32_t generation, uint64_t approvedSerial,
         uint64_t nowMs, const BoneMatrix* approved, const BoneMatrix* proposed,
         uint32_t nodeCount,bool worldOwned=false);
@@ -6458,6 +6460,9 @@ namespace
                 Halo3MeasureSameFrameRotatingGap(
                     activeWeaponHandle, destination,
                     static_cast<uint32_t>(renderNodeCount), nowMs);
+                if (worldFinal)
+                    Halo3PublishWorldDraw(destination,trackedNodes.data(),renderNodeCount,tag,
+                        activeWeaponHandle,contactGeneration,proposalSerial,nowMs,worldFinal);
                 // Keep the swept physical palette for collision/aim history.
                 // Only the draw is hidden while an obstructed hand is beyond
                 // the leash or the current animated shape cannot be proved.
@@ -15188,8 +15193,11 @@ namespace
                 collisionShape ? weaponTriangleMesh.triangleCount : 0u,
                 std::memory_order_relaxed);
             if (collisionShape && !debugRig)
+            {
                 Halo3PublishWorldVolume(nowMs,generation,weaponHandle,proposalRenderTag,unitHandle,
                     weaponShape,visibleNodes.data(),visibleNodeCount,worldScale);
+                Halo3AuditWorldDraw(nowMs,generation,weaponHandle,unitHandle,weaponData,worldScale);
+            }
             if (!collisionShape && !physicsFallback)
             {
                 g_halo3ContactUnsupportedShapes.fetch_add(
