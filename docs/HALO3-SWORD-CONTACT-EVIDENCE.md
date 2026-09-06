@@ -326,3 +326,43 @@ button. Input delivery is not treated as confirmation of a game-state change.
 This is test-control scaffolding, not a change to weapon physics or sword
 geometry. The existing keyboard sender also accepts Tab, E, Minus and Tools;
 their mappings alone do not establish native gameplay actions.
+
+### Live bridge result, 19:24–19:31 PDT
+
+Diagnostic source `3afef90ecafd9e0af2885f234a68300799fd805e`, package
+`out/candidates/3afef90-h3-physical-contact-20260906-022418871Z`, independently
+verified installed DLL SHA-256
+`B348B0E219E164EF45E62A9C582F91A44D74617F182C42299A9F5AA245D01302`.
+Release build/core tests passed. The prior launcher/configuration are unchanged;
+only E: Steam is installed. No sword physics was added.
+
+The opt-in bridge was observed opening the native pause page with Start,
+returning with B, switching to monitor/editor with Up, and opening the native
+weapon inventory with X. Sword selection was visibly reached at 19:31:03:
+`out/debug-openxr/20260906-023103752Z-forge-sword-selection/0000-023103965Z.jpg`.
+The automatic hold ended before placement; the subsequent A sender found no
+MCC process and sent no input. No sword palette was captured and no sword demo
+is claimed. Short pulses were often missed and some longer pulses repeated;
+neither a fixed key count nor successful SendInput proves menu selection.
+
+Result `out/debug-openxr/20260906-022449029Z-controller-contact-result.json`
+correctly reports **failed**, because the session ended in monitor/editor mode
+and lost its on-foot controller-contact pass condition. The final log had
+stage=visible-pose, weaponTriangles=0, nativeSamples=0; this is not a weapon
+collision regression test. Preserved log SHA-256:
+`E2F86AF9917BA34A849826350578D9F27AF58473A5A86C409D399B7178FBA726`.
+The observed input actions above are supporting tool evidence only.
+
+The sender's initial ReadAllText failed against the live writer's sharing mode
+before input. It now uses Get-Content's shared read and additionally confirms
+the isolated key's Windows down-state during the pulse, retaining release in
+finally. Successful actions used 750 ms holds with screenshot verification.
+The harness now permits up to 900 seconds of explicitly requested post-pass
+hold, prints the absolute UTC expiry and records the requested duration. It
+still rechecks the pass condition at expiry and restores settings in finally;
+an equip investigation must return to the on-foot weapon path before claiming
+a controller-contact regression pass.
+
+MCC and SteamVR were confirmed stopped after completion. Original real-headset
+settings hash `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`
+was independently verified restored. Accepted pointer unchanged.

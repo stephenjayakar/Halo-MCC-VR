@@ -18,7 +18,7 @@ $install = Split-Path (Split-Path (Split-Path (Split-Path $mcc.Path)))
 $log = Join-Path $install 'Halo_MCC_VR/halo3xr.log'
 if (-not (Test-Path -LiteralPath $log) -or
     (Get-Item -LiteralPath $log).LastWriteTimeUtc -lt $mcc.StartTime.ToUniversalTime() -or
-    [IO.File]::ReadAllText($log) -notmatch 'debug input: keyboard-to-gamepad bridge enabled \(isolated F13-F21 controls available\)') {
+    (Get-Content -LiteralPath $log -Raw) -notmatch 'debug input: keyboard-to-gamepad bridge enabled \(isolated F13-F21 controls available\)') {
     throw 'The current MCC session has not enabled the F13-F21 test bridge.'
 }
 Add-Type @'
@@ -34,11 +34,17 @@ public static class MccDiagnosticPad {
  }
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
  [DllImport("user32.dll")] static extern uint SendInput(uint n, Input[] input, int size);
  public static uint Pulse(ushort vk, int hold) {
   var input = new Input[1]; input[0].type=1; input[0].key.vk=vk;
   uint result=SendInput(1,input,40);
-  try { System.Threading.Thread.Sleep(hold); }
+  try {
+   System.Threading.Thread.Sleep(30);
+   if ((GetAsyncKeyState(vk) & 0x8000)==0)
+    throw new InvalidOperationException("The isolated key did not enter the Windows down state.");
+   System.Threading.Thread.Sleep(hold-30);
+  }
   finally { input[0].key.flags=2; result+=SendInput(1,input,40); }
   return result;
  }

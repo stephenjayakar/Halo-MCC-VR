@@ -27,7 +27,7 @@ param(
     [ValidateRange(30, 600)]
     [int]$MenuControlTimeoutSeconds = 300,
 
-    [ValidateRange(0, 300)]
+    [ValidateRange(0, 900)]
     [int]$PostPassHoldSeconds = 0,
 
     [ValidateSet('Auto', 'Construct', 'HighGround', 'Valhalla')]
@@ -948,8 +948,12 @@ public static class HaloMccVrContactInput {
     } $ValidationTimeoutSeconds "Halo 3 $Test did not reach its pass condition."
 
     if ($PostPassHoldSeconds -gt 0) {
-        Write-Host "Holding the validated $Scenario process for $PostPassHoldSeconds seconds."
-        Start-Sleep -Seconds $PostPassHoldSeconds
+        $holdDeadline = [DateTime]::UtcNow.AddSeconds($PostPassHoldSeconds)
+        Write-Host "Holding the validated $Scenario process until $($holdDeadline.ToString('o')) ($PostPassHoldSeconds seconds)."
+        while ([DateTime]::UtcNow -lt $holdDeadline) {
+            $remainingHold = ($holdDeadline - [DateTime]::UtcNow).TotalMilliseconds
+            Start-Sleep -Milliseconds ([int][Math]::Max(1, [Math]::Min(30000, $remainingHold)))
+        }
     }
     $text = Get-NewLogText $runtimeLog $startedUtc
     if ($FreshRegion -and $text -match 'H3 fresh region EXPERIMENT status:.*faults=[1-9][0-9]*') {
@@ -1038,6 +1042,7 @@ $result = [ordered]@{
     passed = $passed
     hand_recovery_requested = [bool]$TestHandRecovery
     keyboard_gamepad_requested = [bool]$KeyboardGamepad
+    post_pass_hold_seconds = $PostPassHoldSeconds
     fresh_region_requested = [bool]$FreshRegion
     source_commit = $runtimeSourceCommit
     validator_source_commit = $validatorCommit
