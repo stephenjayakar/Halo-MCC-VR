@@ -1420,3 +1420,56 @@ After the sword run, MCC/SteamVR were closed and normal SteamVR settings
 restored to SHA `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`.
 The read-only Campaign check found all four original files and matching Steam
 metadata. No save restoration was necessary. Accepted pointer unchanged.
+
+### 22bf874 sword contact succeeded, reset recovery failed
+
+Package `out/candidates/22bf874-h3-physical-contact-20260906-114644864Z`, source
+`22bf874e5ba11b62c16024266e89f7c97dd1f000`. Release and both CTests passed.
+Installed Steam DLL independently verified at
+`AB43BB7489CEC4BF59CD27D3D10C948037C31D922867B5594B9E8CF415BE9E29`;
+launcher/config unchanged, other Steam/Store roots absent. Prior installation:
+`out/deploy-backups/282c864-steam-before-22bf874-20260906-114645807Z`.
+
+Run `20260906-114654558Z-controller-contact-result.json`: Steam / SteamVR null /
+Null Model Number, Guardian Forge, WorldPartitions + mesh audit + BladeGeometry.
+Log SHA `069E1FCD7DC68ECADEEFA12A3D239B97E086C420CDC0D3AB6B30F2751A3A42DB`.
+The cumulative harness reported a pass including its 90-second hold, but the
+late reset failure below makes this an **overall failed recovery candidate**.
+Parsed summary: `out/research/20260906-native-volume/guardian-sword-reset-summary.json`.
+
+Spawn was the outdoor ramp with a blue floor fixture. The Forge palette spawned
+an energy sword onto the ramp; W 1100 + 900 ms and ordinary pickup acquired it.
+D 450 ms approached the right railing. Controller position (0.18,-0.65,-0.65),
+pitch 75 degrees produced native paired contact: twelve positive visible-draw
+samples, maximum correction 0.09492 m. Representative requested geometry had
+four interior points and sixteen directed edge crossings; submitted geometry
+had zero of both. The sword was below the inspected camera frame during this
+contact, so a visible draw flag is not a visually useful demonstration video.
+Position (0.10,-0.30,-0.75), pitch 35 degrees brought the sword into view and
+returned to near-zero correction with clear sampled meshes. No recontact input
+was completed before the post-pass timeout.
+
+At log time 04:53:25, reset identity changed from 30 to 31. A paired 1/0 decision
+first recorded reasons 8/4 (cache identity changed), then the reserved category
+5 recorded sixteen 0/0 decisions with reasons 5/5, seeded=0/0 and safe=0/0.
+The fresh cache shape changed from 3419 to 9078 across that reset; this is not
+proof that incoming geometry deformation caused it. Missing-seed count reached
+3,796 in the preserved log, while admitted solves stopped at 52,194 and caches
+continued to 10,341. Thus lost seed ownership is now observed; the initiating
+reset reason still needs capture. No native/query/capacity/plan/region errors.
+Last preserved counts: 5,149 blocks, 2,128 holds, 22 hide decisions, 16 shape
+rejects. Cover mean/max 6.9/301.8 us, gather 164.3/2,411.7 us, solve 16.3/406.2 us.
+Maximum worker mesh audit 19,479.5 us; not headset latency acceptance.
+
+The sampler retained 62 records, but a second diagnostic blind spot remains:
+its caller publishes only when worldFinal is nonzero. The new unowned category
+therefore has no corresponding mesh audits. Correct this call-site restriction
+before interpreting absent unowned mesh samples as clear space. Also extend the
+harness beyond cumulative successes so a sustained late ownership gap cannot
+be reported as a successful recovery hold.
+
+The partition experiment is disabled as its own failure-revert commit before
+further changes. Dormant solver code is retained. The accepted pointer remains
+unchanged. A late 35-second recording started only eight seconds before the
+hold ended and covered shutdown instead of the requested interaction; it is
+irrelevant and is removed under the user's existing cleanup instruction.
