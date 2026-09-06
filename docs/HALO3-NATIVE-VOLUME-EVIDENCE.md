@@ -1564,3 +1564,68 @@ and saturated storage. Both CTests passed after recompiling the final fixtures.
 Cold counters distinguish accepted nonempty feature sets from rejected ones.
 This is source/math evidence only; the next runtime must demonstrate recovery
 and retain paired mesh checks. Accepted pointer unchanged.
+
+#### 08d6675 Guardian runtime: improved seed query, failed ownership recovery
+
+Source `08d667597ca6b6aee4223a690db3161a990d3a49`, package
+`out/candidates/08d6675-h3-physical-contact-20260906-121407911Z`.
+Release and both CTests passed. Installed Steam DLL independently verified at
+`2237019DB7205955683F57943E3F4F086F91CFE0DB0F8F423CF9734E53570CC4`.
+Other Steam/Store roots absent; launcher and config unchanged.
+
+First attempt `20260906-121416838Z-controller-contact-result.json` closed in
+menu control before the world test started. Log SHA
+`7CD8A0E1DF6901911B570256FFD83D49872BA5C782E586C000C2C9182A85DBA0`.
+Crash dump MCC-Win64-Shipping.exe.7304.dmp reports execute access violation at
+zero, with chrome_elf.dll+247CB as the first stack word. This is not a seed-query
+runtime result. Read-only analysis: `out/research/20260906-native-volume/08d6675-menu-crash.txt`.
+The harness and menu helper terminated before retry; normal VR settings restored.
+
+Retry `20260906-121711978Z-controller-contact-result.json`: Steam / SteamVR null /
+Null Model Number, Guardian Forge, WorldPartitions + BladeGeometry + mesh audit.
+Log SHA `62FA0F243AC8900A149A124420A1B959811FE6621A14B40AB05E794A1B45D8C1`.
+The new harness correctly failed on submitted visible mesh intersections after
+completing the 180-second observation hold. Parsed summary:
+`out/research/20260906-native-volume/guardian-expanded-seed-summary.json`.
+
+Spawn was the blue lift room. The Forge palette spawned a sword onto the floor;
+W 1400 + 450 ms and ordinary pickup acquired it; D 450 ms approached the wall
+right of the forward doorway. Controller Z -0.85 produced constrained contact,
+Z -1.00 deepened it, and Z -0.48 withdrew. Z -1.00 recontact later lost ownership;
+Z -0.48 withdrew again. Final Z -0.60 and a Forge monitor/Spartan round-trip
+left the sword visible and controlled near the wall. These are different
+geometry and controls from the prior outdoor-railing run.
+
+125 mesh audits, four positive constrained samples, maximum positive correction
+0.27738 m. Fourteen submitted intersections were recorded, all draw=0 (world
+solver unowned); none occurred in draw=1 or draw=2 samples. First bad sample 56
+had requested inside/crossings 8/32, submitted 4/16, correction 0.09595 m.
+Thus this is not a working collision candidate even though some contacts passed.
+The previously hidden diagnostic gap now yields actual geometry evidence.
+
+Reserved no-seed records show resetReasons=1 (motion gate). The first interval
+used reset 33, shape 5957; a later no-seed record used shape 8122 with the same
+reset 33. Both lifecycle reset and cover replacement therefore remain relevant.
+Missing-seed count ended at 14,980; withdrawal resumed solving. End counters:
+18,442 caches, 78,428 solves, 8,366 blocks, 2,175 holds, 32 hide decisions,
+17 shape rejects, four geometry changes, no unknown/native faults, incomplete
+regions, capacity/plan/cast failures or exhausted queries. Per-sphere seed checks
+accepted 12,110 nonempty feature sets and rejected 4,983; these are not counts
+of approved whole-weapon poses. Cover mean/max 8.1/2,103.5 us, gather
+85.8/2,492.4 us, solve 6.2/1,999.8 us, audit max 5,701.4 us. Not headset timing.
+
+Two actual 50-second recordings are retained as **failed recovery diagnostics**,
+with demo-evidence.json sidecars explicitly marking overall_pass=false:
+- `out/demos/20260906-122206-guardian-sword-doorway-seed-recovery/raw.mp4`, SHA
+  `950096D5A50A9AA897F3D6138AFF4309157B1E4FDD309F4FCCDC2A5C42445A47`.
+- `out/demos/20260906-122322-guardian-sword-contact-withdraw-recontact/raw.mp4`, SHA
+  `A62247F17BE56FC59CF6ACEE5C4C0757EA3A663D0E485A3A27F5D5AFDDA6FD0A`.
+Do not present these as working functionality demonstrations.
+
+The partition behavior is disabled as its own failure-revert commit; dormant
+feature math is retained. MCC/SteamVR independently confirmed closed; normal
+settings SHA `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`,
+null=false, forcedDriver empty, requireHmd=true. The three Campaign checkpoint
+files remain original; all four Steam metadata entries match. AceSettings still
+has the separately preserved completion-record differences and was not restored.
+Accepted pointer unchanged.
