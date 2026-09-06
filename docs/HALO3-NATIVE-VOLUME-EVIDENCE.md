@@ -1887,3 +1887,76 @@ its output distinguishes rejection categories and query-budget exhaustion.
 Initial Release build, both existing CTests, standalone replay target build,
 and PowerShell syntax parsing passed. An actual live capture/replay remains
 required; no synthetic no-argument CTest is presented as runtime evidence.
+
+fbf4d7f capture/replay result (2026-09-06): diagnostic SUCCEEDED; collision
+behavior FAILED as expected. Source `fbf4d7f2b925194085f38ef7392154379c872789`,
+package `out/candidates/fbf4d7f-h3-physical-contact-20260906-131718655Z`, installed
+DLL independently checked
+`3FCAC3DD033DC685CD001C93A98D7D6E6A4EF0BDE4997A7E19C7C56D2BE3B8CB`.
+Backup `out/deploy-backups/3aedc61-steam-before-fbf4d7f-20260906-131719502Z`.
+Final Release, both CTests and the replay executable build passed; passing a
+runtime log instead of a binary correctly returns exit2 for invalid size.
+
+Steam / SteamVR null / Null Model Number, Guardian Forge lift-room spawn,
+13:17:46Z to13:23:31Z. Menu helper selected Guardian; three TurnRight commands
+faced the nearby wall before sword placement. A450 twice/Up750, W1800/E1500
+picked up the sword. Subsequent W400 and controller reach Z=-1.05, then
+X=.35/Z=-1.55, remained clear in the sampled mesh. X=.85/Z=-1.55 at
+13:22:53.585Z triggered the first rejected historical seed. The background
+logger saved it at06:22:54.563 local, stable=1, faults unchanged.
+
+Result `out/debug-openxr/20260906-131740397Z-controller-contact-result.json`,
+preserved log SHA `F709EBFCF7155F986139B2282ACC2F9B5F5360C95872F0446EDC5619FF4E7999`.
+Snapshot `out/debug-openxr/20260906-131740397Z-world-recovery.bin`, 4,834,240 bytes,
+SHA `44276DE7AD7EE3B2755D421D529DB16B4F436203F09CFC4EC30CC420BEABDF9F`.
+Running `out/build/release/Release/halo3_world_recovery_replay.exe` with that
+snapshot produced an EXACT replay (exit0): 453 callbacks, 25 cover spheres,
+7 complete regions, 35 expanded-boundary rejections, 418 clear spheres,
+0 missing-region and 0 native-interior rejections. Budget was NOT exhausted.
+No recovery proposal cleared the full cover. This rules out those three
+alternative explanations for this captured attempt; it is not a global claim.
+Saved machine-readable output:
+`out/research/20260906-native-volume/recovery-capture-replay-result.json`.
+
+Independent read-only Python inspection of the version1 layout and recorded
+feature math: `inspect-recovery-capture.py` / `recovery-capture-boundaries.json`
+in that research directory. Historical/raw roots differ by only0.0000082m.
+The first rejecting ball was usually sphere12 (blade child1), query radius
+0.15625675m. Its containing native prism has normal approximately(0,-1,0),
+plane7.8865366 world units, thickness0.15625675m, signed point distance
+0.10749765m. Shifting enough to clear that ball still left other blade balls
+inside expanded features. Do not confuse one clear sphere with a clear weapon.
+
+`scan-recovery-capture.py` / `recovery-cached-direction-scan.json` tested six
+straight translation directions in5mm increments, with exact region expansion
+matching and conservative containment slack. The first full-cover cached
+boundary-clear result was0.315m along negativeY; other tested axes found none
+through0.40m. Native solid-interior tests at those NEW positions are unverified:
+this scan proves neither an accepted seed nor a global minimum over rotations
+or other directions. It does explain why the0.10m candidate search cannot
+solve this captured case and why simply increasing that bound conflicts with
+the existing0.30m visible-hand leash for the tested straight recovery direction.
+
+The live run eventually submitted penetrated geometry: audit59 draw0 had
+raw/submitted inside10/10, crossings32/32. The harness correctly failed before
+a post-pass hold. 60 preserved audits, zero positive paired contacts (some
+legacy draw0 corrections temporarily cleared raw8/0, but are not world-solver
+success). Caches8816, frames45700, blocks579, holds465, hidden38, missingSeed3276.
+Native faults/capacity/invalid/plan/region/cast failures and exhaustion all0.
+Final preserved recovery counters1090 attempts, 0 clears,494859 callbacks,
+mean373.1us/max2932.6us (includes first snapshot copy). These are diagnostic
+null-run timings, not ordinary headset tracking. No video was started or
+presented as a working demo.
+
+MCC and SteamVR processes are absent. Normal headset settings independently
+match `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`;
+installed config still `C570089F47A17AE8645310C02688CA1454E1A02C9239BC24C5CC316E4DA94946`.
+The three original Campaign checkpoints and all four Steam metadata records
+still match; AceSettings bytes retain the pre-run completion state unchanged.
+No save restoration or cleanup was needed. All tool sessions are terminal.
+The installed diagnostic defaults to the disabled partition path; only an
+explicit WorldReplay launch reproduces the failed behavior. Accepted pointer
+unchanged. The next behavioral candidate must address no-seed draw disposition
+and continuity when a full cover cannot recover within the visible leash,
+using this exact replay to avoid another guessed recovery distance. Tighter
+cover geometry may also matter, but is not established by this capture alone.
