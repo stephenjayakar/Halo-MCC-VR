@@ -987,7 +987,7 @@ namespace
         // 5 no seed/safe pose, 6 reset changed, 7 invalid transform,
         // 8 visible result, 9 hidden result. Observations never grant ownership.
         uint32_t reason{},count{},reset{},active{};
-        uint64_t cacheMs{},epoch{},shape{};
+        uint64_t cacheMs{},evaluationMs{},epoch{},shape{};
         bool seeded{},safe{},matching{},fresh{};
     };
     int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int32_t weapon,

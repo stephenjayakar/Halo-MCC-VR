@@ -1068,3 +1068,23 @@ The partition experiment was subsequently disabled in its own source commit
 after the repeated failed Floodgate runs and directly observed false-future
 cache rejection. Its implementation and diagnostics remain intact. This
 disable precedes the next behavioral candidate; it does not advance acceptance.
+
+### Cache-pinned freshness clock candidate
+
+After disable commit `2718151`, the next opt-in partition candidate samples
+`GetTickCount64` after acquiring its immutable cache. Its 20 ms solve freshness
+and 100 ms retained-pose age checks use this evaluation clock. This ordering
+prevents a concurrently published cache from appearing to be in the future
+merely because the caller retained a timestamp from earlier palette work.
+The raw request and pose provenance timestamps remain unchanged. Epoch,
+identity, shape, seed clearance, query containment and leash guards are retained.
+This changes one behavior: the clock used to evaluate the pinned cache's age.
+
+Each paired observation now records both evaluation clocks. An independent
+sixteen-record category reserves final-cache-newer-than-frame cases; loss and
+visible-over-leash categories retain priority. Cold logging reports the total
+number of such clock advances across both calls. This makes it possible to
+verify visible corrected cases rather than infer success from build results.
+The old whole-query backend remains disabled and normal launches still opt
+into neither world partitions nor sword blades. Other open collision/shape,
+sword effects, shove and headset latency requirements remain outstanding.

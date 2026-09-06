@@ -39,6 +39,7 @@ std::atomic<uint64_t> g_halo3WorldBuilds{0},g_halo3WorldSeeds{0},g_halo3WorldFra
 std::atomic<uint64_t> g_halo3WorldBlocks{0},g_halo3WorldHolds{0},g_halo3WorldHidden{0};
 std::atomic<uint64_t> g_halo3WorldUnknown{0},g_halo3WorldShapeRejects{0},g_halo3WorldFaults{0};
 std::atomic<uint64_t> g_halo3WorldQueries{0},g_halo3WorldExhausted{0};
+std::atomic<uint64_t> g_halo3WorldClockAdvances{0};
 std::atomic<uint64_t> g_halo3WorldSolveMaxTicks{0},g_halo3WorldSolveTicks{0},g_halo3WorldSolveCount{0};
 std::atomic<uint64_t> g_halo3WorldPartitionCalls{0},g_halo3WorldPartitionRegions{0};
 std::atomic<uint64_t> g_halo3WorldPartitionCapacity{0},g_halo3WorldPartitionInvalid{0};
@@ -87,11 +88,11 @@ struct Halo3WorldHandoffObservation
     PhysicalContactVec3 tracked{},submitted{};
     Halo3WorldConstraintObservation before{},after{};
 };
-std::array<Halo3WorldHandoffObservation,64> g_halo3WorldHandoffRecords{};
-std::array<std::atomic<uint32_t>,64> g_halo3WorldHandoffStates{};
-std::array<std::atomic<uint64_t>,4> g_halo3WorldHandoffCounts{};
-std::array<std::atomic<uint64_t>,4> g_halo3WorldHandoffNextMs{};
-std::array<std::atomic<uint32_t>,4> g_halo3WorldHandoffReservations{};
+std::array<Halo3WorldHandoffObservation,80> g_halo3WorldHandoffRecords{};
+std::array<std::atomic<uint32_t>,80> g_halo3WorldHandoffStates{};
+std::array<std::atomic<uint64_t>,5> g_halo3WorldHandoffCounts{};
+std::array<std::atomic<uint64_t>,5> g_halo3WorldHandoffNextMs{};
+std::array<std::atomic<uint32_t>,5> g_halo3WorldHandoffReservations{};
 
 void Halo3ObserveWorldHandoff(uint64_t nowMs,uint64_t serial,uint64_t originMs,
     int32_t weapon,int proposal,int final,uint32_t proof,const BoneMatrix& tracked,
@@ -108,11 +109,13 @@ void Halo3ObserveWorldHandoff(uint64_t nowMs,uint64_t serial,uint64_t originMs,
     if (!std::isfinite(gap)) return;
     // Independent reservations preserve late failures after initial controls.
     // Category 0: early ownership lost; 1: visible over-leash; 2: hidden;
-    // 3: remaining controls. This records existing decisions, changing none.
+    // 3: remaining controls; 4: final cache newer than the frame timestamp.
+    // Failures retain priority over clock cases. Decisions are unchanged here.
+    const bool newer=after.cacheMs>nowMs && after.cacheMs<=after.evaluationMs;
     const uint32_t category=proposal && !final ? 0u :
-        (final!=2 && gap>.30f ? 1u : (final==2 ? 2u : 3u));
+        (final!=2 && gap>.30f ? 1u : (newer ? 4u : (final==2 ? 2u : 3u)));
     g_halo3WorldHandoffCounts[category].fetch_add(1,std::memory_order_relaxed);
-    const uint32_t limit=category<2 ? 16u : 4u;
+    const uint32_t limit=category<2 || category==4 ? 16u : 4u;
     if (g_halo3WorldHandoffReservations[category].load(std::memory_order_relaxed)>=limit) return;
     uint64_t next=g_halo3WorldHandoffNextMs[category].load(std::memory_order_relaxed);
     if (nowMs<next || !g_halo3WorldHandoffNextMs[category].compare_exchange_strong(
@@ -537,6 +540,15 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
     auto cache=g_halo3WorldCaches.read();
     if (!cache) { observation.reason=3; return 0; }
     const auto& c=cache.get();
+    // The worker may publish while the earlier palette/body path is running.
+    // Pin first, then sample time: an earlier frame timestamp can classify
+    // that already-published cache as future and hide a near-hand weapon.
+    // Keep nowMs on the raw request and pose provenance; only cache freshness
+    // uses the actual evaluation clock. No age or epoch allowance is widened.
+    const uint64_t cacheNowMs=GetTickCount64();
+    observation.evaluationMs=cacheNowMs;
+    if (c.ms>nowMs && c.ms<=cacheNowMs)
+        g_halo3WorldClockAdvances.fetch_add(1,std::memory_order_relaxed);
     observation.count=c.count; observation.reset=c.reset; observation.active=c.active;
     observation.cacheMs=c.ms; observation.epoch=c.epoch; observation.shape=c.shape;
     observation.seeded=c.seeded;
@@ -555,7 +567,7 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
             Halo3WorldTransform(tracked[0]).position)>.30f*c.worldScale)
         pose=c.seed;
     const bool matching=Halo3WorldNodesMatch(c,nodes,count);
-    const bool fresh=matching && nowMs>=c.ms && nowMs-c.ms<=20 &&
+    const bool fresh=matching && cacheNowMs>=c.ms && cacheNowMs-c.ms<=20 &&
         c.epoch==g_halo3ClearanceEpoch.load(std::memory_order_acquire);
     observation.matching=matching; observation.fresh=fresh;
     if (!matching) g_halo3WorldShapeRejects.fetch_add(1,std::memory_order_relaxed);
@@ -626,7 +638,7 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
             write.publish(serial);
         }
     }
-    const bool hide=!matching || nowMs<c.ms || nowMs-c.ms>100 ||
+    const bool hide=!matching || cacheNowMs<c.ms || cacheNowMs-c.ms>100 ||
         PhysicalContactLength(pose.position-Halo3WorldTransform(tracked[0]).position)>.30f*c.worldScale;
     if (hide) g_halo3WorldHidden.fetch_add(1,std::memory_order_relaxed);
     observation.reason=hide?9:8;
@@ -642,18 +654,20 @@ void Halo3LogWorldVolume()
         g_halo3WorldUnknown.load(),g_halo3WorldShapeRejects.load(),g_halo3WorldQueries.load(),
         g_halo3WorldExhausted.load(),g_halo3WorldFaults.load());
     LARGE_INTEGER frequency{}; QueryPerformanceFrequency(&frequency);
-    LOG("H3 world handoff counts: lost=%llu visibleOverLeashWithoutLoss=%llu hidden=%llu controls=%llu",
+    LOG("H3 world handoff counts: lost=%llu visibleOverLeashWithoutLoss=%llu hidden=%llu controls=%llu clockCases=%llu",
         g_halo3WorldHandoffCounts[0].load(),g_halo3WorldHandoffCounts[1].load(),
-        g_halo3WorldHandoffCounts[2].load(),g_halo3WorldHandoffCounts[3].load());
+        g_halo3WorldHandoffCounts[2].load(),g_halo3WorldHandoffCounts[3].load(),g_halo3WorldHandoffCounts[4].load());
+    LOG("H3 world cache clock: mode=after-pin newerThanFrame=%llu; freshness=20ms hold=100ms, raw pose timestamps unchanged",
+        g_halo3WorldClockAdvances.load());
     for (uint32_t index=0;index<g_halo3WorldHandoffRecords.size();++index)
     {
         uint32_t ready=2;
         if (!g_halo3WorldHandoffStates[index].compare_exchange_strong(ready,3,std::memory_order_acquire)) continue;
         const auto& r=g_halo3WorldHandoffRecords[index];
         const auto& a=r.before; const auto& b=r.after;
-        LOG("H3 world handoff: index=%u category=%u ms=%llu serial=%llu weapon=0x%08X decisions=%d/%d proof=%u originAgeMs=%llu gapM=%.5f reasons=%u/%u cacheMs=%llu/%llu epochs=%llu/%llu shapes=%llu/%llu resets=%u/%u active=%u/%u nodes=%u/%u seeded=%d/%d safe=%d/%d matching=%d/%d fresh=%d/%d tracked=(%.6f %.6f %.6f) submitted=(%.6f %.6f %.6f)",
+        LOG("H3 world handoff: index=%u category=%u ms=%llu serial=%llu weapon=0x%08X decisions=%d/%d proof=%u originAgeMs=%llu gapM=%.5f reasons=%u/%u cacheMs=%llu/%llu evaluationMs=%llu/%llu epochs=%llu/%llu shapes=%llu/%llu resets=%u/%u active=%u/%u nodes=%u/%u seeded=%d/%d safe=%d/%d matching=%d/%d fresh=%d/%d tracked=(%.6f %.6f %.6f) submitted=(%.6f %.6f %.6f)",
             index,r.category,r.ms,r.serial,static_cast<uint32_t>(r.weapon),r.proposal,r.final,r.proof,r.age,r.gapMeters,
-            a.reason,b.reason,a.cacheMs,b.cacheMs,a.epoch,b.epoch,a.shape,b.shape,a.reset,b.reset,a.active,b.active,
+            a.reason,b.reason,a.cacheMs,b.cacheMs,a.evaluationMs,b.evaluationMs,a.epoch,b.epoch,a.shape,b.shape,a.reset,b.reset,a.active,b.active,
             a.count,b.count,a.seeded?1:0,b.seeded?1:0,a.safe?1:0,b.safe?1:0,a.matching?1:0,b.matching?1:0,
             a.fresh?1:0,b.fresh?1:0,r.tracked.x,r.tracked.y,r.tracked.z,r.submitted.x,r.submitted.y,r.submitted.z);
     }
