@@ -1160,6 +1160,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactRenderExactClears{0};
     std::atomic<float> g_halo3ContactExactRenderPeakUs{0.0f};
     std::atomic<uint32_t> g_halo3ContactDebugLastResetReason{0};
+    std::atomic<uint64_t> g_halo3ContactFutureMotionSkips{0};
     std::atomic<float> g_halo3ContactDebugVisibleMinimumGap{FLT_MAX};
     std::atomic<float> g_halo3ContactDebugVisibleMaximumGap{-FLT_MAX};
 
@@ -14358,8 +14359,13 @@ namespace
                         : (!gate ? Halo3PhysicalContactStage::BaseGate
                                  : Halo3PhysicalContactStage::Motion)),
                 std::memory_order_relaxed);
+            // A publication can be newer than the worker's earlier clock.
+            // Skip this tick without unsigned age wrap causing tracking loss.
+            // Invalid poses and truly expired samples still reset immediately.
+            if (haveMotion && motion.poseValid && nowMs<motion.sampleMs)
+                g_halo3ContactFutureMotionSkips.fetch_add(1,std::memory_order_relaxed);
             if (!gate || !motion.poseValid ||
-                (motion.sampleMs && nowMs - motion.sampleMs > 100))
+                (motion.sampleMs && nowMs>=motion.sampleMs && nowMs-motion.sampleMs>100))
                 Halo3ResetPhysicalContact(1);
             return;
         }

@@ -1629,3 +1629,23 @@ null=false, forcedDriver empty, requireHmd=true. The three Campaign checkpoint
 files remain original; all four Steam metadata entries match. AceSettings still
 has the separately preserved completion-record differences and was not restored.
 Accepted pointer unchanged.
+
+### Motion-clock underflow correction (world experiment remains disabled)
+
+The observed reset reason 1 led to a source-confirmed arithmetic defect in
+Halo3SamplePhysicalContact. Its outer motion gate correctly skips a sample
+newer than the worker's nowMs. The nested reset decision then evaluates unsigned
+nowMs-sampleMs without the same ordering guard, making a slightly newer sample
+look enormously stale and clearing contact with reason 1.
+VR_GetRightControllerMotion's null path calls GetTickCount64 itself after the
+worker has sampled nowMs; the normal publication can also advance concurrently.
+Thus the clock ordering is possible in the actual producers. The 08d6675 records
+prove reset reason 1, but do not individually prove which subtype caused it.
+
+The correction retains the outer sample rejection and the 100-ms age limit;
+it requires nowMs>=sampleMs before the nested expiration subtraction. Future
+samples skip one tick without invalidating contact. Invalid poses, disabled
+base gates and truly expired samples still reset immediately. A bounded atomic
+counter records future samples skipped, with cold world diagnostic output.
+This does not fix cover-replacement seed loss or authorize stale geometry.
+The failed partition experiment remains disabled for this separate candidate.
