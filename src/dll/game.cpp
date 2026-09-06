@@ -14262,10 +14262,11 @@ namespace
             g_halo3ContactStage.store(
                 static_cast<uint32_t>(Halo3PhysicalContactStage::VisiblePose),
                 std::memory_order_relaxed);
-            // A missed render-palette publication is not tracking loss. Keep
-            // the last geometry-approved pose for its existing bounded 100 ms
-            // lifetime and stop contact work for this sample. If publication
-            // does not recover, the render hook rejects the stale approval.
+            // A missed render-palette publication is not tracking loss. Stop
+            // contact work for this sample. The renderer currently holds an
+            // identity-compatible approval without an age limit; its separate
+            // hand-distance recovery can release that hold. The 100 ms check
+            // above limits input sampling, not the render approval lifetime.
             // The controller, gameplay, lifecycle, vehicle, and weapon gates
             // still reset contact immediately on their own failures.
             return;

@@ -334,3 +334,68 @@ the working camera and other interaction bindings remain available. A cold
 status line reports actual later-stage callback counts for runtime validation.
 This candidate still uses the existing render approval policy and requires
 runtime regression results before attributing any visible improvement to it.
+
+### Later-stage candidate 5dd1666: bounded runtime regression results
+
+Source 5dd1666932032b4727f5a1a8a835993af88a0250 built and passed core tests
+and Reach consistency. Package:
+out/candidates/5dd1666-h3-physical-contact-20260906-001532655Z.
+Installed DLL independently verified:
+16E7F77969087809325AC59AA4A3936EB7D4F17F333471DE2F26042F6FD9BB2E.
+Steam E: installed; the alternate Steam and Store locations were absent.
+The accepted-build pointer is unchanged.
+
+The controller-contact run 20260906-001545750Z passed normal sampling admission
+on Steam / SteamVR null / Null Model Number. The log confirms the uniquely
+matched later hook enabled and reached 7,093 callbacks. The synchronized
+movement recording at out/demos/20260906-001726-forge-later-stage-wall-retreat
+shows a side approach and retreat. Eight evenly spaced frames were reviewed.
+One recovery occurred at 17:17:32: corrected=0, proof=1, zero consumed offset,
+tracked=(0.501266,7.881065,12.074084), displayed=(0.588507,7.929944,12.074088),
+world scale 0.33: approximately 0.303 m apart. No wall blocks or prop impulses
+were registered. This is a movement/recovery diagnostic, not a successful
+weapon-wall demonstration; changing update phase did not eliminate the event.
+Log SHA-256: ECB694D54109AF8EC0F75E3369041ACF05B11D1D7E2BE42FF8D89C5DCD811529.
+
+Wall regression 20260906-001939015Z passed structure/fixed-object fixture
+checks, including native type 3 (instance). All 32 clearance probes completed
+with bounds=1 and faulted=0 and positive gathers were observed. Log SHA-256:
+2D32D2FEAD1E920656BD9C053C7E7B4A3885D6F8C5925A194755651FA505B851.
+
+Weapon-scoop regression 20260906-002146471Z passed: 130 native impulse commands
+applied, authored target geometry observed, zero melee events. This remains a
+synthetic-contact fixture, not proof of visible controller/prop alignment.
+Log SHA-256: 585A3C37FF1398C2B9CE91F7B5FD96A088974C8B7F0FC2A4B8C9A29EFDF7A44C.
+Each harness restored the original real-headset settings before the next run.
+
+Fast-contact melee regression 20260906-002338285Z passed: three authored melee
+events, meleeStatus=2 and contact haptics, with 312 impulse commands applied.
+The target was a loose weapon (kind 2), so this is command-path regression
+coverage rather than a new NPC result. Log SHA-256:
+3F1289146FDE43A423C9F9EC6EB9933BB95CEF3B95A6458944B5E30C75C23FF6.
+
+Second normal-controller run 20260906-002655450Z passed sampling admission.
+Six 15-degree right turns faced the nearby wall; D then approached and A
+retreated in this observed setup. Unlike the earlier side approach, this
+registered native wall blocks (3 before the recording, 9 after). Local video:
+out/demos/20260906-002918-forge-frontal-wall-contact-recovery/raw.mp4.
+Eight evenly spaced frames and matching telemetry were reviewed. The recorded
+approach crossed the 0.30 m hand leash at 17:29:24 with corrected=1, proof=1,
+proposal 13039 / displayed 13025, consumed offset (0,0.064240,0). Retreat
+released awaitingMotion. Two recoveries occurred across the whole run,
+including the setup approach. This is a real contact/recovery reproduction,
+not proof of whole-weapon nonpenetration or polished recovery: the visible
+reset remains abrupt. No prop or NPC interaction is shown in this clip.
+Log SHA-256: 9BDBD30F382C01C1C86217DC53F5FBDF5FACAD9C1C985F8AA768D1B0D131199E.
+
+All five runs finished and restored the same real-headset settings hash
+175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E.
+No headset acceptance, Campaign regression, sword-blade acceptance or frame
+time improvement is inferred from these Forge/null tests. The next rendering
+investigation must address stale absolute-pose reuse: the current compatibility
+predicate has no age limit, and the worker stamps approvals with query time
+rather than the original proposal time. The nearby 100 ms worker input check
+is not a renderer lifetime bound; its misleading comment was corrected.
+Allowing fresh tracking still requires conservative geometry coverage and
+rendered dynamic-object freshness; moving the simulation phase alone did not
+resolve either requirement.
