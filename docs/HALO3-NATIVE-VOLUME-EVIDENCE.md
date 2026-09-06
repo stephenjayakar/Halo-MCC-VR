@@ -78,3 +78,56 @@ memory-layout validation, **not** proof of correct sweep response. Review the
 positive, negative, sliding and interior cases before using results in the
 weapon solver. Rotating whole-weapon coverage, latency, dynamic target response,
 Guardian/Floodgate behavior, videos and headset acceptance remain outstanding.
+
+## First retail query result
+
+Source `29c3c51165873a6f62c1bae4a07102c77e1f0eb8`, package
+`out/candidates/29c3c51-h3-physical-contact-20260906-065418368Z`.
+DLL SHA-256 independently verified after installation:
+`B25D1DD886B3BD73F4AFCC6E28C4069C268822732A81FE19787670439B9168B9`.
+Launcher SHA remains `D489C5763E21FC339999DC734CED09A2068AAC6C035EA8B7BF4339B6810FA450`.
+Release, both CTest suites and Reach consistency passed. E: Steam installed;
+alternate Steam and Store roots absent. Existing config was not changed.
+
+Run `out/debug-openxr/20260906-065445170Z-wall-result.json` passed its probe
+admission condition. Log SHA-256:
+`C36315DB8366A116671DC12DFA9FC25021686F4AD21D6E7EA3253A78A51FCF4C`.
+Steam / SteamVR null / Null Model Number / **Construct Forge**, verified from
+the lobby image `out/debug-openxr/20260906-065537712Z-forge-menu-ocr/0000-065537855Z.jpg`.
+All 32 records were bounded and fault-free. Parsed observations are in
+`out/research/20260906-native-volume/runtime-observations.json`.
+
+Observed native response:
+
+- Instance (type 3), five frontal crossings: one collision each, final clearance
+  equals the requested sphere radius within the logged float precision. Four
+  tangential crossings likewise retain radius clearance and tangential motion.
+- Fixed object (type 4), three frontal crossings: one collision each and final
+  clearance equals requested radius. Tangential cases contact other geometry on
+  that object; distance to the original reference plane alone cannot classify
+  those outcomes as sphere penetration.
+- Eight retreat controls: zero collisions, full requested motion, final reference
+  clearance approximately 0.8 m.
+- Four interior starts in the instance: point test reports inside, but solver
+  returns zero collisions and continues to -0.92 m reference clearance. Therefore
+  the sweep **cannot** be used as an overlap-recovery or interior-clearance proof.
+- Four interior starts in the object: 1–16 returned collisions and variable
+  output. The 16-contact case reaches the supplied capacity. This also does not
+  establish a robust overlap recovery policy.
+
+Observed costs include point test, gather and solve. Free-side instance crossing
+peaked at 55.4 us, fixed-object crossing at 93.1 us, retreat at 41.4 us; the
+interior object case peaked at 144.6 us. These are 32 queries around two local
+surface classes, not a general performance bound or a whole-weapon benchmark.
+
+The next behavioral experiment should maintain a known clear starting pose,
+cover the weapon's volume through rotation/translation, and use this native
+gather/solve path for world response. It must not blindly query from a hand pose
+already inside a solid, and it must distinguish contact-capacity exhaustion from
+a proved safe result. Existing impulse/melee behavior is a separate transaction.
+
+The harness closed MCC/SteamVR and restored the independently checked settings
+hash `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`.
+Null driver disabled, forcedDriver empty, requireHmd true. No production weapon
+response changed, no functionality video is claimed, and the accepted pointer
+in CURRENT-STATE remains unchanged.
