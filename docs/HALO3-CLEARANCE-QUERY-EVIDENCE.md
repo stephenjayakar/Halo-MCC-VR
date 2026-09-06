@@ -323,3 +323,14 @@ This proves the current contact worker can precede native object-position
 updates. It does not prove that the later stage is the final transform writer
 for the whole frame, that render interpolation is covered, or that moving the
 worker will fix the user's flicker. No later-stage hook has been tested yet.
+
+The next candidate moves only contact sampling/approval to the return from
+that later native stage. Command consumption, authored melee execution,
+velocity application and left-hand command consumption retain their existing
+objects_update timing. The later hook uses the verified unique entry and
+normal reverse-order title cleanup. If its signature or hook fails, a cold
+log explicitly reports fallback to the previous contact sampling location;
+the working camera and other interaction bindings remain available. A cold
+status line reports actual later-stage callback counts for runtime validation.
+This candidate still uses the existing render approval policy and requires
+runtime regression results before attributing any visible improvement to it.

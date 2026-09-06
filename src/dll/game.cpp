@@ -7393,6 +7393,9 @@ namespace
     Halo3MaterialLookupFn g_halo3MaterialLookup = nullptr;
     void** g_halo3MaterialGlobals = nullptr;
     Halo3ObjectsUpdateFn g_origHalo3ObjectsUpdate = nullptr;
+    Halo3ObjectsUpdateFn g_origHalo3ObjectsLateUpdate = nullptr;
+    std::atomic<bool> g_halo3ContactLateUpdateInstalled{false};
+    std::atomic<uint64_t> g_halo3ContactLateUpdateCalls{0};
     std::atomic<bool> g_halo3PhysicalContactBindings{false};
     std::atomic<bool> g_halo3PhysicalMeleeBindings{false};
     // Left-hand pickup shares the proven object/velocity bindings but owns a
@@ -13361,10 +13364,9 @@ namespace
     // at +0x34067C carries the same object-list/update-loop invariants. Native
     // melee stays before Halo's update. Sustained whole-body velocity is
     // applied immediately after it so a floor-loaded body cannot overwrite the
-    // correction in this stage. The solver currently observes transforms here,
-    // but later native object stages can write positions again (retail 3408F0
-    // -> 3483A4 -> 347FF8 -> 340D7C). This is not a final-transform boundary;
-    // see docs/HALO3-CLEARANCE-QUERY-EVIDENCE.md before using it for clearance.
+    // correction in this stage. Contact sampling runs after the later native
+    // object stage when its optional hook is installed; this earlier sampling
+    // location remains the explicitly logged fallback if that hook is absent.
     // The original always runs after a failure.
     void __fastcall Halo3ObjectsUpdateHook()
     {
@@ -14035,13 +14037,31 @@ namespace
         // right-weapon contact this tick. This ordering prevents the nudge
         // response from knocking an actively held prop out of the palm.
         Halo3ConsumeLeftGrabCommand();
-        if (g_halo3RuntimeGeneration.load(std::memory_order_acquire))
+        if (!g_halo3ContactLateUpdateInstalled.load(std::memory_order_acquire) &&
+            g_halo3RuntimeGeneration.load(std::memory_order_acquire))
             Halo3ProcessPhysicalWeaponContact(GetTickCount64());
     }
 
-    // Simulation-thread-only, immediately after Halo's authoritative object
-    // update. Native writes are reached only after the same validated Halo 3
-    // TLS/object-table path used by the vehicle sampler.
+    // The uniquely matched later object stage can copy native component
+    // transforms into object positions after objects_update. Run the entire
+    // original, including its tail call, before sampling. This does not claim
+    // that subsequent render interpolation cannot move the displayed object.
+    // Evidence: docs/HALO3-CLEARANCE-QUERY-EVIDENCE.md.
+    void __fastcall Halo3ObjectsLateUpdateHook()
+    {
+        if (g_origHalo3ObjectsLateUpdate)
+            g_origHalo3ObjectsLateUpdate();
+        if (g_halo3ContactLateUpdateInstalled.load(std::memory_order_acquire) &&
+            g_halo3PhysicalContactBindings.load(std::memory_order_acquire) &&
+            g_halo3RuntimeGeneration.load(std::memory_order_acquire))
+        {
+            g_halo3ContactLateUpdateCalls.fetch_add(1, std::memory_order_relaxed);
+            Halo3ProcessPhysicalWeaponContact(GetTickCount64());
+        }
+    }
+
+    // Simulation-thread-only. Native writes are reached only after the same
+    // validated Halo 3 TLS/object-table path used by the vehicle sampler.
     void Halo3ProcessPhysicalWeaponContact(uint64_t nowMs)
     {
         const uint64_t recoveryUntil = g_halo3ContactHandRecoveryUntilMs.load(
@@ -18671,6 +18691,10 @@ namespace
         nextLogMs = nowMs + 2000;
         Halo3LogNpcShoveProbe();
         Halo3LogClearanceProbe();
+        LOG("H3 contact sampling phase: laterStage=%d calls=%llu",
+            g_halo3ContactLateUpdateInstalled.load(std::memory_order_acquire) ? 1 : 0,
+            (unsigned long long)g_halo3ContactLateUpdateCalls.load(
+                std::memory_order_relaxed));
         for (size_t index = 0; index < kHalo3LargeWallCorrectionRecords; ++index)
         {
             uint32_t expected = 2;
@@ -23515,6 +23539,12 @@ namespace
         "65 48 8B 04 25 58 00 00 00 41 BD 70 01 00 00 "
         "41 BF B0 00 00 00 BA 38 00 00 00 48 8B 1C C8 49 8B 04 1F "
         "4E 8B 2C 2B 49 63 8D 80 26 00 00 C6 40 03 01";
+    // Later object stage +0x3408F0, matched to H3EK A524C0. Exact unique
+    // entry checked by verify-h3-clearance-gather.py against pinned retail.
+    const char* kHalo3ObjectsLateUpdateSig =
+        "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 40 "
+        "65 48 8B 04 25 58 00 00 00 8B 0D 8E 96 6F 00 "
+        "BE B0 00 00 00 48 8B 3C C8";
     // Exact retail decorator placement-buffer CreateBuffer return site. The
     // signature ends at the owning helper's return and is unique in the pinned
     // module. The indirect D3D call begins at +0x24 and returns at +0x27.
@@ -24993,6 +25023,9 @@ namespace
             g_halo3ObjectSetVelocity = nullptr;
             g_halo3ObjectSetVelocities = nullptr;
             g_origHalo3ObjectsUpdate = nullptr;
+            g_origHalo3ObjectsLateUpdate = nullptr;
+            g_halo3ContactLateUpdateInstalled.store(false, std::memory_order_release);
+            g_halo3ContactLateUpdateCalls.store(0, std::memory_order_relaxed);
             g_halo3CollisionTestVector = nullptr;
             g_halo3SelectMelee = nullptr;
             g_halo3DamageOwnerFromObject = nullptr;
@@ -25020,6 +25053,11 @@ namespace
                 sig::Find(base, size, kHalo3CollisionTestVectorSig);
             const uintptr_t updateHit =
                 sig::Find(base, size, kHalo3ObjectsUpdateSig);
+            const uintptr_t lateUpdateHit =
+                sig::Find(base, size, kHalo3ObjectsLateUpdateSig);
+            const bool lateUpdateUnique = lateUpdateHit && !sig::Find(
+                lateUpdateHit + 1, base + size - lateUpdateHit - 1,
+                kHalo3ObjectsLateUpdateSig);
             const uintptr_t effectsOnlyHit =
                 sig::Find(base, size, kHalo3NativeMeleeResponseSig);
             const uintptr_t selectMeleeHit =
@@ -25189,6 +25227,41 @@ namespace
                         true, std::memory_order_release);
                     g_halo3LeftGrabBindings.store(
                         true, std::memory_order_release);
+                    // This optional timing improvement never gates the camera,
+                    // melee executor or left-hand grab. Register it with normal
+                    // reverse-order title teardown only after successful enable.
+                    MH_STATUS lateCreate = MH_ERROR_NOT_CREATED;
+                    MH_STATUS lateEnable = MH_ERROR_NOT_CREATED;
+                    if (lateUpdateUnique && lateUpdateHit - base == 0x3408F0 &&
+                        g_installedGameHookCount < kMaxInstalledGameHooks)
+                    {
+                        lateCreate = MH_CreateHook(
+                            reinterpret_cast<void*>(lateUpdateHit),
+                            reinterpret_cast<void*>(&Halo3ObjectsLateUpdateHook),
+                            reinterpret_cast<void**>(&g_origHalo3ObjectsLateUpdate));
+                        if (lateCreate == MH_OK)
+                            lateEnable = MH_EnableHook(
+                                reinterpret_cast<void*>(lateUpdateHit));
+                        if (lateCreate == MH_OK && lateEnable == MH_OK)
+                        {
+                            RememberInstalledGameHook(
+                                reinterpret_cast<void*>(lateUpdateHit));
+                            g_halo3ContactLateUpdateInstalled.store(
+                                true, std::memory_order_release);
+                        }
+                        else
+                        {
+                            if (lateCreate == MH_OK)
+                                MH_RemoveHook(reinterpret_cast<void*>(lateUpdateHit));
+                            g_origHalo3ObjectsLateUpdate = nullptr;
+                        }
+                    }
+                    LOG("H3 contact sampling: %s later=+0x%llX unique=%d hook=%d/%d",
+                        g_halo3ContactLateUpdateInstalled.load(std::memory_order_acquire)
+                            ? "after later native object stage"
+                            : "fallback to existing objects_update stage",
+                        (unsigned long long)(lateUpdateHit ? lateUpdateHit - base : 0),
+                        lateUpdateUnique ? 1 : 0, (int)lateCreate, (int)lateEnable);
                 }
                 else
                 {
