@@ -1472,4 +1472,31 @@ The partition experiment is disabled as its own failure-revert commit before
 further changes. Dormant solver code is retained. The accepted pointer remains
 unchanged. A late 35-second recording started only eight seconds before the
 hold ended and covered shutdown instead of the requested interaction; it is
-irrelevant and is removed under the user's existing cleanup instruction.
+irrelevant. Removal was requested under the user's existing cleanup instruction,
+but automatic approval review rejected it with "blocked by policy" and no more
+specific reason. The recording remains on disk and is not a functionality demo.
+
+### Unowned draw and late-stall validation correction
+
+The draw audit publisher now admits guarded tracked submissions even when
+worldFinal=0; the existing experiment/mesh-audit flags still gate all diagnostic
+snapshots and worker native queries. The paired handoff captures the existing
+contact reset reason at constraint evaluation time. Neither change modifies
+solver ownership or grants permission to reuse a pre-reset pose.
+
+The harness rejects sampled submitted-mesh penetration for visible draw=0 as
+well as draw=1. Its final check also rejects three consecutive cold reports
+with increasing cache and missing-seed counters but unchanged admitted solves.
+This catches the observed late stall while allowing transient misses followed
+by resumed solving. Offline validation extracted only these pure functions
+from the parsed PowerShell AST (no game launch): the preserved 22bf874 run was
+rejected, the dd461a3 wall run retained, a resumed-solve suffix retained, an
+unowned penetrating mesh rejected, and an unowned clear mesh did not satisfy
+the positive-contact requirement. Script parsing and git diff checks passed.
+The partition behavior remains disabled; this is diagnostic preparation for
+the next recovery experiment, not a recovery fix.
+
+After the run, MCC/SteamVR were independently confirmed closed, normal settings
+SHA `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`, null=false,
+forcedDriver empty and requireHmd=true. All four original Campaign files and
+their Steam metadata matched; no save restoration was needed.

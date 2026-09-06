@@ -566,7 +566,7 @@ if (Get-Process $mccProcessName -ErrorAction SilentlyContinue) {
 
 function Test-WorldMeshAudit([string]$Text) {
     if ($Text -match 'H3 world mesh AUDIT: [^\r\n]*fault=1' -or
-        $Text -match 'H3 world mesh AUDIT: [^\r\n]*draw=1 valid=1 fault=0 [^\r\n]*(?:inside=\d+/[1-9]\d*|crossings=\d+/[1-9]\d*)') {
+        $Text -match 'H3 world mesh AUDIT: [^\r\n]*draw=[01] valid=1 fault=0 [^\r\n]*(?:inside=\d+/[1-9]\d*|crossings=\d+/[1-9]\d*)') {
         throw 'World-volume audit found a native fault or an intersection in the submitted visible collision mesh.'
     }
     # At least two visible paired observations in which the requested mesh has
@@ -574,6 +574,27 @@ function Test-WorldMeshAudit([string]$Text) {
     # interiors or edge crossings. Hidden recovery roots do not count as demos.
     return [regex]::Matches($Text,
         'H3 world mesh AUDIT: [^\r\n]*draw=1 valid=1 fault=0 triangles=\d+/\d+ inside=[1-9]\d*/0 crossings=\d+/0 ').Count -ge 2
+}
+function Test-WorldOwnershipStall([string]$Text) {
+    # Three consecutive cold reports cover two reporting intervals. A cache
+    # producer that keeps running while every attempted draw lacks a seed must
+    # not inherit an earlier cumulative contact pass. Initial/transient misses
+    # or a recovered solver are not a sustained late stall.
+    $volumes = [regex]::Matches($Text,
+        'H3 world volume EXPERIMENT: enabled=1 caches=(\d+) seeds=\d+ frames=(\d+)')
+    $handoffs = [regex]::Matches($Text,
+        'H3 world handoff counts: [^\r\n]*missingSeed=(\d+)')
+    if ($volumes.Count -lt 3 -or $handoffs.Count -lt 3) { return $false }
+    $v = @($volumes | Select-Object -Last 3)
+    $h = @($handoffs | Select-Object -Last 3)
+    for ($i=1; $i -lt 3; ++$i) {
+        if ([uint64]$v[$i].Groups[1].Value -le [uint64]$v[$i-1].Groups[1].Value -or
+            [uint64]$v[$i].Groups[2].Value -ne [uint64]$v[$i-1].Groups[2].Value -or
+            [uint64]$h[$i].Groups[1].Value -le [uint64]$h[$i-1].Groups[1].Value) {
+            return $false
+        }
+    }
+    return $true
 }
 # A running client can still be at its sign-in screen. Do not switch SteamVR
 # into null mode until the Steam edition has an actual account session.
@@ -1046,6 +1067,9 @@ public static class HaloMccVrContactInput {
     }
     if ($WorldVolume -and $text -match 'H3 world volume EXPERIMENT:.*faults=[1-9][0-9]*') {
         throw 'Current-pose world-volume experiment recorded a native query fault.'
+    }
+    if ($WorldVolume -and (Test-WorldOwnershipStall $text)) {
+        throw 'World-volume solver ended with a sustained missing-seed ownership stall despite continued cache publication.'
     }
     if ($WorldVolume -and ($text -notmatch 'H3 world mesh AUDIT mode: enabled=1;' -or
             -not (Test-WorldMeshAudit $text))) {

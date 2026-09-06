@@ -986,7 +986,7 @@ namespace
         // 0 not called, 1 inactive, 2 gather-only, 3 no cache, 4 identity,
         // 5 no seed/safe pose, 6 reset changed, 7 invalid transform,
         // 8 visible result, 9 hidden result. Observations never grant ownership.
-        uint32_t reason{},count{},reset{},active{};
+        uint32_t reason{},count{},reset{},active{},resetReason{};
         uint64_t cacheMs{},evaluationMs{},epoch{},shape{};
         bool seeded{},safe{},matching{},fresh{};
     };
@@ -6483,7 +6483,9 @@ namespace
                 Halo3MeasureSameFrameRotatingGap(
                     activeWeaponHandle, destination,
                     static_cast<uint32_t>(renderNodeCount), nowMs);
-                if (worldFinal)
+                // Zero means the world solver did not take ownership, not
+                // that the submitted palette is absent or known clear.
+                if (guardActive && haveTrackedNodes)
                     Halo3PublishWorldDraw(destination,trackedNodes.data(),renderNodeCount,tag,
                         activeWeaponHandle,contactGeneration,proposalSerial,nowMs,worldFinal);
                 // Keep the swept physical palette for collision/aim history.

@@ -576,6 +576,7 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
     if (c.ms>nowMs && c.ms<=cacheNowMs)
         g_halo3WorldClockAdvances.fetch_add(1,std::memory_order_relaxed);
     observation.count=c.count; observation.reset=c.reset; observation.active=c.active;
+    observation.resetReason=g_halo3ContactDebugLastResetReason.load(std::memory_order_relaxed);
     observation.cacheMs=c.ms; observation.epoch=c.epoch; observation.shape=c.shape;
     observation.seeded=c.seeded;
     if (c.generation!=generation || c.reset!=reset || c.weapon!=weapon || c.tag!=tag)
@@ -699,11 +700,12 @@ void Halo3LogWorldVolume()
         if (!g_halo3WorldHandoffStates[index].compare_exchange_strong(ready,3,std::memory_order_acquire)) continue;
         const auto& r=g_halo3WorldHandoffRecords[index];
         const auto& a=r.before; const auto& b=r.after;
-        LOG("H3 world handoff: index=%u category=%u ms=%llu serial=%llu weapon=0x%08X decisions=%d/%d proof=%u originAgeMs=%llu gapM=%.5f reasons=%u/%u cacheMs=%llu/%llu evaluationMs=%llu/%llu epochs=%llu/%llu shapes=%llu/%llu resets=%u/%u active=%u/%u nodes=%u/%u seeded=%d/%d safe=%d/%d matching=%d/%d fresh=%d/%d tracked=(%.6f %.6f %.6f) submitted=(%.6f %.6f %.6f)",
+        LOG("H3 world handoff: index=%u category=%u ms=%llu serial=%llu weapon=0x%08X decisions=%d/%d proof=%u originAgeMs=%llu gapM=%.5f reasons=%u/%u cacheMs=%llu/%llu evaluationMs=%llu/%llu epochs=%llu/%llu shapes=%llu/%llu resets=%u/%u active=%u/%u nodes=%u/%u seeded=%d/%d safe=%d/%d matching=%d/%d fresh=%d/%d resetReasons=%u/%u tracked=(%.6f %.6f %.6f) submitted=(%.6f %.6f %.6f)",
             index,r.category,r.ms,r.serial,static_cast<uint32_t>(r.weapon),r.proposal,r.final,r.proof,r.age,r.gapMeters,
             a.reason,b.reason,a.cacheMs,b.cacheMs,a.evaluationMs,b.evaluationMs,a.epoch,b.epoch,a.shape,b.shape,a.reset,b.reset,a.active,b.active,
             a.count,b.count,a.seeded?1:0,b.seeded?1:0,a.safe?1:0,b.safe?1:0,a.matching?1:0,b.matching?1:0,
-            a.fresh?1:0,b.fresh?1:0,r.tracked.x,r.tracked.y,r.tracked.z,r.submitted.x,r.submitted.y,r.submitted.z);
+            a.fresh?1:0,b.fresh?1:0,a.resetReason,b.resetReason,
+            r.tracked.x,r.tracked.y,r.tracked.z,r.submitted.x,r.submitted.y,r.submitted.z);
     }
     const auto partitionCalls=g_halo3WorldPartitionCalls.load();
     if (partitionCalls && frequency.QuadPart>0)
