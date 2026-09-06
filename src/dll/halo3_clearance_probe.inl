@@ -67,8 +67,15 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
         L"HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE", value, 2) == 1 && value[0] == L'1';
     const bool volumeRequested = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_DEBUG_VOLUME", value, 2) == 1 && value[0] == L'1';
-    const bool worldRequested = GetEnvironmentVariableW(
+    // Disabled after the full sword/Floodgate rock run: recurring unknown
+    // gathers/casts held and hid the weapon. Retain the implementation while
+    // independent observations establish the failing boundary.
+    constexpr bool kEnableHalo3WorldVolumeExperiment = false;
+    const bool worldFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_VOLUME", value, 2) == 1 && value[0] == L'1';
+    const bool worldRequested = kEnableHalo3WorldVolumeExperiment && worldFlag;
+    if (worldFlag && !worldRequested)
+        LOG("H3 world volume EXPERIMENT disabled after Floodgate sword gather/cast failures; prior contact path retained; VR unchanged");
     constexpr bool kEnableHalo3FreshRegionExperiment = true;
     const bool freshRequested = worldRequested || (kEnableHalo3FreshRegionExperiment && GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_FRESH_REGION", value, 2) == 1 && value[0] == L'1');

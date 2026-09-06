@@ -666,3 +666,47 @@ settings again independently match
 forced driver empty, requireHmd true. Before further Campaign tests, resolve
 Resume availability and expand the save-isolation procedure if another file or
 cached state is shown to participate. Do not claim the restored menu works.
+
+### Steam cache recovery and full sword/Floodgate failure
+
+Steam's cloud log showed cached checkpoint SHA mismatches after restoration,
+then refreshed/uploaded the restored files on the next MCC shutdown. Before
+the following launch, cached checkpoint sizes/SHA-1 matched the files. On that
+launch Resume returned (`20260906-091533141Z-menu-ocr/0000-091533286Z.jpg`) and
+loaded Floodgate (`20260906-091547309Z-floodgate-full-blade-start`). No profile
+contents or remote-cache metadata were edited. This supports stale Steam
+metadata as the missing-Resume cause; a causal API trace was not performed.
+Byte restoration must be followed by metadata refresh and menu verification.
+
+The full-blade run used the same 143f3a3 artifact, Steam / SteamVR null /
+Null Model Number. Result:
+`out/debug-openxr/20260906-091431848Z-controller-contact-result.json`.
+Log SHA: `3582A9DCB7AB865ADFCE625D7DEB2FF90E85F27DC0AD077DF8F1A67F74326A7B`.
+Blade appends were active and audited meshes had 256 triangles. D movement
+toward the nearby rock produced blocks, then recurring unknown queries and
+hidden submissions. At one interval caches froze at 1,048 while unknowns grew;
+in another, caches grew while admitted solves froze and unknowns grew. These
+distinguish failed gathers from failed render casts in the code, but do not
+identify each rejection reason. Retreat/reposition and respawn restored
+updates. Enemy combat and death were present, so this is not an isolated
+kinematic test. Sampled audit costs reached about 19 ms on the worker; that
+probe is itself material to timing and must not be treated as cost-free.
+
+Last totals: 6,000 caches, 18 seeds, 30,714 admitted solves, 93 blocks,
+13,089 holds, 12,462 hidden submissions, 5,230 unknowns, two shape rejects,
+804,388 queries, zero budget exhaustion/native faults. Mean sweep cost was
+24.4 us, maximum 417.6 us. The bounded audit did not establish the required
+two visible positive counterfactuals. The observer closed MCC through its
+window; the harness recorded failure and restored real-headset VR settings.
+This is a failed interaction candidate, not Campaign acceptance.
+
+Diagnostic recording (not a successful demo):
+`out/demos/20260906-091716-floodgate-sword-gather-failure-diagnostic/raw.mp4`,
+SHA `589D631F98878B70E1CF6A982F6A69B00BE77C893272908A2090EC45F3C243C2`.
+The snapshots show the sword's effects at the rock during recovery. They do
+not establish that hiding the physical draw hides every sword effect.
+All four current pre-test save/profile files were restored and hash verified,
+with intervening files preserved in `post-full-blade-failure` under the current
+Campaign snapshot. Steam metadata/menu verification is still required after
+this latest restoration. The world-volume experiment is disabled as a separate
+behavioral revert; its code is retained for an observation-only diagnosis.
