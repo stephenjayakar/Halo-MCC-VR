@@ -19,6 +19,43 @@ struct PhysicalContactVolumeCover
     uint16_t count = 0;
 };
 
+// Every complete incoming ball must fit inside one cached ball belonging to
+// the same child. This proves volume containment, not merely that sampled
+// vertices fit a union of balls. Keep margin for future node deformation.
+inline bool PhysicalContactVolumeCoverContains(const PhysicalContactVolumeCover& outer,
+    const PhysicalContactVolumeCover& inner,float margin)
+{
+    if (!outer.count || outer.count>outer.kMaximumSpheres ||
+        !inner.count || inner.count>inner.kMaximumSpheres ||
+        !std::isfinite(margin) || margin<0 || margin>100) return false;
+    const auto valid=[](const PhysicalContactVolumeSphere& s) {
+        return PhysicalContactFinite(s.center) && std::isfinite(s.radius) &&
+            s.radius>0 && s.radius<=100 && s.child<PhysicalContactCompoundShape::kMaximumChildren;
+    };
+    for (uint16_t i=0;i<outer.count;++i) if (!valid(outer.spheres[i])) return false;
+    for (uint16_t i=0;i<inner.count;++i)
+    {
+        const auto& candidate=inner.spheres[i];
+        if (!valid(candidate)) return false;
+        bool contained=false;
+        for (uint16_t j=0;j<outer.count;++j)
+        {
+            const auto& previous=outer.spheres[j];
+            if (previous.child!=candidate.child) continue;
+            const double dx=static_cast<double>(previous.center.x)-candidate.center.x;
+            const double dy=static_cast<double>(previous.center.y)-candidate.center.y;
+            const double dz=static_cast<double>(previous.center.z)-candidate.center.z;
+            // Double arithmetic and outward rounding retain conservative
+            // containment at a float-radius boundary.
+            const double required=std::nextafter(std::sqrt(dx*dx+dy*dy+dz*dz)+
+                static_cast<double>(candidate.radius)+margin,INFINITY);
+            if (required<=previous.radius) { contained=true; break; }
+        }
+        if (!contained) return false;
+    }
+    return true;
+}
+
 inline bool PhysicalContactBuildVolumeCover(const PhysicalContactCompoundShape& shape,
     float maximumSlabLength, PhysicalContactVolumeCover& output)
 {

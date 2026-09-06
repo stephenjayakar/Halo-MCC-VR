@@ -127,8 +127,62 @@ static void TestPhysicalContactVolumeRegions()
         "invalid cached bounds cannot authorize a zero-motion query");
 }
 
+static void TestPhysicalContactCoverReuse()
+{
+    auto shape=std::make_unique<PhysicalContactCompoundShape>();
+    const auto box=[](PhysicalContactConvexShape& child,PhysicalContactVec3 half,PhysicalContactVec3 offset) {
+        child={}; child.vertexCount=8;
+        for (int i=0;i<8;++i) child.vertices[i]=offset+PhysicalContactVec3{
+            (i&1)?half.x:-half.x,(i&2)?half.y:-half.y,(i&4)?half.z:-half.z};
+    };
+    shape->childCount=1;
+    box(shape->children[0],{.05f,.03f,.04f},{});
+    PhysicalContactVolumeCover handle{},incoming{};
+    Check(PhysicalContactBuildVolumeCover(*shape,.12f,handle),"handle-only geometry builds a complete volume");
+    const auto rawHandle=handle;
+    for (uint16_t i=0;i<handle.count;++i) handle.spheres[i].radius+=.01f;
+    Check(PhysicalContactVolumeCoverContains(handle,rawHandle,.005f),
+        "unchanged geometry reuses its cache while retaining future animation reserve");
+    shape->childCount=3;
+    box(shape->children[1],{.45f,.01f,.02f},{.5f,.06f,0});
+    box(shape->children[2],{.45f,.01f,.02f},{.5f,-.06f,0});
+    Check(PhysicalContactBuildVolumeCover(*shape,.12f,incoming) &&
+        !PhysicalContactVolumeCoverContains(handle,incoming,.005f),
+        "a full two-prong blade cannot reuse handle-only coverage despite unchanged node transforms");
+    shape->childCount=1;
+    box(shape->children[0],{.55f,.03f,.04f},{});
+    Check(PhysicalContactBuildVolumeCover(*shape,.12f,incoming) &&
+        !PhysicalContactVolumeCoverContains(handle,incoming,.005f),
+        "geometry growth within the same child also invalidates cached coverage");
+    box(shape->children[0],{.05f,.03f,.04f},{}); shape->children[0].radius=.02f;
+    Check(PhysicalContactBuildVolumeCover(*shape,.12f,incoming) &&
+        !PhysicalContactVolumeCoverContains(handle,incoming,.005f),
+        "increased authored collision padding cannot bypass reuse validation");
+    incoming=rawHandle;
+    for (uint16_t i=0;i<incoming.count;++i) incoming.spheres[i].center.x+=.001f;
+    Check(PhysicalContactVolumeCoverContains(handle,incoming,.005f),
+        "small numerical motion retains bounded coverage without forcing a new seed every sample");
+    // Do not accumulate a new 5 mm allowance at each reuse. The outer sphere
+    // stays fixed while the incoming geometry continues moving.
+    for (uint16_t i=0;i<incoming.count;++i) incoming.spheres[i].center.x+=.010f;
+    Check(!PhysicalContactVolumeCoverContains(handle,incoming,.005f),
+        "repeated small geometry changes cannot drift beyond the original cached volume");
+    incoming=rawHandle; incoming.spheres[0].child=1;
+    Check(!PhysicalContactVolumeCoverContains(handle,incoming,.005f),
+        "an overlapping unrelated child cannot supply the wrong expanded native feature group");
+    incoming=rawHandle; incoming.spheres[0].radius=std::numeric_limits<float>::quiet_NaN();
+    Check(!PhysicalContactVolumeCoverContains(handle,incoming,.005f),"invalid incoming geometry cannot reuse a cache");
+    incoming=rawHandle; incoming.count=0;
+    Check(!PhysicalContactVolumeCoverContains(handle,incoming,.005f),"an empty candidate is not a geometry proof");
+    // Checking only sphere centres would incorrectly accept this case.
+    incoming=rawHandle; incoming.spheres[0].radius=handle.spheres[0].radius+.001f;
+    Check(!PhysicalContactVolumeCoverContains(handle,incoming,0),
+        "equal centres do not establish containment of the complete incoming volume");
+}
+
 static void TestPhysicalContactVolumeSweep()
 {
+    TestPhysicalContactCoverReuse();
     TestPhysicalContactVolumeRegions();
     TestContactSnapshotLifetime();
     auto features=std::make_unique<Halo3VolumeFeatures>();

@@ -1151,3 +1151,37 @@ file, independently hash-checked in `cache-clock-profile-comparison.json`.
 MCC/SteamVR are closed. Normal settings hash remains
 `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`;
 null is disabled. Accepted pointer unchanged.
+
+### Incoming geometry proof before cover reuse
+
+The previous reuse predicate checked scene/weapon identity, scale and node
+transforms, but did not inspect the supplied compound geometry. A synthetic
+handle-to-two-prong transition with unchanged nodes demonstrates why those
+conditions alone are insufficient: the handle cover cannot enclose the blade.
+This is a verified missing condition in the code, not a claim that the exact
+transition was captured in the earlier live cache records.
+
+The next candidate builds the incoming complete slab-sphere cover on the
+worker before considering reuse. Reuse additionally requires unchanged child
+count and full containment of every incoming sphere, plus 5 mm of deformation
+reserve, inside a cached sphere of the same child. The containment arithmetic
+uses double intermediates and outward rounding. Centre/vertex samples alone
+cannot grant this proof. If the condition fails, the existing rebuild/new-shape
+and independent seed paths run; no old safe pose transfers to a different cover.
+
+On successful reuse, the cached cover/radii/shape identity stay fixed, while
+the node reference updates to the current geometry's nodes. This matters:
+the remaining 5 mm allowance is for deformation from those current nodes.
+Retaining a node reference on the opposite side of an earlier allowance would
+double-count the margin. Every subsequent worker sample must fit the same
+fixed outer cover again, so small changes cannot accumulate unbounded drift.
+Changing child count rebuilds even when a smaller shape could fit an older
+larger cover, so an inactive blade does not indefinitely retain its old extent.
+
+Regression tests cover handle-to-full-blade and same-child growth, increased
+authored padding, small numerical movement, accumulated drift, child-group
+mismatch, nonfinite/empty inputs and a larger sphere sharing an accepted centre.
+Counters distinguish reuse from compatible-node geometry rejection. Worker
+timing measures incoming cover construction and compatibility/containment
+checks separately from native gathering. Render hooks gain no geometry copies,
+native queries or new loops. World and blade experiments remain opt-in.

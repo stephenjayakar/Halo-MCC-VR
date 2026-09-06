@@ -40,6 +40,8 @@ std::atomic<uint64_t> g_halo3WorldBlocks{0},g_halo3WorldHolds{0},g_halo3WorldHid
 std::atomic<uint64_t> g_halo3WorldUnknown{0},g_halo3WorldShapeRejects{0},g_halo3WorldFaults{0};
 std::atomic<uint64_t> g_halo3WorldQueries{0},g_halo3WorldExhausted{0};
 std::atomic<uint64_t> g_halo3WorldClockAdvances{0};
+std::atomic<uint64_t> g_halo3WorldCoverReused{0},g_halo3WorldCoverChanged{0};
+std::atomic<uint64_t> g_halo3WorldCoverChecks{0},g_halo3WorldCoverTicks{0},g_halo3WorldCoverMaxTicks{0};
 std::atomic<uint64_t> g_halo3WorldSolveMaxTicks{0},g_halo3WorldSolveTicks{0},g_halo3WorldSolveCount{0};
 std::atomic<uint64_t> g_halo3WorldPartitionCalls{0},g_halo3WorldPartitionRegions{0};
 std::atomic<uint64_t> g_halo3WorldPartitionCapacity{0},g_halo3WorldPartitionInvalid{0};
@@ -407,21 +409,40 @@ void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
     c.worldScale=worldScale; c.skin=.005f*worldScale;
     c.ms=nowMs; c.epoch=g_halo3ClearanceEpoch.load(std::memory_order_acquire);
     const uint64_t version=g_halo3WorldCacheSerial.fetch_add(1,std::memory_order_relaxed)+1;
+    LARGE_INTEGER coverBegin{},coverEnd{}; QueryPerformanceCounter(&coverBegin);
+    const auto currentRoot=Halo3WorldTransform(nodes[0]);
+    PhysicalContactVolumeCover incomingCover{};
+    if (!PhysicalContactVolumeRigid(currentRoot) || shape.childCount>4 ||
+        !PhysicalContactBuildVolumeCover(shape,.12f*worldScale/currentRoot.scale,incomingCover)) return;
     auto old=g_halo3WorldCaches.read();
-    const bool reuse=old && old.get().generation==generation && old.get().reset==reset &&
+    const bool compatible=old && old.get().generation==generation && old.get().reset==reset &&
         old.get().weapon==weapon && old.get().tag==tag && old.get().worldScale==worldScale &&
         Halo3WorldNodesMatch(old.get(),nodes,count) && Halo3WorldNodesMatch(old.get(),r.nodes.data(),count);
+    const bool reuse=compatible && old.get().groups==shape.childCount &&
+        PhysicalContactVolumeCoverContains(old.get().cover,incomingCover,.005f*worldScale/currentRoot.scale);
+    QueryPerformanceCounter(&coverEnd);
+    const auto coverTicks=static_cast<uint64_t>(std::max<LONGLONG>(0,coverEnd.QuadPart-coverBegin.QuadPart));
+    g_halo3WorldCoverChecks.fetch_add(1,std::memory_order_relaxed);
+    g_halo3WorldCoverTicks.fetch_add(coverTicks,std::memory_order_relaxed);
+    auto coverPeak=g_halo3WorldCoverMaxTicks.load(std::memory_order_relaxed);
+    for (unsigned attempt=0;coverTicks>coverPeak && attempt<3;++attempt)
+        if (g_halo3WorldCoverMaxTicks.compare_exchange_weak(coverPeak,coverTicks,std::memory_order_relaxed)) break;
+    if (compatible && !reuse) g_halo3WorldCoverChanged.fetch_add(1,std::memory_order_relaxed);
     if (reuse)
     {
         const auto& previous=old.get();
-        c.cover=previous.cover; c.nodes=previous.nodes; c.bound=previous.bound;
+        c.cover=previous.cover; c.bound=previous.bound;
         c.radii=previous.radii; c.groups=previous.groups; c.shape=previous.shape;
+        // The containment proof left 5 mm around today's incoming geometry.
+        // Future node deformation must be measured from today's nodes, not
+        // an older reference on the opposite side of that allowance.
+        for (uint32_t i=0;i<count;++i) c.nodes[i]=nodes[i];
+        g_halo3WorldCoverReused.fetch_add(1,std::memory_order_relaxed);
     }
     else
     {
-        const auto root=Halo3WorldTransform(nodes[0]);
-        if (!PhysicalContactVolumeRigid(root) || shape.childCount>4 ||
-            !PhysicalContactBuildVolumeCover(shape,.12f*worldScale/root.scale,c.cover)) return;
+        const auto root=currentRoot;
+        c.cover=incomingCover;
         c.radii.fill(0); c.groups=shape.childCount; c.bound=0;
         for (uint32_t i=0;i<count;++i) c.nodes[i]=nodes[i];
         for (uint16_t i=0;i<c.cover.count;++i)
@@ -659,6 +680,13 @@ void Halo3LogWorldVolume()
         g_halo3WorldHandoffCounts[2].load(),g_halo3WorldHandoffCounts[3].load(),g_halo3WorldHandoffCounts[4].load());
     LOG("H3 world cache clock: mode=after-pin newerThanFrame=%llu; freshness=20ms hold=100ms, raw pose timestamps unchanged",
         g_halo3WorldClockAdvances.load());
+    LOG("H3 world cover reuse: contained=%llu geometryChanged=%llu; complete incoming spheres plus 5mm deformation reserve required",
+        g_halo3WorldCoverReused.load(),g_halo3WorldCoverChanged.load());
+    const auto coverChecks=g_halo3WorldCoverChecks.load();
+    if (coverChecks && frequency.QuadPart>0)
+        LOG("H3 world cover timing: checks=%llu meanUs=%.1f maxUs=%.1f",
+            coverChecks,g_halo3WorldCoverTicks.load()*1.e6/frequency.QuadPart/coverChecks,
+            g_halo3WorldCoverMaxTicks.load()*1.e6/frequency.QuadPart);
     for (uint32_t index=0;index<g_halo3WorldHandoffRecords.size();++index)
     {
         uint32_t ready=2;
