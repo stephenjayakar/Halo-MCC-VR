@@ -710,3 +710,25 @@ with intervening files preserved in `post-full-blade-failure` under the current
 Campaign snapshot. Steam metadata/menu verification is still required after
 this latest restoration. The world-volume experiment is disabled as a separate
 behavioral revert; its code is retained for an observation-only diagnosis.
+
+### Observation-only world gather diagnosis
+
+After behavioral revert 9792aab, `HALOMCCVR_H3_CONTACT_DEBUG_WORLD_GATHER=1`
+(`-WorldGather` in the harness) observes the same raw-pose, full-cover world
+gather without enabling the disabled world-volume behavior. Rendering only
+publishes the raw request and returns before reading a world pose. The worker
+returns after gathering, before seed tests or cache publication. World pose
+ownership and the paired mesh audit are explicitly bypassed. FreshRegion stays
+off. No current-pose world correction or hiding is performed by this probe.
+
+Four success controls and sixteen rejection records are reserved independently.
+Cold records identify reason (1 active mask, 2 feature validation, 3 false
+return with nonempty features, 4 canary, 5 changed active mask, 6 exception),
+native return, feature counts, group, query center/radius/expansion and shape
+bound. The optional validator diagnostic encodes category in the high word
+(1 storage, 2 capacity, 3 sphere, 4 cylinder, 5 prism) and offending index in
+the low word. Existing validation rules remain unchanged. This probe diagnoses
+the gather side only; it does not yet classify the separate render-cast
+rejections. Its pass condition requires successful and rejected observations,
+zero pose/seed/hide counters, no native faults and no mesh audit. Passing means
+the failure was observed with that isolation, not that collision was fixed.

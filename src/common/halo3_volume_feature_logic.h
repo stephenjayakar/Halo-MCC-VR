@@ -15,12 +15,20 @@ struct Halo3VolumeFeatures
 // Validate once before publishing an immutable snapshot. Besides the outer
 // counts, the prism helper uses a projection-table index and polygon count to
 // address its local arrays; those nested bounds must survive the copy too.
-inline bool Halo3VolumeFeaturesValid(const void* memory,size_t bytes)
+inline bool Halo3VolumeFeaturesValid(const void* memory,size_t bytes,uint32_t* failure=nullptr)
 {
-    if (!memory || bytes<Halo3VolumeFeatures::kBytes) return false;
+    // Optional diagnosis only; the admission rules are unchanged. High word:
+    // 1 storage, 2 category capacity, 3 sphere, 4 cylinder, 5 prism.
+    // Low word: record index (zero for storage/capacity).
+    if (failure) *failure=0;
+    const auto reject=[&](uint32_t reason,uint32_t index=0) {
+        if (failure) *failure=(reason<<16)|index;
+        return false;
+    };
+    if (!memory || bytes<Halo3VolumeFeatures::kBytes) return reject(1);
     const auto* data=static_cast<const unsigned char*>(memory);
     uint16_t counts[3]{}; std::memcpy(counts,data,sizeof(counts));
-    if (counts[0]>=256 || counts[1]>=256 || counts[2]>=256) return false;
+    if (counts[0]>=256 || counts[1]>=256 || counts[2]>=256) return reject(2);
     const auto real=[](const unsigned char* p) {
         float value=0; std::memcpy(&value,p,sizeof(value)); return value;
     };
@@ -35,12 +43,12 @@ inline bool Halo3VolumeFeaturesValid(const void* memory,size_t bytes)
     for (unsigned i=0;i<counts[0];++i)
     {
         const auto* p=data+8+i*0x24;
-        if (!finiteRange(p+0x14,4) || real(p+0x20)<0) return false;
+        if (!finiteRange(p+0x14,4) || real(p+0x20)<0) return reject(3,i);
     }
     for (unsigned i=0;i<counts[1];++i)
     {
         const auto* p=data+0x2408+i*0x30;
-        if (!finiteRange(p+0x14,7) || real(p+0x2C)<0) return false;
+        if (!finiteRange(p+0x14,7) || real(p+0x2C)<0) return reject(4,i);
     }
     for (unsigned i=0;i<counts[2];++i)
     {
@@ -49,7 +57,7 @@ inline bool Halo3VolumeFeaturesValid(const void* memory,size_t bytes)
         std::memcpy(&projection,p+0x28,sizeof(projection));
         std::memcpy(&vertices,p+0x2C,sizeof(vertices));
         if (projection<0 || projection>2 || p[0x2A]>1 || vertices<0 || vertices>8 ||
-            !finiteRange(p+0x14,5) || !finiteRange(p+0x30,static_cast<unsigned>(vertices)*2)) return false;
+            !finiteRange(p+0x14,5) || !finiteRange(p+0x30,static_cast<unsigned>(vertices)*2)) return reject(5,i);
     }
     return true;
 }

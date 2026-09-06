@@ -42,6 +42,7 @@ param(
     [switch]$ProbeVolume,
     [switch]$FreshRegion,
     [switch]$WorldVolume,
+    [switch]$WorldGather,
     [switch]$KeyboardGamepad,
     [switch]$SelectionProbe,
     [switch]$BladeGeometry
@@ -58,6 +59,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if ($WorldVolume -and $Test -ne 'controller-contact') { throw 'WorldVolume requires the normal controller-contact path.' }
+if ($WorldGather -and ($Test -ne 'controller-contact' -or $WorldVolume -or $FreshRegion -or $ProbeVolume)) {
+    throw 'WorldGather is an observation-only controller-contact probe; do not combine with world/fresh-region/volume experiments.'
+}
 if ($ProbeVolume -and $Test -ne 'wall') { throw 'ProbeVolume requires the native-surface wall fixture.' }
 if ($TestHandRecovery -and $Test -notin @('visible-weapon-gap', 'controller-contact')) {
     throw 'TestHandRecovery requires visible-weapon-gap or controller-contact.'
@@ -627,7 +631,8 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE',
     'HALOMCCVR_H3_CONTACT_DEBUG_VOLUME',
     'HALOMCCVR_H3_CONTACT_FRESH_REGION',
-    'HALOMCCVR_H3_CONTACT_WORLD_VOLUME'
+    'HALOMCCVR_H3_CONTACT_WORLD_VOLUME',
+    'HALOMCCVR_H3_CONTACT_DEBUG_WORLD_GATHER'
 )
 $savedEnvironment = @{}
 foreach ($name in $debugVariables) {
@@ -685,6 +690,7 @@ try {
     if ($ProbeVolume) { $env:HALOMCCVR_H3_CONTACT_DEBUG_VOLUME = '1' }
     if ($FreshRegion) { $env:HALOMCCVR_H3_CONTACT_FRESH_REGION = '1' }
     if ($WorldVolume) { $env:HALOMCCVR_H3_CONTACT_WORLD_VOLUME = '1' }
+    if ($WorldGather) { $env:HALOMCCVR_H3_CONTACT_DEBUG_WORLD_GATHER = '1' }
     if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
         $env:HALOMCCVR_H3_CONTACT_DEBUG_VISIBLE_EXACT = '1'
@@ -982,6 +988,10 @@ public static class HaloMccVrContactInput {
             throw 'Halo 3 visible-weapon-gap recorded an exact visible-geometry penetration.'
         }
         (Test-ValidationResult $text $Test) -and
+            (-not $WorldGather -or
+             ($text -match 'H3 world gather PROBE: index=[0-9]+ .*reason=0 validation=0x00000000 ' -and
+              $text -match 'H3 world gather PROBE: index=[0-9]+ .*reason=[1-6] ' -and
+              $text -match 'H3 world volume EXPERIMENT: enabled=1 caches=[1-9][0-9]* seeds=0 frames=0 blocks=0 holds=0 hidden=0 ')) -and
             (-not $BladeGeometry -or
              ($text -match 'H3 sword EXPERIMENT: observations=[1-9][0-9]* paired=[1-9][0-9]* appends=[1-9][0-9]* stale=[0-9]+ rejected=0 active=1' -and
               $text -match 'H3 physical contact status:.*weaponTriangles=256 ')) -and
@@ -1028,6 +1038,11 @@ public static class HaloMccVrContactInput {
     }
     if ($WorldVolume -and -not (Test-WorldMeshAudit $text)) {
         throw 'World-volume audit did not prove the requested two visible raw/submitted counterfactual observations.'
+    }
+    if ($WorldGather -and ($text -match 'H3 world volume EXPERIMENT:.*(?:seeds|frames|blocks|holds|hidden)=[1-9][0-9]*' -or
+        $text -match 'H3 world volume EXPERIMENT:.*faults=[1-9][0-9]*' -or
+        $text -match 'H3 world mesh AUDIT:' -or $text -match 'H3 fresh region EXPERIMENT: enabled')) {
+        throw 'Observation-only world gather changed pose ownership or enabled another experiment.'
     }
     if ($ProbeClearance -and ($text -match 'H3 clearance PROBE sample:.*(?:bounds=0|faulted=1)' -or
         $text -notmatch 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0')) {
@@ -1121,6 +1136,7 @@ $result = [ordered]@{
     blade_geometry_requested = [bool]$BladeGeometry
     volume_probe_requested = [bool]$ProbeVolume
     world_volume_requested = [bool]$WorldVolume
+    world_gather_requested = [bool]$WorldGather
     post_pass_hold_seconds = $PostPassHoldSeconds
     fresh_region_requested = [bool]$FreshRegion
     source_commit = $runtimeSourceCommit

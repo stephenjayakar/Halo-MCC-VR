@@ -59,11 +59,40 @@ struct Halo3WorldMeshAudit
 };
 std::array<Halo3WorldMeshAudit,32> g_halo3WorldMeshAudits{};
 std::array<std::atomic<uint32_t>,32> g_halo3WorldMeshAuditStates{};
+struct Halo3WorldGatherAudit
+{
+    uint64_t ms{};
+    uint32_t reason{},validation{},group{},active{};
+    uint16_t counts[3]{};
+    bool gathered{};
+    float radius{},expansion{},bound{};
+    PhysicalContactVec3 center{};
+};
+std::array<Halo3WorldGatherAudit,20> g_halo3WorldGatherAudits{};
+std::array<std::atomic<uint32_t>,20> g_halo3WorldGatherAuditStates{};
+
+// Simulation worker only; cold logging consumes immutable records. Reserve
+// sixteen failure records independently of four success controls.
+void Halo3ObserveWorldGather(const Halo3WorldVolumeCache& c,uint32_t group,
+    uint32_t reason,uint32_t validation,bool gathered,const uint16_t* counts)
+{
+    if (!g_halo3WorldGatherOnly.load(std::memory_order_relaxed)) return;
+    static unsigned successes=0,failures=0;
+    if ((!reason && successes>=4) || (reason && failures>=16)) return;
+    const unsigned index=reason ? 4+failures++ : successes++;
+    auto& r=g_halo3WorldGatherAudits[index];
+    r.ms=c.ms; r.reason=reason; r.validation=validation; r.group=group; r.active=c.active;
+    r.gathered=gathered; r.radius=c.regionRadius; r.expansion=c.radii[group];
+    r.bound=c.bound; r.center=c.center;
+    if (counts) memcpy(r.counts,counts,sizeof(r.counts));
+    g_halo3WorldGatherAuditStates[index].store(2,std::memory_order_release);
+}
 
 void Halo3PublishWorldDraw(const BoneMatrix* nodes,const BoneMatrix* tracked,uint32_t count,
     uint16_t tag,int32_t weapon,uint32_t generation,uint64_t serial,uint64_t ms,int disposition)
 {
-    if (!g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) || !nodes || !tracked ||
+    if (!g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) ||
+        g_halo3WorldGatherOnly.load(std::memory_order_acquire) || !nodes || !tracked ||
         !count || count>16) return;
     auto write=g_halo3WorldDraws.write();
     if (!write) return;
@@ -155,6 +184,7 @@ void Halo3AuditWorldDraw(uint64_t nowMs,uint32_t generation,int32_t weapon,int32
     const unsigned char* weaponData,float worldScale)
 {
     if (!g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) ||
+        g_halo3WorldGatherOnly.load(std::memory_order_acquire) ||
         !std::isfinite(worldScale) || worldScale<.05f || worldScale>2) return;
     static uint64_t lastMs=0,lastSerial=0;
     static unsigned next=0,freeSamples=0,hiddenSamples=0;
@@ -218,7 +248,8 @@ bool Halo3WorldGather(Halo3WorldVolumeCache& c,int32_t ignored)
     __try
     {
         c.active=*g_halo3ClearanceActiveMask;
-        if (!c.active || (c.active&0xFFFF0000u)) return false;
+        if (!c.active || (c.active&0xFFFF0000u))
+        { Halo3ObserveWorldGather(c,0,1,0,false,nullptr); return false; }
         for (uint32_t group=0;group<c.groups;++group)
         {
             if (c.radii[group]<=0) continue;
@@ -226,15 +257,23 @@ bool Halo3WorldGather(Halo3WorldVolumeCache& c,int32_t ignored)
             const bool gathered=g_halo3ClearanceGather(9,&c.center.x,c.regionRadius,0,
                 c.radii[group],ignored,-1,memory);
             uint16_t counts[3]{}; memcpy(counts,memory,sizeof(counts));
-            if (!Halo3VolumeFeaturesValid(memory,sizeof(memory)) ||
-                (!gathered && (counts[0] || counts[1] || counts[2]))) return false;
-            for (size_t i=0xC408;i<sizeof(memory);++i) if (memory[i]!=0xCD) return false;
+            uint32_t validation=0;
+            if (!Halo3VolumeFeaturesValid(memory,sizeof(memory),&validation))
+            { Halo3ObserveWorldGather(c,group,2,validation,gathered,counts); return false; }
+            if (!gathered && (counts[0] || counts[1] || counts[2]))
+            { Halo3ObserveWorldGather(c,group,3,0,gathered,counts); return false; }
+            for (size_t i=0xC408;i<sizeof(memory);++i) if (memory[i]!=0xCD)
+            { Halo3ObserveWorldGather(c,group,4,0,gathered,counts); return false; }
+            Halo3ObserveWorldGather(c,group,0,0,gathered,counts);
             memcpy(c.features[group].bytes.data(),memory,0xC408);
         }
-        return c.active==*g_halo3ClearanceActiveMask;
+        if (c.active!=*g_halo3ClearanceActiveMask)
+        { Halo3ObserveWorldGather(c,0,5,0,false,nullptr); return false; }
+        return true;
     }
     __except(EXCEPTION_EXECUTE_HANDLER)
-    { g_halo3WorldFaults.fetch_add(1,std::memory_order_relaxed); return false; }
+    { g_halo3WorldFaults.fetch_add(1,std::memory_order_relaxed);
+      Halo3ObserveWorldGather(c,0,6,0,false,nullptr); return false; }
 }
 
 void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
@@ -300,6 +339,10 @@ void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
     c.regionRadius=c.bound+.60f*worldScale+c.skin;
     if (!Halo3WorldGather(c,ignored))
     { g_halo3WorldUnknown.fetch_add(1,std::memory_order_relaxed); return; }
+    // Observation mode deliberately stops before seed testing/publication:
+    // neither a known-clear seed nor a permission can escape this probe.
+    if (g_halo3WorldGatherOnly.load(std::memory_order_acquire))
+    { g_halo3WorldBuilds.fetch_add(1,std::memory_order_relaxed); return; }
     auto safe=g_halo3WorldPoses.read();
     const bool carry=safe && safe.get().generation==generation && safe.get().reset==reset &&
         safe.get().weapon==weapon && safe.get().tag==tag && safe.get().shape==c.shape &&
@@ -330,7 +373,8 @@ void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
 
 bool Halo3WorldVolumeOwns(uint32_t generation,int32_t weapon,uint64_t nowMs)
 {
-    if (!g_halo3WorldVolumeEnabled.load(std::memory_order_acquire)) return false;
+    if (!g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) ||
+        g_halo3WorldGatherOnly.load(std::memory_order_acquire)) return false;
     auto cache=g_halo3WorldCaches.read();
     if (!cache) return false;
     const auto& c=cache.get();
@@ -359,6 +403,7 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
             memcpy(r.nodes.data(),tracked,count*sizeof(BoneMatrix)); write.publish(serial);
         }
     }
+    if (g_halo3WorldGatherOnly.load(std::memory_order_acquire)) return 0;
     auto cache=g_halo3WorldCaches.read();
     if (!cache) return 0;
     const auto& c=cache.get();
@@ -453,6 +498,16 @@ void Halo3LogWorldVolume()
         LOG("H3 world volume timing: solves=%llu meanUs=%.1f maxUs=%.1f",
             count,g_halo3WorldSolveTicks.load()*1.e6/frequency.QuadPart/count,
             g_halo3WorldSolveMaxTicks.load()*1.e6/frequency.QuadPart);
+    for (uint32_t index=0;index<g_halo3WorldGatherAudits.size();++index)
+    {
+        uint32_t ready=2;
+        if (!g_halo3WorldGatherAuditStates[index].compare_exchange_strong(ready,3,std::memory_order_acquire)) continue;
+        const auto& r=g_halo3WorldGatherAudits[index];
+        LOG("H3 world gather PROBE: index=%u ms=%llu reason=%u validation=0x%08X group=%u active=0x%X gathered=%d counts=%u/%u/%u radius=%.6f expansion=%.6f bound=%.6f center=(%.6f %.6f %.6f)",
+            index,r.ms,r.reason,r.validation,r.group,r.active,r.gathered?1:0,
+            static_cast<unsigned>(r.counts[0]),static_cast<unsigned>(r.counts[1]),static_cast<unsigned>(r.counts[2]),
+            r.radius,r.expansion,r.bound,r.center.x,r.center.y,r.center.z);
+    }
     for (uint32_t index=0;index<g_halo3WorldMeshAudits.size();++index)
     {
         uint32_t ready=2;

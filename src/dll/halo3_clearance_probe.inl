@@ -61,6 +61,7 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     g_halo3FreshRegionEnabled.store(false, std::memory_order_release);
     g_halo3VolumeProbeEnabled.store(false, std::memory_order_release);
     g_halo3WorldVolumeEnabled.store(false, std::memory_order_release);
+    g_halo3WorldGatherOnly.store(false, std::memory_order_release);
     g_halo3ClearanceActiveMask = nullptr;
     wchar_t value[2]{};
     const bool probeRequested = GetEnvironmentVariableW(
@@ -76,10 +77,12 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     const bool worldRequested = kEnableHalo3WorldVolumeExperiment && worldFlag;
     if (worldFlag && !worldRequested)
         LOG("H3 world volume EXPERIMENT disabled after Floodgate sword gather/cast failures; prior contact path retained; VR unchanged");
+    const bool gatherOnly = GetEnvironmentVariableW(
+        L"HALOMCCVR_H3_CONTACT_DEBUG_WORLD_GATHER", value, 2) == 1 && value[0] == L'1';
     constexpr bool kEnableHalo3FreshRegionExperiment = true;
     const bool freshRequested = worldRequested || (kEnableHalo3FreshRegionExperiment && GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_FRESH_REGION", value, 2) == 1 && value[0] == L'1');
-    if (!probeRequested && !freshRequested && !volumeRequested)
+    if (!probeRequested && !freshRequested && !volumeRequested && !gatherOnly)
         return;
     const auto unique = [&](const char* pattern) -> uintptr_t {
         const uintptr_t hit = sig::Find(base, size, pattern);
@@ -99,7 +102,7 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     g_halo3ClearanceProbeEnabled.store(probeRequested, std::memory_order_release);
     if (probeRequested)
         LOG("H3 clearance PROBE enabled: observation only, 32 bounded samples, no render approval");
-    if (freshRequested || volumeRequested)
+    if (freshRequested || volumeRequested || gatherOnly)
     {
         // Both verified native queries read the same active-structure mask.
         // Resolve the RIP operands from the matched functions, never from a
@@ -121,7 +124,7 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
         LOG("H3 fresh region EXPERIMENT: %s; full shape bound + 0.30m motion + 0.25m reserve; 20ms/one object epoch; native-query coverage remains under test",
             g_halo3FreshRegionEnabled.load() ? "enabled" : "disabled: active structure binding unavailable");
     }
-    if ((volumeRequested || worldRequested) && g_halo3ClearanceActiveMask)
+    if ((volumeRequested || worldRequested || gatherOnly) && g_halo3ClearanceActiveMask)
     {
         const uintptr_t solver = unique("48 8B C4 4C 89 40 18 55 53 56 57 41 54 41 55 41 56 41 57 48 8D A8 38 FF FF FF 48 81 EC 88 01 00 00");
         const uintptr_t firstHit = unique("48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 55 41 54 41 55 41 56 41 57 48 8B EC 48 81 EC 80 00 00 00 0F 29 70 C8 4D 8B F0 F3 0F 10 35 97 BC 5F 00 4C 8B FA");
@@ -130,7 +133,10 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
             g_halo3VolumeSolve = reinterpret_cast<Halo3VolumeSolveFn>(solver);
             g_halo3VolumeFirstHit = reinterpret_cast<Halo3VolumeFirstHitFn>(firstHit);
             g_halo3VolumeProbeEnabled.store(volumeRequested, std::memory_order_release);
-            g_halo3WorldVolumeEnabled.store(worldRequested, std::memory_order_release);
+            g_halo3WorldGatherOnly.store(gatherOnly, std::memory_order_release);
+            g_halo3WorldVolumeEnabled.store(worldRequested || gatherOnly, std::memory_order_release);
+            if (gatherOnly)
+                LOG("H3 world gather PROBE enabled: raw-pose worker observations only; no world pose ownership, no mesh audit, no weapon hiding");
             if (volumeRequested)
                 LOG("H3 volume PROBE enabled: 32 native sphere-motion observations; no production pose changes");
             if (worldRequested)

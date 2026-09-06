@@ -976,6 +976,7 @@ namespace
     Halo3VisibleWeaponPosePublication g_halo3ApprovedWeaponPose;
     std::atomic<uint64_t> g_halo3ClearanceEpoch{1};
     std::atomic<bool> g_halo3WorldVolumeEnabled{false};
+    std::atomic<bool> g_halo3WorldGatherOnly{false};
     std::atomic<uint32_t> g_halo3WorldReset{1};
     int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int32_t weapon,
         uint32_t generation,uint64_t serial,uint64_t nowMs,const BoneMatrix* tracked,bool publishRequest);
