@@ -18722,6 +18722,22 @@ namespace
         Halo3LogNpcShoveProbe();
         Halo3LogClearanceProbe();
         VR_LogNullControllerPathStatus();
+        if (VR_UsesFixedControllerDebugPose())
+        {
+            float basis[9]{}, position[3]{}, scale = 0;
+            uint64_t sampleMs = 0, serial = 0;
+            int32_t weapon = -1;
+            bool corrected = false, offsetValid = false;
+            PhysicalContactVec3 offset{};
+            if (Halo3ReadWeaponPose(g_halo3ProposedWeaponPose,
+                    basis, position, scale, sampleMs, nullptr, nullptr,
+                    nullptr, &weapon, &serial, &corrected, &offset, &offsetValid))
+                LOG("H3 null controller world sample: weapon=0x%08X serial=%llu ageMs=%llu root=(%.6f %.6f %.6f) forward=(%.6f %.6f %.6f) scale=%.6f corrected=%d offsetValid=%d consumedOffset=(%.6f %.6f %.6f) [proposed palette; diagnostic only]",
+                    (unsigned)weapon, (unsigned long long)serial,
+                    (unsigned long long)(nowMs >= sampleMs ? nowMs - sampleMs : 0),
+                    position[0], position[1], position[2], basis[0], basis[1], basis[2],
+                    scale, corrected, offsetValid, offset.x, offset.y, offset.z);
+        }
         LOG("H3 contact sampling phase: laterStage=%d calls=%llu",
             g_halo3ContactLateUpdateInstalled.load(std::memory_order_acquire) ? 1 : 0,
             (unsigned long long)g_halo3ContactLateUpdateCalls.load(
