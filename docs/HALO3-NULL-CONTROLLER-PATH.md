@@ -135,3 +135,61 @@ positions, but TLS enumeration sometimes finds both live simulation/render
 tables and must not silently select one. Explicit table addresses are only
 valid while still enumerated. The existing probe rejected ambiguity and an
 expired table as intended during these runs.
+
+## Loose-weapon alignment exposes rejected contacts, 18:32–18:38 PDT
+
+Source `36d511ca1b2a73c3a1963f85a0255bd1f6934200` adds a cold, opt-in
+world-pose readout from the existing atomic proposed-palette publication. It
+logs root, forward, identity, age and correction provenance every two seconds.
+It does not alter collision or normal headset behavior. Release build/tests
+passed; package `out/candidates/36d511c-h3-physical-contact-20260906-013211844Z`
+installed DLL `45D61CABDAE3CA19B5E9E8123D4308FF0859AB2A9B25A6878660577C4495D984`.
+All configured edition paths were checked; only E: Steam was present.
+
+Normal controller-contact, Forge Construct, SteamVR Null Model Number, fresh
+region off. Result: `out/debug-openxr/20260906-013222013Z-controller-contact-result.json`.
+Log SHA-256 `8D4C8FE9A2283EECB01B9FE19EF464C3159DBA44F61FBC3CA07E3DEEC93AF585`.
+
+The initial player position was (6.6960, -11.4452, 12.5159). The nearest loose
+weapon E27A000B at (4.7569, -9.5416, 12.6185) disappeared as the player
+approached, with reserve ammunition increasing 64 to 160: consistent with
+normal same-weapon ammo pickup. No physical-contact hit accompanied it.
+
+The second target E2900021 remained at (6.2375, -6.8090, 12.5385), visibly a
+loose Brute weapon. Twenty F8 steps lowered the diagnostic view about 40 degrees.
+Read-only TLS snapshots and world-pose telemetry guided ordinary movement and
+timed hand commands. A low hand command near X=1, Y=-1.79, Z=-1.5 brought the
+proposed weapon root to (6.2314, -6.8934, 12.5426). This was not a successful
+nudge. The run ended with 4 hits, 2 authored-shape hits, 2 unreliable-normal
+rejections, zero impulses and zero melee. At 18:37:45 the log specifically
+identified E2900021 as the candidate with candidateNormal=0.
+
+Five hand recovery events occurred: three world corrections and two target
+render-guard failures for E2900021 (proof=3, finalGuard=1/0). Shape sampling
+paused during recovery, and proposed weapon identity became FFFFFFFF. Code
+inspection shows Halo3ResetPhysicalContact clears the active identity, so
+this alone is not evidence that the renderer culled the weapon. The last two
+target failures and the rejected authored contacts need a numerical geometry
+replay before changing impulse-normal eligibility. In particular, the current
+solver deliberately rejects a new pre-existing overlap without a reliable
+swept plane; simply treating its fallback direction as an impulse normal would
+remove an existing guard without proving the resulting physical response.
+
+Diagnostic videos (neither demonstrates a successful shove):
+
+- `out/demos/20260906-013611-forge-commanded-loose-weapon-contact/raw.mp4`,
+  SHA-256 `2CA22728FAC2E0A707C860BFB65D06DCE4B66EE87481BC55C63B4BDF1D17FF8B`.
+- `out/demos/20260906-013759-forge-loose-weapon-contact-normal-rejection/raw.mp4`,
+  SHA-256 `8FABA9763FFED960DDB9FBE560658934E1137E2237B01E5885968D9EFFC6D3CA`.
+  Six sampled frames show a stationary loose target and constrained/floating
+  held weapon followed by the return command; contact continuity is unproven.
+
+The sender also exposed a parameter-binding bug: float -1.6 became
+-1.600000023841858 before PowerShell's double range check and was rejected.
+X/Y/Z parameters now validate as doubles before the existing float wire-format
+conversion. Isolated binding checks accept all six endpoints and reject
+Z=-1.6001 without contacting MCC. The live test used -1.59 after the rejection.
+
+The harness exited normally; MCC/SteamVR stopped and the exact original normal
+SteamVR settings hash was restored. This remains diagnostic evidence, not
+headset acceptance or successful prop interaction.
