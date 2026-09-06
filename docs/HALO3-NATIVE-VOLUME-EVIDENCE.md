@@ -1088,3 +1088,66 @@ verify visible corrected cases rather than infer success from build results.
 The old whole-query backend remains disabled and normal launches still opt
 into neither world partitions nor sword blades. Other open collision/shape,
 sword effects, shove and headset latency requirements remain outstanding.
+
+#### 28d2f20 short collision regression
+
+Source `28d2f20ef409be869026cf4725e41c812eb3e822`; package
+`out/candidates/28d2f20-h3-physical-contact-20260906-102849861Z`.
+Release build and both CTests passed. Installed Steam DLL independently
+verified: `0EA65BD4F00D69DEA0590CB7E0CAE490907BA88AADE692FC344EB1EF3592D8FC`.
+Launcher/config unchanged; alternate Steam and Store roots absent. Prior
+artifact preserved in
+`out/deploy-backups/ba6c22d-steam-before-28d2f20-20260906-102850779Z`.
+
+Run `out/debug-openxr/20260906-102903117Z-controller-contact-result.json`
+passed its bounded controller-contact/paired-mesh criteria and 30-second
+post-pass hold. Steam / SteamVR null / Null Model Number, Floodgate resumed
+checkpoint, WorldPartitions / BladeGeometry / mesh audit. Log SHA:
+`E3EC97A79D1722A7642D5E4E5F65CD0454A559C3E05FB6862BCA57B7D7CF868B`.
+This shorter hold is not equivalent to the earlier 180-second failed run.
+The 500 ms D approach produced 20 visible positive counterfactuals among 32
+mesh samples. Stable requested geometry had 109 interior points and 80 directed
+edge crossings; submitted geometry had zero of both. Maximum positive root
+correction was 0.21974 m. All samples were valid and fault-free. Audit maximum
+was 23,425.6 us. Parsed records:
+`out/research/20260906-native-volume/cache-clock-audit.json`.
+
+The contact screenshot `20260906-103040977Z-cache-clock-rock/0000-103041222Z.jpg`
+was inspected: the actual blade is displaced clear while electrical effects
+remain near the original pose. The 500 ms A retreat screenshot
+`20260906-103108483Z-cache-clock-retreat/0000-103108754Z.jpg` has no first-person
+weapon/HUD after combat and does not prove clean release. No new polished demo
+or headset acceptance is claimed.
+
+Final preserved-log totals: 2,538 complete caches / 24,186 regions, capacity/invalid/plan/
+region-miss/cast-invalid counters all zero, peak native counts 64/119/128,
+mean gather 532.6 us, maximum 2,114.7 us. There were 10,357 admitted solves,
+2,028 blocks, 851 holds, 63 counted age/shape/leash hide decisions, 322 shape rejects, zero
+unknown results, native faults or exhausted budgets. Mean solve 19.1 us,
+maximum 377.9 us. Final handoff categories: no ownership losses or visible
+over-leash frames, 329 hidden draws and 7,338 controls. The latter includes
+early return-2 dispositions not counted by the solver's final hide counter.
+These data still
+contradict a claim of consistently visible, polished interaction.
+
+Both newer-than-frame counters were zero: this run did **not** exercise the
+repaired interleaving. Its collision regression passed, but live proof of the
+timestamp repair remains outstanding. The change's ordering follows the
+recorded failing case; do not attribute the reduced holds or zero region misses
+to it from this shorter, different combat sequence.
+
+Campaign files were restored and verified under
+`post-cache-clock-test/restoration.json`. Start-screen refresh harness
+`20260906-103152139Z` synchronized Steam metadata. Final MenuOnly check
+`20260906-103409961Z` showed Resume at
+`20260906-103536559Z-menu-ocr/0000-103536707Z.jpg` (inspected), entered no
+mission, then closed normally. These menu-only harnesses intentionally report
+closure during external control. All three checkpoint files retain their
+original bytes and all four Steam metadata entries match current files in
+`out/test-runs/20260906-resume-cache-check/final-cache-clock-menu-cache.json`.
+AceSettings matches the previously decoded, semantically identical
+`FFC8C7E64319CC140C50656A8C5E1F259BFCD5DF1DF6A4626F0BFA8973B9C2BE`
+file, independently hash-checked in `cache-clock-profile-comparison.json`.
+MCC/SteamVR are closed. Normal settings hash remains
+`298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`;
+null is disabled. Accepted pointer unchanged.
