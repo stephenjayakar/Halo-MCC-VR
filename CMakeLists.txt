@@ -261,6 +261,10 @@ if(BUILD_TESTING)
         HALOMCCVR_EXPERIMENTAL_REACH_BRINGUP=$<BOOL:${HALOMCCVR_EXPERIMENTAL_REACH_BRINGUP}>
         HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE=$<BOOL:${HALOMCCVR_EXPERIMENTAL_REACH_RENDER_CANDIDATE}>)
     add_test(NAME halomccvr_core_tests COMMAND halomccvr_core_tests)
+    add_executable(halo3_sword_runtime_replay tests/sword_runtime_replay.cpp)
+    target_compile_features(halo3_sword_runtime_replay PRIVATE cxx_std_20)
+    add_test(NAME halo3_sword_runtime_replay COMMAND halo3_sword_runtime_replay)
+    set_tests_properties(halo3_sword_runtime_replay PROPERTIES TIMEOUT 10)
 endif()
 
 # Stage an unaccepted local candidate only. Release-specific hashes and metadata

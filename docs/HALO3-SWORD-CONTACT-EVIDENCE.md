@@ -730,3 +730,40 @@ and prop contact, switch/selection fallback, melee versus gentle NPC shove,
 Campaign coverage, native-query/render cost and genuine functionality videos.
 The optional retail header-check probe can run in that same session; it is not
 required to trust an unverified checksum field.
+
+### Offline replay of the selection authorization (2026-09-06 UTC)
+
+`tests/sword_runtime_replay.cpp` includes the production
+`src/dll/halo3_sword_runtime.inl` with fake engine reads and a controlled clock.
+The tracked pose fixture contains records 2 and 6 from the paired-selection log
+above (serials 14202/21218, log SHA-256
+`9B8220C41176F81E5A1B23935C6D6A829201CA26CE8E6E75A5508C74A803F426`).
+The object definition is an explicitly synthetic sentinel, not a discovered
+engine address. The base handle sentinel is one valid triangle; a successful
+replay therefore publishes three children and 245 triangles, unlike the real
+sword's expected three children and 256 triangles.
+
+The Release replay passed 118 checks. It exercises both recorded palettes,
+unpaired switch/re-equip, hidden region selections, missing native matrices,
+the inclusive 50 ms freshness boundary, expiry at 51 ms, zero/future times,
+generation changes including a change during observation, full render-datum
+salt mismatch, object/weapon identity mismatch, unavailable reads, incorrect
+inverse fingerprints, nonfinite consumer geometry, and hull-only consumers.
+An odd publication sequence returns without waiting. Every append attempt
+checks that the existing base geometry remains intact and published shapes
+remain valid. CTest gives this replay a ten-second timeout.
+
+These are offline authorization/geometry regression checks. They do not prove
+retail pointer safety, native hook ABI, simultaneous writer/reader scheduling,
+same-frame selection, real wall/prop response, performance or headset comfort.
+No production behavior changed for this replay and the installed opt-in
+candidate remains `8436e79`; live validation still requires Steam sign-in.
+
+The cumulative Release build and both CTest suites passed. Preserved test log:
+`out/test-runs/20260906-sword-runtime-replay.log`, SHA-256
+`44824A061E68CBA58903581AE034CBD09C8E949F9369640D9BB9588049F78088`.
+Replay executable SHA-256:
+`D888C0433F8C1A6E38ADB12870D740079968FB4C139E4D46EB44CB133641BC22`.
+The installed DLL independently still matches the candidate hash above;
+SteamVR remains `driver_null.enable=false`, empty `forcedDriver`, and
+`requireHmd=true`. Steam still shows `Sign in to Steam` with `ActiveUser=0`.
