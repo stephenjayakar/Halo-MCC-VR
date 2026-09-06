@@ -698,3 +698,35 @@ Steam subsequently showed the `Sign in to Steam` window and registry
 restored the original SteamVR settings hash. The harness now checks Steam's
 active process/account before making any SteamVR changes; the signed-out
 rejection and unchanged settings hash were verified locally.
+
+### Packaged candidate identity and remaining acceptance
+
+Source `8436e79b10a586adb199c432e35a6c9265232de3` built successfully and passed
+the Release core suite. Package:
+`out/candidates/8436e79-h3-physical-contact-20260906-052511596Z`.
+Installed DLL SHA-256, independently verified:
+`0417F56851CC5ED100618E88DA3044B0DCF96A4A1615D5D484ABC7C2EFDE4615`.
+Launcher SHA-256:
+`D489C5763E21FC339999DC734CED09A2068AAC6C035EA8B7BF4339B6810FA450`.
+The installer checked all configured roots; only E: Steam exists. Prior files
+are preserved under `out/deploy-backups/fe9bf5a-steam-before-8436e79-20260906-052512704Z`.
+Configuration remains
+`C570089F47A17AE8645310C02688CA1454E1A02C9239BC24C5CC316E4DA94946`.
+
+At final verification MCC/SteamVR were closed, null driver was false,
+forcedDriver empty, requireHmd true, and the restored SteamVR settings hash
+was the original `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
+The blade experiment environment variable was absent at process, user and
+machine scope. No normal-headset blade behavior is enabled by this package.
+Steam remained at its sign-in screen (`ActiveUser=0`); the active goal remains
+incomplete and the accepted-build pointer is unchanged.
+
+After sign-in, the next diagnostic invocation is normal `controller-contact`
+with `-BladeGeometry -SelectionProbe -KeyboardGamepad -ExternalMenuControl`,
+`-ValidationTimeoutSeconds 300` and a short post-pass hold. Native sword equip
+must occur during that validation window. Its 256-triangle/append check proves
+geometry admission only. Required follow-up still includes visible blade/wall
+and prop contact, switch/selection fallback, melee versus gentle NPC shove,
+Campaign coverage, native-query/render cost and genuine functionality videos.
+The optional retail header-check probe can run in that same session; it is not
+required to trust an unverified checksum field.
