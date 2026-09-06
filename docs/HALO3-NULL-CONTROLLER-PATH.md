@@ -245,3 +245,24 @@ still required; the capture run above predates the behavioral change.
 After the capture run, MCC/SteamVR were stopped and the original normal
 SteamVR settings hash was independently verified restored. Accepted pointer
 unchanged.
+
+Behavioral candidate `4ea27bfc3d1e2522a5f2d3ceee5bd80fef11a031` passed the
+complete Release build/core tests (including both numerical captures and all
+initial-overlap/clear-end controls) and the Reach consistency check. Package:
+`out/candidates/4ea27bf-h3-physical-contact-20260906-015556881Z`. Installed DLL
+SHA-256 `D277E687282D9301DB018B4FBEAF3436C05E8904630BE55517705D6010F2B646`,
+independently verified. Launcher remains
+`D489C5763E21FC339999DC734CED09A2068AAC6C035EA8B7BF4339B6810FA450`.
+This is a candidate result; the prior diagnostic video predates this fix.
+
+The installed fix passed the live synthetic weapon-scoop regression in Forge,
+Steam / SteamVR / Null Model Number. It recorded 153 applied native impulses,
+zero melee and zero unreliable-normal rejections; command=applied=153,
+commandStatus=2. The fixture also reported validated=1. Result:
+`out/debug-openxr/20260906-015611566Z-weapon-scoop-result.json`; log SHA-256
+`47066D193653159106A90DF20D9B1FDC5AB4D6AA997A24AABE582BB987926A88`.
+This confirms the broader synthetic impulse path still operates. It is not a
+same-pose visible A/B of the sniper contact, nor Campaign or headset acceptance.
+After normal harness completion, the installed DLL/configuration hashes were
+unchanged, the original normal SteamVR hash matched, null was disabled,
+forcedDriver empty, requireHmd true, and MCC/SteamVR were stopped.
