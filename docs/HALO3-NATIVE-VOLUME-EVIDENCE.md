@@ -543,3 +543,71 @@ Inspection also found existing opt-in turn controls: `send-mcc-keys.ps1 -Keys
 TurnRight` / `TurnLeft` enqueue 15-degree steps consumed by ordinary VR turning.
 The null controller pose continues through the same yaw reference. Mouse look
 is not needed to frame the test and no new camera override has been added.
+
+### Paired audit runtime result and wall recording
+
+Source `143f3a3bba9eea6b39435131c0443ea48ab493c9`, package
+`out/candidates/143f3a3-h3-physical-contact-20260906-084548468Z`.
+Installed DLL SHA independently verified:
+`53873266C69C3C2B555F42057AC9942908115E960E91BF53DC90A046B0716713`.
+Launcher/config unchanged from 52a813f. E: Steam installed; alternate Steam and
+Store roots absent. Backup:
+`out/deploy-backups/6b246d0-steam-before-143f3a3-20260906-084549542Z`.
+
+Run `out/debug-openxr/20260906-084605323Z-controller-contact-result.json`
+passed the new paired-mesh criterion. Log SHA:
+`F80A1BBBEF47B0B945814E2D4133E2A5569DCBB27D56B6D65038B5662266DF68`.
+Steam / SteamVR OpenXR 2.17.8 null / Null Model Number / 90 Hz panel / Guardian
+Forge. Lobby verification is under `20260906-084807344Z-world-audit-launch`.
+This spawn was the covered outer ramp, not the previous blue-room spawn.
+The installed predecessor's preserved log had only blocked counters; the new
+log adds independent point and vector checks on submitted geometry.
+
+All 32 audits were valid and fault-free, each with 36 authored collision
+triangles for both palettes. Of 28 visible samples, 22 had requested-mesh
+points inside native world solids; all 28 submitted meshes had zero sampled
+point interiors and zero edge crossings. Four hidden samples also retained a
+clear physical mesh but are excluded from visible success. The stable visible
+contact held approximately 15.2 cm root correction: 14 requested samples were
+inside the wall and 40 requested directed edges crossed it, versus zero of
+both for the submitted mesh. These counts include repeated triangle vertices
+and both edge directions, not unique vertices or distinct contacts. Maximum
+full paired audit cost was 2,672.2 microseconds on the worker. Parsed records:
+`out/research/20260906-native-volume/paired-mesh-audit.json`.
+
+The obstacle was the structural support beside the covered ramp. Programmatic
+turning correctly rotated the view. Native keyboard W/A/S/D movement did not
+follow the diagnostic view yaw in this run: it retained its original game
+heading, so stepping toward the turned view required matching the original
+axes. After returning along S and approaching on D, a far-forward hand was
+hidden beyond 30 cm; retracting Z from -.65 to -.48 m produced the visible
+15.2 cm constraint and the positive paired audit. This control-space detail
+must be accounted for in later scripts rather than navigating blindly.
+
+A second oblique sequence at the same obstacle extends the controller, moves
+sideways/vertically, then retracts. Local 15-second captioned recording:
+`out/demos/20260906-085322-guardian-wall-oblique-controller-sweep/guardian-wall-contact-demo.mp4`.
+SHA: `D7E551A9DF157B85B2CCDABBC9D7B155AD73AEC78ACC69191040E51E03440B7B`.
+The source MP4 is preserved alongside it. The edit trims seconds 9-24, lifts
+visibility with gamma 1.45 / contrast 1.08 / brightness +.01, and captions the
+command phases. Geometry, motion and timing are not generated or replaced.
+Representative contact/release frames and the caption render were inspected.
+The scene remains dark; this is a limited experimental wall demonstration.
+`demo-evidence.json` identifies all edits and limitations. The positive paired
+audits precede this clip at the same obstacle; they are not frame-by-frame
+verification of every later movement. The earlier frontal 40-second recording
+is preserved under `20260906-085138-guardian-native-wall-contact-slide-release`.
+
+After final retreat the blocked counter remained at 12,597 while subsequent
+uncorrected fresh poses had zero recorded root gap, supporting release rather
+than a persistent displaced gun in that final state. Last totals were 130,311
+admitted pre/post solves, 5,779 held submissions, 6,500 hidden submissions,
+zero unknown casts/shape rejects/budget exhaustion/native faults. No object
+contact was attempted, so this run does not establish props or NPC regression.
+
+Harness cleanup completed and MCC/SteamVR are closed. Restored settings hash
+independently matches `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`;
+null disabled, forced driver empty, real headset required. The accepted pointer
+has not advanced and WorldVolume remains opt-in. Campaign, instance/rock
+coverage, sword animation, physical items, NPC shove/melee and headset feel
+remain necessary before enabling this as the normal interaction path.
