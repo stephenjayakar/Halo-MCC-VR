@@ -298,3 +298,31 @@ missing correspondence as null, not as an invisible mesh.
 No sword runtime behavior was changed by this investigation. The hand-recovery
 candidate remains the installed, unaccepted candidate while its feedback is
 pending. The user's successful enemy melee and floor nudging must be preserved.
+
+## Forge equip controls, September 5, 19:16–19:22 PDT
+
+Stationary normal-controller run on source 9988fa3:
+`out/debug-openxr/20260906-021614133Z-controller-contact-result.json`, log
+SHA-256 `3B4089E4911368C2E5543B92CD2CC32A8E80C73173F9DCE178689A4CEAF9BBC6`.
+The generic controller validation passed, but no sword was equipped and no
+sword-contact result is claimed. A focused 500 ms Escape opened the native
+Forge pause page; short addressed Escape/Tab did not establish that transition.
+Its controls showed `[-] Play / Edit`, `[2] Tools`, and `[E] Toggle Rotation Axes`.
+Minus input did not visibly enter the editor; the dash is not established as
+an actual assigned key. No bindings or map files were edited or saved.
+Screenshot: `out/debug-openxr/20260906-022002427Z-forge-menu-native-held/0000-022002655Z.jpg`.
+The harness exited normally and original normal SteamVR settings were verified
+restored, with MCC and SteamVR stopped.
+
+The following diagnostic candidate extends the already opt-in
+`HALOMCCVR_DEBUG_KEYBOARD_GAMEPAD` bridge from F13–F19 to F13–F21, adding native
+X and Y buttons. The validation harness explicitly enables it only with
+`-KeyboardGamepad`, and now preserves/clears/restores that process environment
+variable with the other test flags. Normal launches do not enable the bridge.
+`tools/send-mcc-gamepad-button.ps1` verifies the current live log advertises the
+new bridge, focuses the unique MCC window, and sends isolated virtual-key
+pulses with release in finally. It rejects a lost foreground before another
+button. Input delivery is not treated as confirmation of a game-state change.
+This is test-control scaffolding, not a change to weapon physics or sword
+geometry. The existing keyboard sender also accepts Tab, E, Minus and Tools;
+their mappings alone do not establish native gameplay actions.

@@ -58,7 +58,7 @@ namespace
         g_debugKeyboardPad.store(enabled);
         if (enabled)
             LOG("debug input: keyboard-to-gamepad bridge enabled "
-                "(isolated F13-F19 controls available)");
+                "(isolated F13-F21 controls available)");
     }
 
     bool MergeDebugKeyboardPad(XINPUT_STATE* state)
@@ -69,7 +69,7 @@ namespace
         const auto down = [](int key) {
             return (GetAsyncKeyState(key) & 0x8000) != 0;
         };
-        // Arrow/Enter remain convenient for manual desktop use. F13-F19 are
+        // Arrow/Enter remain convenient for manual desktop use. F13-F21 are
         // isolated automation controls: MCC has no native binding for them,
         // so one injected key becomes exactly one XInput button instead of a
         // keyboard navigation event plus a second gamepad navigation event.
@@ -87,6 +87,10 @@ namespace
             buttons |= XINPUT_GAMEPAD_B;
         if (down(VK_TAB) || down(VK_F19))
             buttons |= XINPUT_GAMEPAD_START;
+        if (down(VK_F20))
+            buttons |= XINPUT_GAMEPAD_X;
+        if (down(VK_F21))
+            buttons |= XINPUT_GAMEPAD_Y;
         state->Gamepad.wButtons |= buttons;
         return buttons != 0;
     }

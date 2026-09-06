@@ -39,7 +39,8 @@ param(
     [switch]$ExternalMenuControl,
     [switch]$TestHandRecovery,
     [switch]$ProbeClearance,
-    [switch]$FreshRegion
+    [switch]$FreshRegion,
+    [switch]$KeyboardGamepad
 )
 
 # Runs one Halo 3 physical-contact transaction through SteamVR's null driver.
@@ -574,6 +575,7 @@ $passed = $false
 $failure = $null
 
 $debugVariables = @(
+    'HALOMCCVR_DEBUG_KEYBOARD_GAMEPAD',
     'HALOMCCVR_H3_AIM_DEBUG_POSE',
     'HALOMCCVR_H3_CONTACT_DEBUG_RIG',
     'HALOMCCVR_H3_CONTACT_DEBUG_SCOOP',
@@ -638,6 +640,7 @@ try {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_RIG = '1'
     }
     if ($TestHandRecovery) { $env:HALOMCCVR_H3_CONTACT_DEBUG_HAND_RECOVERY = '1' }
+    if ($KeyboardGamepad) { $env:HALOMCCVR_DEBUG_KEYBOARD_GAMEPAD = '1' }
     if ($ProbeClearance) { $env:HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE = '1' }
     if ($FreshRegion) { $env:HALOMCCVR_H3_CONTACT_FRESH_REGION = '1' }
     if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
@@ -1034,6 +1037,7 @@ $result = [ordered]@{
     requested_scenario = $Scenario
     passed = $passed
     hand_recovery_requested = [bool]$TestHandRecovery
+    keyboard_gamepad_requested = [bool]$KeyboardGamepad
     fresh_region_requested = [bool]$FreshRegion
     source_commit = $runtimeSourceCommit
     validator_source_commit = $validatorCommit
