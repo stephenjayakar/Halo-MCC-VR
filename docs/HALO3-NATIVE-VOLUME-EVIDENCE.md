@@ -1701,3 +1701,61 @@ The initial Release build and both CTests passed; final packaging must rebuild
 a subsequent invalid-radius guard and its negative control before runtime.
 This is a recovery experiment, not headset acceptance or comprehensive surface
 coverage proof. The accepted pointer is unchanged.
+
+50681c9 runtime result: FAILED in Guardian Forge on Steam / SteamVR null /
+Null Model Number. Source `50681c9c3a14b1ef6376ca2f276296a6714d99ed`, package
+`out/candidates/50681c9-h3-physical-contact-20260906-124424230Z`, installed DLL
+`AE68AE977F68CCEC4223AFB6CBE3D9B23E1DFF6F472AEA8D82489685940E63AF` independently
+verified. Final Release build and both CTests passed, including the invalid
+radius guard. Normal config and launcher hashes remained unchanged.
+Backup: `out/deploy-backups/ba1c54b-steam-before-50681c9-20260906-124425088Z`.
+
+Result: `out/debug-openxr/20260906-124439341Z-controller-contact-result.json`.
+Preserved log SHA `395B0E7B9F6765149D9EF11808929F2EB7621AF59A85FA20F3A121BE37312C7D`.
+Started 12:44:45Z, finished 12:51:30Z. Guardian's blue-floor-fixture room
+spawned successfully. Sword pickup required moving nearer until the native
+pickup prompt appeared, then E; earlier out-of-range E presses did not pick it
+up. Positive controller pitch raised the rifle barrel, negative pitch lowered
+it; do not treat a numeric pitch alone as proof of an on-camera sword pose.
+
+At 12:50:24Z, D450 and controller Z=-1.0 left the blade clear, with zero raw
+mesh intersections. At 12:51:08Z, W450 plus Z=-1.25 produced deep doorway
+contact. The solver briefly blocked (19 frames), then recorded hidden gap
+0.33934m at reset34/shape8287. A new cover at the SAME reset34/shape11904
+lost its seed. Revalidation counters were tested16/clear11/rejected5; these
+are complete-cover counts. The prior 10 clears preceded this contact, so they
+are not evidence of recovery from a wall. Afterward legacy hand-recovery
+requests caused resetReasons32, and no-seed fallback continued.
+
+81 preserved mesh audits: zero positive paired contact samples; the last
+sample (index80, draw0) contained raw/submitted inside755/755 and crossings
+168/168. MissingSeed511; capacity/invalid/planFailures/regionMisses/castInvalid,
+query exhaustion and native faults all zero. Cover mean7.0us/max2294.0;
+gather mean82.6us/max2464.4; solve mean4.8us/max379.7; diagnostic audit
+max11023.3us. These are null-run timings with audits enabled, not headset
+tracking latency. futureSamplesSkipped remained0: the separate timestamp fix
+ran without that branch being observed.
+
+The harness correctly failed and closed MCC upon visible submitted penetration;
+180-second post-pass hold was never reached. A subsequent withdrawal command
+found MCC already closed, so this run does not establish withdrawal recovery.
+The late capture helper ended at its own 45-second visible-window timeout.
+All tool sessions terminal, no remaining MCC/SteamVR processes. SteamVR settings
+independently match normal-headset SHA
+`298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`.
+
+Retained video: `out/demos/20260906-125026-guardian-historical-seed-doorway/raw.mp4`,
+SHA `B928381AA39FAF5239084CE31D281BD85C7F8FB5E9C038FC1B9D1CAFD2672785`.
+50 seconds of actual MCC, mostly clear approach with deep failed contact near
+the end. Labelled failed diagnostic, not a working demo. No cleanup attempted.
+The partition experiment is disabled again in its own revert commit before
+any further behavioral candidate. Accepted pointer unchanged.
+
+Next work must resolve the explicit no-seed fallback after ownership has been
+established. Revalidation is necessary but insufficient when new geometry
+actually overlaps at the historical pose. A bounded search for a newly clear
+pose (using current full-cover clearance) is one possible next experiment;
+never call a rejected seed clear or infer player-body clearance proves a long
+weapon clear. Preserve complete swept regions and hand-distance limits. The
+legacy fallback must not be mistaken for collision ownership. Full surface,
+Forge/Campaign, props/NPC and headset latency acceptance remain outstanding.
