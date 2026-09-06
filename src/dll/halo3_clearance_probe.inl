@@ -5,6 +5,23 @@ using Halo3ClearanceGatherFn = bool(__fastcall*)(uint64_t, const float*, float, 
                                                float, int32_t, int32_t, void*);
 Halo3ClearancePointFn g_halo3ClearancePoint = nullptr;
 Halo3ClearanceGatherFn g_halo3ClearanceGather = nullptr;
+using Halo3VolumeSolveFn = uint16_t(__fastcall*)(const float*, const float*, const void*,
+    float*, float*, uint16_t, void*);
+Halo3VolumeSolveFn g_halo3VolumeSolve = nullptr;
+std::atomic<bool> g_halo3VolumeProbeEnabled{false};
+struct Halo3VolumeProbeRecord
+{
+    uint64_t ms{};
+    uint32_t mode{};
+    int32_t surfaceType{};
+    float radius{}, clearance{};
+    PhysicalContactVec3 start{}, motion{}, result{}, velocity{};
+    uint16_t featureCounts[3]{}, collisions{};
+    bool interior{}, gathered{}, bounded{}, faulted{};
+    double microseconds{};
+};
+std::array<Halo3VolumeProbeRecord, 32> g_halo3VolumeProbeRecords{};
+std::array<std::atomic<uint32_t>, 32> g_halo3VolumeProbeStates{};
 std::atomic<bool> g_halo3ClearanceProbeEnabled{false};
 std::atomic<bool> g_halo3FreshRegionEnabled{false};
 const uint32_t* g_halo3ClearanceActiveMask = nullptr;
@@ -34,14 +51,17 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
 {
     g_halo3ClearanceProbeEnabled.store(false, std::memory_order_release);
     g_halo3FreshRegionEnabled.store(false, std::memory_order_release);
+    g_halo3VolumeProbeEnabled.store(false, std::memory_order_release);
     g_halo3ClearanceActiveMask = nullptr;
     wchar_t value[2]{};
     const bool probeRequested = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE", value, 2) == 1 && value[0] == L'1';
+    const bool volumeRequested = GetEnvironmentVariableW(
+        L"HALOMCCVR_H3_CONTACT_DEBUG_VOLUME", value, 2) == 1 && value[0] == L'1';
     constexpr bool kEnableHalo3FreshRegionExperiment = true;
     const bool freshRequested = kEnableHalo3FreshRegionExperiment && GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_FRESH_REGION", value, 2) == 1 && value[0] == L'1';
-    if (!probeRequested && !freshRequested)
+    if (!probeRequested && !freshRequested && !volumeRequested)
         return;
     const auto unique = [&](const char* pattern) -> uintptr_t {
         const uintptr_t hit = sig::Find(base, size, pattern);
@@ -61,7 +81,7 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     g_halo3ClearanceProbeEnabled.store(probeRequested, std::memory_order_release);
     if (probeRequested)
         LOG("H3 clearance PROBE enabled: observation only, 32 bounded samples, no render approval");
-    if (freshRequested)
+    if (freshRequested || volumeRequested)
     {
         // Both verified native queries read the same active-structure mask.
         // Resolve the RIP operands from the matched functions, never from a
@@ -77,11 +97,94 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
             pm == gm && pm >= base && pm + 4 <= base + size && pm - base == 0x46B70A8)
         {
             g_halo3ClearanceActiveMask = reinterpret_cast<const uint32_t*>(pm);
-            g_halo3FreshRegionEnabled.store(true, std::memory_order_release);
+            g_halo3FreshRegionEnabled.store(freshRequested, std::memory_order_release);
         }
+        if (freshRequested)
         LOG("H3 fresh region EXPERIMENT: %s; full shape bound + 0.30m motion + 0.25m reserve; 20ms/one object epoch; native-query coverage remains under test",
             g_halo3FreshRegionEnabled.load() ? "enabled" : "disabled: active structure binding unavailable");
     }
+    if (volumeRequested && g_halo3ClearanceActiveMask)
+    {
+        const uintptr_t solver = unique("48 8B C4 4C 89 40 18 55 53 56 57 41 54 41 55 41 56 41 57 48 8D A8 38 FF FF FF 48 81 EC 88 01 00 00");
+        if (solver && solver - base == 0x1FEF30)
+        {
+            g_halo3VolumeSolve = reinterpret_cast<Halo3VolumeSolveFn>(solver);
+            g_halo3VolumeProbeEnabled.store(true, std::memory_order_release);
+            LOG("H3 volume PROBE enabled: 32 native sphere-motion observations; no production pose changes");
+        }
+        else LOG("H3 volume PROBE disabled: unique verified solver unavailable; VR unchanged");
+    }
+}
+
+void Halo3RunVolumeProbe(uint64_t nowMs, PhysicalContactVec3 surface,
+    PhysicalContactVec3 normal, PhysicalContactVec3 camera, int32_t surfaceType,
+    float worldScale, int32_t ignoredPlayer)
+{
+    if (!g_halo3VolumeProbeEnabled.load(std::memory_order_acquire) ||
+        !PhysicalContactFinite(surface) || !PhysicalContactFinite(normal) ||
+        !PhysicalContactFinite(camera) || !std::isfinite(worldScale) ||
+        worldScale < .05f || worldScale > 2.0f || PhysicalContactLengthSquared(normal) < .5f)
+        return;
+    static uint32_t next = 0;
+    static uint64_t lastMs = 0;
+    if (next >= g_halo3VolumeProbeRecords.size() || nowMs < lastMs || nowMs - lastMs < 250)
+        return;
+    normal = PhysicalContactNormalize(normal);
+    if (PhysicalContactDot(normal, camera - surface) < 0) normal = normal * -1.0f;
+    const uint32_t index = next++;
+    lastMs = nowMs;
+    auto& r = g_halo3VolumeProbeRecords[index];
+    r.ms = nowMs;
+    r.mode = index % 4;
+    r.surfaceType = surfaceType;
+    constexpr float radii[4]{.03f, .08f, .16f, .24f};
+    r.radius = radii[(index / 4) % 4] * worldScale;
+    r.start = surface + normal * ((r.mode == 3 ? -.02f : .60f) * worldScale);
+    r.motion = normal * ((r.mode == 1 ? .20f : -.90f) * worldScale);
+    if (r.mode == 2)
+    {
+        const auto tangent = PhysicalContactNormalize(PhysicalContactCross(normal,
+            std::abs(normal.z) < .9f ? PhysicalContactVec3{0,0,1} : PhysicalContactVec3{0,1,0}));
+        r.motion = r.motion + tangent * (.40f * worldScale);
+    }
+    const auto center = r.start + r.motion * .5f;
+    const float gatherRadius = PhysicalContactLength(r.motion) * .5f + r.radius;
+    alignas(16) unsigned char features[0xC490];
+    alignas(16) unsigned char collisions[16 * 48 + 64];
+    memset(features, 0xCD, sizeof(features));
+    memset(collisions, 0xCD, sizeof(collisions));
+    r.result = r.start + r.motion;
+    r.velocity = r.motion;
+    LARGE_INTEGER begin{}, end{}, frequency{};
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&begin);
+    __try
+    {
+        const uint32_t active = *g_halo3ClearanceActiveMask;
+        if (active && !(active & 0xFFFF0000u))
+        {
+            constexpr uint64_t flags = 9ull | (0x7FFFull << 32);
+            int32_t pointType = 0;
+            r.interior = g_halo3ClearancePoint(flags, &r.start.x, ignoredPlayer, -1, &pointType);
+            r.gathered = g_halo3ClearanceGather(flags, &center.x, gatherRadius,
+                0.0f, r.radius, ignoredPlayer, -1, features);
+            memcpy(r.featureCounts, features, sizeof(r.featureCounts));
+            r.bounded = r.featureCounts[0] <= 256 && r.featureCounts[1] <= 256 && r.featureCounts[2] <= 256;
+            if (r.gathered && r.bounded)
+                r.collisions = g_halo3VolumeSolve(&r.start.x, &r.motion.x, features,
+                    &r.result.x, &r.velocity.x, 16, collisions);
+            r.bounded = r.bounded && r.collisions <= 16 && PhysicalContactFinite(r.result) &&
+                PhysicalContactFinite(r.velocity) && active == *g_halo3ClearanceActiveMask;
+            for (size_t i = 0xC408; i < sizeof(features); ++i) r.bounded = r.bounded && features[i] == 0xCD;
+            for (size_t i = 16 * 48; i < sizeof(collisions); ++i) r.bounded = r.bounded && collisions[i] == 0xCD;
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { r.faulted = true; }
+    QueryPerformanceCounter(&end);
+    if (frequency.QuadPart > 0) r.microseconds = (end.QuadPart - begin.QuadPart) * 1.0e6 / frequency.QuadPart;
+    r.clearance = PhysicalContactDot(r.result - surface, normal) / worldScale;
+    if (r.faulted || !r.bounded) g_halo3VolumeProbeEnabled.store(false, std::memory_order_release);
+    g_halo3VolumeProbeStates[index].store(2, std::memory_order_release);
 }
 
 void Halo3PublishFreshRegion(uint64_t nowMs, uint32_t generation, uint64_t serial,
@@ -238,6 +341,18 @@ void Halo3RunClearanceProbe(uint64_t nowMs, PhysicalContactVec3 center,
 
 void Halo3LogClearanceProbe()
 {
+    for (uint32_t index = 0; index < g_halo3VolumeProbeRecords.size(); ++index)
+    {
+        uint32_t ready = 2;
+        if (!g_halo3VolumeProbeStates[index].compare_exchange_strong(ready, 3, std::memory_order_acquire)) continue;
+        const auto& r = g_halo3VolumeProbeRecords[index];
+        LOG("H3 volume PROBE: index=%u ms=%llu mode=%u surfaceType=%d radiusWu=%.6f start=(%.6f %.6f %.6f) motion=(%.6f %.6f %.6f) result=(%.6f %.6f %.6f) velocity=(%.6f %.6f %.6f) interior=%d gathered=%d features=%u/%u/%u collisions=%u clearanceM=%.6f bounded=%d faulted=%d costUs=%.1f",
+            index, (unsigned long long)r.ms, r.mode, r.surfaceType, r.radius,
+            r.start.x, r.start.y, r.start.z, r.motion.x, r.motion.y, r.motion.z,
+            r.result.x, r.result.y, r.result.z, r.velocity.x, r.velocity.y, r.velocity.z,
+            r.interior, r.gathered, r.featureCounts[0], r.featureCounts[1], r.featureCounts[2],
+            r.collisions, r.clearance, r.bounded, r.faulted, r.microseconds);
+    }
     if (g_halo3FreshRegionEnabled.load() || g_halo3FreshRegionFaults.load())
         LOG("H3 fresh region EXPERIMENT status: enabled=%d queries=%llu clears=%llu frames=%llu shapeRejects=%llu faults=%llu",
             g_halo3FreshRegionEnabled.load() ? 1 : 0,

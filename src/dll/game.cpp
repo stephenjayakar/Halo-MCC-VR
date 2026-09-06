@@ -15834,6 +15834,7 @@ namespace
                     int32_t handle = -1;
                     float distanceSquared = FLT_MAX;
                     PhysicalContactVec3 surface{};
+                    PhysicalContactVec3 normal{};
                 };
                 const PhysicalContactVec3 camera{
                     g_camX.load(std::memory_order_relaxed),
@@ -15862,6 +15863,7 @@ namespace
                     candidate.handle = native.objectHandle;
                     candidate.distanceSquared = distanceSquared;
                     candidate.surface = surface;
+                    candidate.normal = {native.normal[0], native.normal[1], native.normal[2]};
                 };
 
                 if (PhysicalContactFinite(camera))
@@ -15976,6 +15978,8 @@ namespace
                     // A positive control must query the native hit surface,
                     // not the pre-fixture weapon position in open space.
                     Halo3RunClearanceProbe(nowMs, selected.surface, worldScale, unitHandle);
+                    Halo3RunVolumeProbe(nowMs, selected.surface, selected.normal, camera,
+                        selected.type, worldScale, unitHandle);
                     const PhysicalContactVec3 direction =
                         PhysicalContactNormalize(
                             selected.surface - camera,

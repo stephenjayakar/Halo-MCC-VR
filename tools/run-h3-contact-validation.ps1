@@ -39,6 +39,7 @@ param(
     [switch]$ExternalMenuControl,
     [switch]$TestHandRecovery,
     [switch]$ProbeClearance,
+    [switch]$ProbeVolume,
     [switch]$FreshRegion,
     [switch]$KeyboardGamepad,
     [switch]$SelectionProbe,
@@ -55,6 +56,7 @@ param(
 # never headset acceptance.
 
 $ErrorActionPreference = 'Stop'
+if ($ProbeVolume -and $Test -ne 'wall') { throw 'ProbeVolume requires the native-surface wall fixture.' }
 if ($TestHandRecovery -and $Test -notin @('visible-weapon-gap', 'controller-contact')) {
     throw 'TestHandRecovery requires visible-weapon-gap or controller-contact.'
 }
@@ -609,6 +611,7 @@ $debugVariables = @(
     'HALOMCCVR_H3_CONTACT_DEBUG_ROTATING'
     'HALOMCCVR_H3_CONTACT_DEBUG_NPC_SHOVE'
     'HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE',
+    'HALOMCCVR_H3_CONTACT_DEBUG_VOLUME',
     'HALOMCCVR_H3_CONTACT_FRESH_REGION'
 )
 $savedEnvironment = @{}
@@ -664,6 +667,7 @@ try {
     if ($SelectionProbe) { $env:HALOMCCVR_H3_SWORD_SELECTION_PROBE = '1' }
     if ($BladeGeometry) { $env:HALOMCCVR_H3_SWORD_BLADE_EXPERIMENT = '1' }
     if ($ProbeClearance) { $env:HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE = '1' }
+    if ($ProbeVolume) { $env:HALOMCCVR_H3_CONTACT_DEBUG_VOLUME = '1' }
     if ($FreshRegion) { $env:HALOMCCVR_H3_CONTACT_FRESH_REGION = '1' }
     if ($Test -in @('npc-shove', 'npc-geometry', 'npc-melee')) {
         $env:HALOMCCVR_H3_CONTACT_DEBUG_KIND = '0'
@@ -971,6 +975,8 @@ public static class HaloMccVrContactInput {
              $text -match 'H3 fresh region EXPERIMENT status: enabled=1 queries=[1-9][0-9]* clears=[1-9][0-9]* frames=[1-9][0-9]* shapeRejects=[0-9]+ faults=0') -and
             (-not $ProbeClearance -or
              $text -match 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0') -and
+            (-not $ProbeVolume -or
+             $text -match 'H3 volume PROBE: index=31 .*bounded=1 faulted=0') -and
             (-not $TestHandRecovery -or
              $text -match 'H3 contact hand recovery: resets=[1-9][0-9]* checks=[1-9][0-9]* ')
     } $ValidationTimeoutSeconds "Halo 3 $Test did not reach its pass condition."
@@ -999,6 +1005,10 @@ public static class HaloMccVrContactInput {
     if ($ProbeClearance -and ($text -match 'H3 clearance PROBE sample:.*(?:bounds=0|faulted=1)' -or
         $text -notmatch 'H3 clearance PROBE sample: index=31 .*bounds=1 faulted=0')) {
         throw 'Clearance probe did not complete 32 bounded, fault-free observations.'
+    }
+    if ($ProbeVolume -and ($text -match 'H3 volume PROBE:.*(?:bounded=0|faulted=1)' -or
+        $text -notmatch 'H3 volume PROBE: index=31 .*bounded=1 faulted=0')) {
+        throw 'Native volume probe did not complete 32 bounded, fault-free observations.'
     }
     if ($ProbeClearance -and $Test -eq 'wall' -and
         $text -notmatch 'H3 clearance PROBE sample:.*gathered=1.*bounds=1 faulted=0') {
@@ -1081,6 +1091,7 @@ $result = [ordered]@{
     keyboard_gamepad_requested = [bool]$KeyboardGamepad
     selection_probe_requested = [bool]$SelectionProbe
     blade_geometry_requested = [bool]$BladeGeometry
+    volume_probe_requested = [bool]$ProbeVolume
     post_pass_hold_seconds = $PostPassHoldSeconds
     fresh_region_requested = [bool]$FreshRegion
     source_commit = $runtimeSourceCommit
