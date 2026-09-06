@@ -946,6 +946,8 @@ namespace
         std::atomic<uint32_t> sequence{0};
         std::atomic<uint64_t> sampleMs{0};
         std::atomic<uint64_t> proposalSerial{0};
+        // Diagnostic provenance only; never refreshed when approval is held.
+        std::atomic<uint64_t> originMs{0};
         std::atomic<int32_t> weaponHandle{-1};
         std::atomic<uint32_t> renderTag{0xFFFFu};
         std::atomic<uint32_t> nodeCount{0};
@@ -1011,6 +1013,48 @@ namespace
         g_halo3HandRecoveryRecordStates{};
     std::array<Halo3HandRecoveryRecord, kHalo3HandRecoveryRecordCount>
         g_halo3HandRecoveryRecords{};
+    struct Halo3PoseTimingRecord
+    {
+        uint64_t ms = 0, originMs = 0;
+        uint32_t proof = 0;
+        bool corrected = false;
+        float rootGapMeters = 0;
+    };
+    // Bounded render-to-cold-logger handoff, sampled at most once per 8 ms.
+    // States: 0 free, 1 writer owns, 2 published, 3 reader owns. Drop on busy.
+    constexpr size_t kHalo3PoseTimingCapacity = 256;
+    std::array<Halo3PoseTimingRecord, kHalo3PoseTimingCapacity> g_halo3PoseTimingRecords{};
+    std::array<std::atomic<uint32_t>, kHalo3PoseTimingCapacity> g_halo3PoseTimingStates{};
+    std::atomic<uint64_t> g_halo3PoseTimingNextMs{0}, g_halo3PoseTimingSequence{0};
+    std::atomic<uint64_t> g_halo3PoseTimingDropped{0};
+
+    void Halo3RecordPoseTiming(uint64_t nowMs, uint64_t originMs,
+        uint32_t proof, bool corrected, const BoneMatrix& tracked,
+        const BoneMatrix& final, float worldScale)
+    {
+        if (!originMs || originMs > nowMs || !std::isfinite(worldScale) || worldScale <= 0)
+            return;
+        uint64_t next = g_halo3PoseTimingNextMs.load(std::memory_order_relaxed);
+        if (nowMs < next || !g_halo3PoseTimingNextMs.compare_exchange_strong(
+                next, nowMs + 8, std::memory_order_relaxed))
+            return;
+        const auto slot = g_halo3PoseTimingSequence.fetch_add(1, std::memory_order_relaxed)
+            % kHalo3PoseTimingCapacity;
+        uint32_t free = 0;
+        if (!g_halo3PoseTimingStates[slot].compare_exchange_strong(
+                free, 1, std::memory_order_acquire))
+        {
+            g_halo3PoseTimingDropped.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        const PhysicalContactVec3 delta{
+            tracked.translation[0] - final.translation[0],
+            tracked.translation[1] - final.translation[1],
+            tracked.translation[2] - final.translation[2]};
+        g_halo3PoseTimingRecords[slot] = {nowMs, originMs, proof, corrected,
+            PhysicalContactLength(delta) / worldScale};
+        g_halo3PoseTimingStates[slot].store(2, std::memory_order_release);
+    }
     struct Halo3LargeWallCorrectionRecord
     {
         uint64_t ms = 0, proposalSerial = 0, proposalMs = 0;
@@ -1309,7 +1353,8 @@ namespace
         Halo3VisibleWeaponPosePublication& published,
         const BoneMatrix* nodes, uint32_t nodeCount, uint16_t renderTag,
         int32_t weaponHandle, uint64_t proposalSerial, uint64_t sampleMs,
-        bool corrected, const PhysicalContactVec3* consumedOffset = nullptr)
+        bool corrected, const PhysicalContactVec3* consumedOffset = nullptr,
+        uint64_t originMs = 0)
     {
         if (!nodes || !nodeCount ||
             nodeCount > Halo3VisibleWeaponPosePublication::kMaximumNodes)
@@ -1317,6 +1362,7 @@ namespace
         const BoneMatrix& root = nodes[0];
         published.sequence.fetch_add(1, std::memory_order_acq_rel);
         published.sampleMs.store(sampleMs, std::memory_order_relaxed);
+        published.originMs.store(originMs ? originMs : sampleMs, std::memory_order_relaxed);
         published.proposalSerial.store(
             proposalSerial, std::memory_order_relaxed);
         published.weaponHandle.store(weaponHandle, std::memory_order_relaxed);
@@ -1350,6 +1396,7 @@ namespace
     {
         published.sequence.fetch_add(1, std::memory_order_acq_rel);
         published.sampleMs.store(0, std::memory_order_relaxed);
+        published.originMs.store(0, std::memory_order_relaxed);
         published.proposalSerial.store(0, std::memory_order_relaxed);
         published.weaponHandle.store(-1, std::memory_order_relaxed);
         published.renderTag.store(0xFFFFu, std::memory_order_relaxed);
@@ -1384,7 +1431,8 @@ namespace
         BoneMatrix* nodes = nullptr, uint32_t* nodeCount = nullptr,
         uint16_t* renderTag = nullptr, int32_t* weaponHandle = nullptr,
         uint64_t* proposalSerial = nullptr, bool* corrected = nullptr,
-        PhysicalContactVec3* consumedOffset = nullptr, bool* consumedOffsetValid = nullptr)
+        PhysicalContactVec3* consumedOffset = nullptr, bool* consumedOffsetValid = nullptr,
+        uint64_t* originMs = nullptr)
     {
         for (int attempt = 0; attempt < 2; ++attempt)
         {
@@ -1393,6 +1441,8 @@ namespace
             if (before & 1u)
                 continue;
             sampleMs = published.sampleMs.load(std::memory_order_relaxed);
+            if (originMs)
+                *originMs = published.originMs.load(std::memory_order_relaxed);
             const uint32_t count = published.nodeCount.load(
                 std::memory_order_relaxed);
             const uint32_t tag = published.renderTag.load(
@@ -5959,6 +6009,7 @@ namespace
                 float approvedBasis[9]{}, approvedPosition[3]{};
                 float approvedScale = 1.0f;
                 uint64_t approvedMs = 0;
+                uint64_t approvedOriginMs = 0;
                 uint64_t approvedSerial = 0;
                 uint32_t approvedNodeCount = 0;
                 uint16_t approvedTag = 0xFFFFu;
@@ -5969,7 +6020,7 @@ namespace
                     approvedPosition, approvedScale, approvedMs,
                     approvedNodes.data(), &approvedNodeCount, &approvedTag,
                     &approvedWeaponHandle, &approvedSerial,
-                    &approvedCorrected);
+                    &approvedCorrected, nullptr, nullptr, &approvedOriginMs);
                 const uint32_t contactGeneration =
                     g_halo3RuntimeGeneration.load(std::memory_order_acquire);
                 if (kEnableHalo3LegacyRecoveryContactPause &&
@@ -6037,6 +6088,7 @@ namespace
                 float previousBasis[9]{}, previousPosition[3]{};
                 float previousScale = 1.0f;
                 uint64_t previousMs = 0;
+                uint64_t previousOriginMs = 0;
                 uint64_t previousSerial = 0;
                 uint32_t previousNodeCount = 0;
                 uint16_t previousTag = 0xFFFFu;
@@ -6047,7 +6099,7 @@ namespace
                     previousPosition, previousScale, previousMs,
                     previousNodes.data(), &previousNodeCount, &previousTag,
                     &previousWeaponHandle, &previousSerial,
-                    &previousCorrected);
+                    &previousCorrected, nullptr, nullptr, &previousOriginMs);
                 const bool compatiblePrevious =
                     guardActive && havePrevious &&
                     PhysicalContactSampleAfterHandRecovery(previousMs,
@@ -6082,6 +6134,7 @@ namespace
                     return true;
                 };
                 uint64_t displayedSerial = proposalSerial;
+                uint64_t displayedOriginMs = nowMs;
                 bool displayedCorrected = false;
                 // 0 = outside the contact guard, 1 = worker-approved,
                 // 2 = last same-weapon palette, 3 = raw unproved proposal,
@@ -6158,6 +6211,7 @@ namespace
                         }
                     }
                     displayedSerial = approvedSerial;
+                    displayedOriginMs = approvedOriginMs;
                     displayedCorrected = approvedCorrected;
                     g_halo3ContactHeldPalettes.fetch_add(
                         1, std::memory_order_relaxed);
@@ -6167,6 +6221,7 @@ namespace
                 {
                     restorePreviousWeapon();
                     displayedSerial = previousSerial;
+                    displayedOriginMs = previousOriginMs;
                     displayedCorrected = previousCorrected;
                     g_halo3ContactHeldPalettes.fetch_add(
                         1, std::memory_order_relaxed);
@@ -6241,6 +6296,7 @@ namespace
                     if (restorePreviousWeapon())
                     {
                         displayedSerial = previousSerial;
+                        displayedOriginMs = previousOriginMs;
                         displayedCorrected = previousCorrected;
                         renderProof = 2;
                         g_halo3ContactHeldPalettes.fetch_add(
@@ -6329,6 +6385,7 @@ namespace
                     memcpy(destination, trackedNodes.data(),
                            static_cast<size_t>(renderNodeCount) * sizeof(BoneMatrix));
                     displayedSerial = proposalSerial;
+                    displayedOriginMs = nowMs;
                     displayedCorrected = false;
                     renderProof = 3;
                 }
@@ -6351,12 +6408,16 @@ namespace
                     g_halo3VisibleWeaponPose, destination,
                     static_cast<uint32_t>(renderNodeCount), tag,
                     activeWeaponHandle, displayedSerial, nowMs,
-                    displayedCorrected);
+                    displayedCorrected, nullptr, displayedOriginMs);
                 Halo3PublishWeaponPose(
                     g_halo3LastDrawnWeaponPose, destination,
                     static_cast<uint32_t>(renderNodeCount), tag,
                     activeWeaponHandle, displayedSerial, nowMs,
-                    displayedCorrected);
+                    displayedCorrected, nullptr, displayedOriginMs);
+                if (guardActive && haveTrackedNodes)
+                    Halo3RecordPoseTiming(nowMs, displayedOriginMs, renderProof,
+                        displayedCorrected, trackedNodes[0], destination[0],
+                        g_worldScale.load(std::memory_order_relaxed));
                 Halo3PublishDirectWeaponAimFromVisiblePalette(
                     tag, destination,
                     static_cast<uint32_t>(renderNodeCount),
@@ -16531,7 +16592,8 @@ namespace
                     g_halo3ApprovedWeaponPose, approvedNodes.data(),
                     visibleNodeCount, proposalRenderTag, weaponHandle,
                     proposalSerial, nowMs,
-                    PhysicalContactLengthSquared(approvedOffset) > 1.0e-10f);
+                    PhysicalContactLengthSquared(approvedOffset) > 1.0e-10f,
+                    nullptr, palettePoseMs);
                 if (g_halo3FreshRegionEnabled.load(std::memory_order_acquire))
                 {
                     const float bound = std::max(
@@ -18757,6 +18819,50 @@ namespace
         }
     }
 
+    void Halo3LogPoseTiming()
+    {
+        struct Bucket
+        {
+            std::array<uint64_t, kHalo3PoseTimingCapacity> ages{};
+            size_t count = 0;
+            uint64_t firstMs = UINT64_MAX, lastMs = 0;
+            float peakGapMeters = 0;
+        };
+        // Fixed scratch on the cold logger: proof 0..4, each corrected/not.
+        std::array<Bucket, 10> buckets{};
+        for (size_t slot = 0; slot < kHalo3PoseTimingCapacity; ++slot)
+        {
+            uint32_t ready = 2;
+            if (!g_halo3PoseTimingStates[slot].compare_exchange_strong(
+                    ready, 3, std::memory_order_acquire))
+                continue;
+            const auto r = g_halo3PoseTimingRecords[slot];
+            g_halo3PoseTimingStates[slot].store(0, std::memory_order_release);
+            if (r.proof > 4 || !r.originMs || r.ms < r.originMs ||
+                !std::isfinite(r.rootGapMeters))
+                continue;
+            auto& bucket = buckets[r.proof * 2 + (r.corrected ? 1 : 0)];
+            bucket.ages[bucket.count++] = r.ms - r.originMs;
+            bucket.firstMs = std::min(bucket.firstMs, r.ms);
+            bucket.lastMs = std::max(bucket.lastMs, r.ms);
+            bucket.peakGapMeters = std::max(bucket.peakGapMeters, r.rootGapMeters);
+        }
+        for (size_t index = 0; index < buckets.size(); ++index)
+        {
+            auto& b = buckets[index];
+            if (!b.count)
+                continue;
+            std::sort(b.ages.begin(), b.ages.begin() + b.count);
+            LOG("H3 contact pose timing: proof=%u corrected=%u samples=%u ms=[%llu %llu] originAgeMs[p50=%llu p95=%llu max=%llu] peakRootGap=%.4fm droppedTotal=%llu [paired render samples; proposal age, not motion-to-photon]",
+                (unsigned)(index / 2), (unsigned)(index % 2), (unsigned)b.count,
+                (unsigned long long)b.firstMs, (unsigned long long)b.lastMs,
+                (unsigned long long)b.ages[(b.count * 50 + 99) / 100 - 1],
+                (unsigned long long)b.ages[(b.count * 95 + 99) / 100 - 1],
+                (unsigned long long)b.ages[b.count - 1], b.peakGapMeters,
+                (unsigned long long)g_halo3PoseTimingDropped.load(std::memory_order_relaxed));
+        }
+    }
+
     void LogHalo3PhysicalContactStatus()
     {
         static uint64_t nextLogMs = 0;
@@ -18772,6 +18878,7 @@ namespace
         VR_LogNullControllerPathStatus();
         Halo3LogSelectionProbe();
         Halo3LogContactReplays();
+        Halo3LogPoseTiming();
         if (VR_UsesFixedControllerDebugPose())
         {
             float basis[9]{}, position[3]{}, scale = 0;

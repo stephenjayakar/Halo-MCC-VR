@@ -588,3 +588,15 @@ and an approach beside the wall, not a demonstrated nudge or a measured tracking
 delay. It remains a diagnostic, not a functionality demo. The harness closed
 MCC/SteamVR and restored the exact preceding settings hash `298D6E80...C4D44`
 (full hash above), independently rechecked. Normal headset mode is restored.
+
+The next diagnostic preserves a separate original-proposal timestamp through
+approval publication, approval refresh, cached rendering and final publication.
+It does not change approval expiry, collision decisions or pose selection.
+Every final guarded draw with reconstructed tracking can publish a bounded
+timing record (at most once per 8 ms). The cold logger drains 256 owned slots,
+reports dropped records, and groups proposal-age percentiles and peak paired
+root separation by render proof and correction state. Raw/recovery/fresh-region
+draws have the current proposal origin; cached poses retain the original origin.
+This measures the contact pipeline's pose age, not controller sensor latency
+or motion-to-photon latency. Corrected-pose separation includes intentional
+contact displacement. Runtime measurements are still pending at this commit.
