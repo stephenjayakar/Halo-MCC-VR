@@ -1185,3 +1185,48 @@ Counters distinguish reuse from compatible-node geometry rejection. Worker
 timing measures incoming cover construction and compatibility/containment
 checks separately from native gathering. Render hooks gain no geometry copies,
 native queries or new loops. World and blade experiments remain opt-in.
+
+#### 83cac52 Guardian contact and repeat-approach failure
+
+Source `83cac52e5309ab59b87c7aa14c8e1691ee80bb4c`, package
+`out/candidates/83cac52-h3-physical-contact-20260906-104427104Z`, installed DLL
+`A803C95C616CBB2C0944C83FCD0402C98948B5CF285DE9A3F58667B2A941E857`.
+Release and both CTests passed. All three runs below used Steam / SteamVR null /
+Null Model Number, Guardian Forge requested, WorldPartitions and mesh audit,
+without BladeGeometry. These are not headset acceptance.
+
+- `20260906-104448687Z-controller-contact-result.json`: timed out without
+  establishing positive contact. Navigation stopped short of the intended wall.
+  Log SHA `71C5C158BE36984BB218A9EAD0E009F5BDB58403F48ACCE183E8CE11C0ADC8BF`.
+  Cover checks averaged 5.1 us, maximum 58.6 us; no geometry-change rejection.
+- `20260906-105152810Z-controller-contact-result.json`: external menu timeout,
+  no Halo 3 gameplay. Log SHA
+  `AF4C592315DD77A3B9E6D14A95E74FC72EE7EB088C785D0C9023C4B53A375238`.
+- `20260906-105809015Z-controller-contact-result.json`: passed the harness's
+  cumulative paired-mesh criterion and 60-second hold, but **failed the actual
+  repeat-approach visibility check**. Log SHA
+  `72BE97A32C8078B617310CC85C2536EC35D48756FEA1037360B1EC4B16E80344`.
+  D 600 ms then W 1200 ms approached the support between the overshield room's
+  doorways. Visible AR samples had 21 requested interior points / 52 directed
+  edge crossings, versus zero of each after correction, at about 18.5 cm gap.
+  Controller Z -0.48 and S 500 ms visibly released the gun. W 500 ms then Z
+  -0.65 made it disappear. The inspected recontact screenshot is
+  `20260906-110134154Z-guardian-cover-retry-recontact/0000-110134379Z.jpg`.
+  By the last preserved counters (04:01:40), region misses rose from 2 to 5,744,
+  admitted solves stopped at 28,865, and hide decisions reached 5,953. Capacity,
+  invalid regions, plan failures, invalid casts, native faults and query-budget
+  exhaustion stayed zero. This contradicts an overall pass despite the harness
+  returning true: its positive mesh observations are retained cumulatively.
+
+Actual 35-second recording:
+`out/demos/20260906-110052-guardian-native-cover-contact-release/raw.mp4`, SHA
+`00BFF0F247E8C90883A301914EF32903B7B0814633DB2E3A5708F12331F227BE`.
+It records the first contact, pull-away and failed recontact, not a polished
+demo. It proves no prop/NPC interaction, sword behavior or headset latency.
+
+Normal SteamVR settings restored and independently verified at SHA
+`298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`;
+MCC and SteamVR closed. Campaign checkpoint bytes remained original in the
+read-only check before the third Forge run. Accepted pointer unchanged.
+The failed partition behavior is disabled in its own commit before repair;
+the incoming-geometry containment code is retained.

@@ -77,7 +77,7 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     const bool worldFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_VOLUME", value, 2) == 1 && value[0] == L'1';
     // Re-enabled only as an opt-in candidate with cache-pinned clock sampling.
-    constexpr bool kEnableHalo3WorldPartitionsExperiment = true;
+    constexpr bool kEnableHalo3WorldPartitionsExperiment = false;
     const bool partitionsFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS", value, 2) == 1 && value[0] == L'1';
     const bool partitions = kEnableHalo3WorldPartitionsExperiment && partitionsFlag;
