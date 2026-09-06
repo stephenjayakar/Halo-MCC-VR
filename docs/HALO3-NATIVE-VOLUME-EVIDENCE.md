@@ -1649,3 +1649,28 @@ base gates and truly expired samples still reset immediately. A bounded atomic
 counter records future samples skipped, with cold world diagnostic output.
 This does not fix cover-replacement seed loss or authorize stale geometry.
 The failed partition experiment remains disabled for this separate candidate.
+
+65bf5c5 build/install: source `65bf5c5bc6b657dab7e3c5246cf1ebecaf789fa6`,
+package `out/candidates/65bf5c5-h3-physical-contact-20260906-123155495Z`.
+Release and both CTests passed; installed Steam DLL independently verified at
+`BA1C54BE56FFFE5D455CBECA4A4338F08033E254B237A8AB58A689041319B3DC`.
+Launcher/config unchanged; other Steam/Store roots absent. Backup:
+`out/deploy-backups/2237019-steam-before-65bf5c5-20260906-123156495Z`.
+No game session has used this package yet. The partition experiment is disabled,
+so this is not a world-collision headset-test candidate or accepted build.
+
+Final read-only profile comparison independently decoded the current and
+pre-run preserved AceSettings JSON: semantic values match exactly. Current
+wrapper SHA `FA6FFC8D4AD3FD6395FCADEEFA96F8B75C4F8F3638FF3D10F26FE24174804B49`.
+Evidence: `out/test-runs/20260906-resume-cache-check/expanded-seed-profile-comparison.json`.
+The existing differences from the much earlier original completion-record
+snapshot were preserved, not overwritten. No Campaign save restoration.
+
+Next recovery candidate should independently test a same-weapon historical
+safe transform against the incoming full cover/current native world before
+using it as a new seed across shape/reset changes. Never inherit its old
+approval unchecked. The existing raw-seed test, visual leash and complete
+swept-region coverage must remain. This is a proposed next action, not implemented
+behavior or evidence of a solved recovery path. Goal and accepted pointer remain
+unchanged; Forge/Campaign, sword, props/NPCs and headset performance acceptance
+are still required.
