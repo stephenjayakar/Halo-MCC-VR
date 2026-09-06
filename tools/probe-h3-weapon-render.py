@@ -78,6 +78,7 @@ def main():
             if not 1 <= nodes <= 64 or not node_address:
                 continue
             entries.append({"slot": i, "render_tag": render, "object_handle": object_handle,
+                            "render_definition_prefix_u32": struct.unpack("<14I", definition),
                             "metadata": metadata, "node_count": nodes,
                             "live_nodes": [struct.unpack_from("<13f", entry, 12+n*52) for n in range(nodes)],
                             "inverse_binds": [struct.unpack("<13f", read(tag_base+node_address*4+n*96+40, 52)) for n in range(nodes)]})

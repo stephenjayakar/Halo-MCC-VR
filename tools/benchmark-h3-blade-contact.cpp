@@ -7,6 +7,7 @@
 #include <vector>
 #include "../src/common/physical_contact_logic.h"
 #include "h3-blade-mesh-prototype.h"
+#include "../src/common/halo3_sword_contact_logic.h"
 
 int main(int argc, char** argv)
 {
@@ -157,6 +158,20 @@ int main(int argc, char** argv)
         }
     }
     std::sort(micros.begin(), micros.end());
+    static PhysicalContactCompoundShape bladeCompound{};
+    static PhysicalContactTriangleMesh bladeMesh{};
+    std::vector<double> constructionMicros;
+    for (unsigned i = 0; i < 1100; ++i)
+    {
+        bladeCompound.childCount = bladeMesh.triangleCount = bladeMesh.groupCount = 0;
+        const auto start = std::chrono::steady_clock::now();
+        if (!Halo3AppendSwordBladeGeometry(inverseBind,movingBlade,movingRoot,
+                bladeCompound,&bladeMesh)) return 8;
+        const auto end = std::chrono::steady_clock::now();
+        if (i >= 100) constructionMicros.push_back(
+            std::chrono::duration<double,std::micro>(end-start).count());
+    }
+    std::sort(constructionMicros.begin(),constructionMicros.end());
     std::cout << "{\"triangles\":" << count << ",\"centroid_contacts\":" << centroidHits
               << ",\"gap_contact\":" << (gapHit ? "true" : "false")
               << ",\"transformed_contacts\":" << transformedHits
@@ -169,7 +184,10 @@ int main(int argc, char** argv)
               << ",\"animated_node_gap_contact\":" << (animatedGap ? "true" : "false")
               << ",\"sweep_contacts\":" << sweepHits << ",\"sweep_samples\":500"
               << ",\"sweep_p95_us\":" << micros[474]
-              << ",\"sweep_max_us\":" << micros.back() << "}\n";
+              << ",\"sweep_max_us\":" << micros.back()
+              << ",\"blade_children\":" << bladeCompound.childCount
+              << ",\"construction_samples\":1000,\"construction_p95_us\":" << constructionMicros[949]
+              << ",\"construction_max_us\":" << constructionMicros.back() << "}\n";
     return centroidHits == count && !gapHit && sweepHits == 500 &&
         transformedHits == transformedSamples && !transformedGapHits &&
         rotationHits == rotationSamples && !rotationEndpointHits &&

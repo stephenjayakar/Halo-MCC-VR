@@ -30,6 +30,7 @@
 #include "sigscan.h"
 #include "odst_vehicle_logic.h"
 #include "physical_contact_logic.h"
+#include "halo3_sword_contact_logic.h"
 #include "fixtures/h3_solid_overlap_replay.h"
 #include "null_controller_path.h"
 #include "reach_adapter.h"
@@ -276,7 +277,76 @@ static void TestHandRecoveryRetreatPolicy()
         "nonfinite correction provenance retains conservative retreat");
 }
 
-int main()
+__declspec(noinline) static void TestHalo3SwordGeometry()
+{
+    auto compound = std::make_unique<PhysicalContactCompoundShape>();
+    auto mesh = std::make_unique<PhysicalContactTriangleMesh>();
+    auto target = std::make_unique<PhysicalContactCompoundShape>();
+    target->childCount = 1;
+    target->children[0].vertexCount = 1;
+    PhysicalContactTransform identity{}, inverse{};
+    inverse.position.x = -.11773931980133057f;
+    unsigned centroidHits = 0, hullHits = 0, samples = 0, gapHits = 0;
+    for (float scale : {.5f, 1.f, 1.5f})
+    for (float angle : {-.7f, .3f, 1.2f})
+    {
+        *compound = {}; *mesh = {};
+        compound->childCount = 1;
+        compound->children[0].vertexCount = 1;
+        compound->children[0].vertices[0] = {-3.f,0,0};
+        compound->children[0].radius = .01f;
+        const auto originalHandle = compound->children[0];
+        PhysicalContactTransform root{};
+        root.position = {13.25f,-4.5f,2.75f}; root.scale = scale;
+        root.forward = {std::cos(angle),0,std::sin(angle)};
+        root.up = {-std::sin(angle),0,std::cos(angle)};
+        auto blade = root;
+        blade.forward = {std::cos(angle+.5f),0,std::sin(angle+.5f)};
+        blade.up = {-std::sin(angle+.5f),0,std::cos(angle+.5f)};
+        blade.position = PhysicalContactTransformPoint(root,{.11773931980133057f,0,0});
+        Check(Halo3AppendSwordBladeGeometry(inverse,blade,root,*compound,mesh.get()),
+            "authored sword prongs append under independent node animation");
+        Check(compound->childCount == 3 && mesh->triangleCount == 244 && mesh->groupCount == 2,
+            "sword prongs fit existing held-weapon limits without enclosing the gap");
+        Check(!std::memcmp(&originalHandle,&compound->children[0],sizeof(originalHandle)),
+            "blade append preserves existing handle geometry");
+        Check(PhysicalContactCompoundValid(*compound) && PhysicalContactTriangleMeshValid(*mesh),
+            "sword compound and exact mesh pass native geometry bounds");
+        target->children[0].radius = .003f*scale;
+        for (const auto& face : kHalo3SwordBladeFaces)
+        {
+            const auto centre = (kHalo3SwordBladePoints[face[0]]+kHalo3SwordBladePoints[face[1]]+
+                kHalo3SwordBladePoints[face[2]])*(1.f/3.f);
+            auto probe = identity;
+            probe.position = PhysicalContactTransformPoint(blade,PhysicalContactTransformPoint(inverse,centre));
+            centroidHits += PhysicalContactTriangleMeshCompoundIntersect(*mesh,root,*target,probe,0).hit;
+            hullHits += PhysicalContactCompoundsIntersect(*compound,root,*target,probe);
+            ++samples;
+        }
+        auto gap = identity;
+        gap.position = PhysicalContactTransformPoint(blade,PhysicalContactTransformPoint(inverse,{.25f,0,0}));
+        gapHits += PhysicalContactCompoundsIntersect(*compound,root,*target,gap);
+        gapHits += PhysicalContactTriangleMeshCompoundIntersect(*mesh,root,*target,gap,0).hit;
+        const auto oldChildren = compound->childCount, oldFaces = mesh->triangleCount, oldGroups = mesh->groupCount;
+        Check(!Halo3AppendSwordBladeGeometry(inverse,blade,root,*compound,mesh.get()),
+            "duplicate blade append cannot exceed four held children");
+        Check(compound->childCount == oldChildren && mesh->triangleCount == oldFaces && mesh->groupCount == oldGroups,
+            "capacity rejection preserves previously valid sword geometry");
+    }
+    Check(centroidHits == samples && hullHits == samples && samples == 2196,
+        "every authored blade triangle contacts across nine animated scale/rotation cases");
+    Check(gapHits == 0,"both exact and conservative sword geometry leave the animated prong gap clear");
+    *compound = {}; *mesh = {};
+    auto invalid = identity; invalid.forward = {};
+    Check(!Halo3AppendSwordBladeGeometry(inverse,identity,invalid,*compound,mesh.get()) &&
+        compound->childCount == 0 && mesh->triangleCount == 0,
+        "degenerate root basis cannot publish sword geometry");
+    invalid = identity; invalid.position.x = std::numeric_limits<float>::quiet_NaN();
+    Check(!Halo3AppendSwordBladeGeometry(inverse,invalid,identity,*compound,mesh.get()),
+        "nonfinite animation cannot publish sword geometry");
+}
+
+__declspec(noinline) static int RunCoreTests()
 {
     TestNullControllerPath();
     TestRecordedSolidOverlap();
@@ -11408,4 +11478,12 @@ int main()
     if (g_failures == 0)
         std::cout << "HaloMCCVR core tests passed\n";
     return g_failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+int main()
+{
+    // The legacy suite's compiler-sized frame is already near Windows' stack
+    // reserve. Exercise the mesh kernel before entering that separate frame.
+    TestHalo3SwordGeometry();
+    return RunCoreTests();
 }

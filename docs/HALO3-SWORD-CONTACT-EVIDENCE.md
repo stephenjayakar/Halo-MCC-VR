@@ -593,3 +593,58 @@ restored `steamvr.vrsettings` is
 The diagnostic is absent from normal launches unless its environment flag is
 explicitly enabled. The installed build still uses handle-only sword contact;
 no new physical-interaction showcase or headset acceptance is claimed.
+
+## Blade geometry implementation and official identity census
+
+`src/common/halo3_sword_contact_logic.h` now implements a bounded append of two
+63-position prong hulls and the complete 244-triangle blade mesh. The existing
+handle remains intact. Geometry follows the verified inverse bind and actual
+animated blade matrix into the supplied root frame. Finite, orthonormal,
+capacity and output-geometry checks reject malformed inputs; valid counts are
+published only after both prongs succeed. This is not yet called by the DLL.
+
+`tools/generate-h3-sword-geometry.py` creates the indexed data header from the
+pinned audited fixture (SHA-256
+`E680FA2D554B27670D8549B1A04D88B9B3BE5DA67F80483CF2DA838364C08302`).
+It verifies the source hash, all 244 triangles, finite coordinates, the lack of
+cross-gap triangles, and exactly 63 distinct positions per side. The duplicated
+render vertices become 126 geometry positions without changing face order
+within each prong or triangle winding.
+
+The Release core suite checks all 2,196 centroid contacts across nine independently
+animated scale/rotation cases with both the exact mesh and conservative hulls;
+all pass. Both representations keep the tested center gap clear. Handle
+preservation, capacity rejection, degenerate root and nonfinite animation checks
+also pass. The first test invocation hit Windows stack overflow (0xC00000FD):
+the existing monolithic test frame was near the stack reserve. `main` now runs
+the sword test before entering the separate noinline legacy suite, avoiding
+overlapping those frames. No runtime stack setting changed. The passing core
+test executable SHA-256 is
+`CF3C1F608F7CC4F2AA35A41FD9BCC967AB4319A7235D57F901B48AA9C9A28114`;
+log: `out/test-runs/20260905-sword-geometry/core-tests.log`.
+
+The extended standalone benchmark retains the prior 244 centroid / 2,196
+transformed / nine rotational / 500 sweep checks. In 1,000 measured constructions
+after 100 warm-ups, prong/triangle construction p95 was 11.7 us, max 14.8 us.
+The one-sphere translation-sweep p95 was 20.8 us. These are isolated kernel
+costs, not a render-time or headset performance result. Output:
+`out/research/20260905-sword-contact/production-geometry-benchmark.json`.
+
+The current official kit is installed at
+`C:\Program Files (x86)\Steam\steamapps\common\H3EK`; older N: documentation is
+stale on this machine. `tool.exe` SHA-256:
+`1DCF51EC39BDF61B6A6AE40917908CF23A247BFEDB7A4BFF07124F508EE0F3B5`.
+The installed `H3EK.7z` contains 26 first-person weapon render models. Its 24
+previously missing render tags were extracted without overwriting existing tags,
+then all 26 were exported with the official tool. Absolute input paths are
+required: a relative path printed an error but exited zero, so output existence
+was checked separately. Exports and hashes are in `render-census/` and
+`fp-render-census.json` under the sword research directory.
+
+Exactly one of those 26 models has two regions and two nodes: `fp_energy_blade`.
+Its runtime import checksum, 470289425, is also unique in that set. The sword
+export is byte-identical to the original audited XML. This census supports a
+stock-weapon structural identity check; it is not a promise about arbitrary
+custom models. The read-only live probe now preserves the render definition's
+first fourteen u32 values so the corresponding retail header can be checked
+before relying on a checksum field offset.
