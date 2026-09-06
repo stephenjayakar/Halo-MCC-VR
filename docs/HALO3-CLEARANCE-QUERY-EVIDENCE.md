@@ -427,3 +427,23 @@ exclusions and intermediate capacity coverage remain limitations. The option
 must not become a default merely because a free-space admission test passes.
 The harness -FreshRegion option runs only the normal controller-contact path
 and requires actual queries, clear regions, rendered fresh frames and no fault.
+
+Candidate 959f81bef47ade495fc38c5fc47fe66a8544d300 built and passed tests.
+Package out/candidates/959f81b-h3-physical-contact-20260906-004436814Z;
+installed DLL 3F978E13F3732494A63DDB1CB97A7CB11A4AF67D044347B7F130388E6412FA4F.
+Opt-in run 20260906-004458814Z-controller-contact passed on Steam/SteamVR null.
+The rendered fresh-frame counter reached 8,184 during the scripted movement,
+then stopped when queries ceased returning clear. Zero hand resets and zero
+query faults were recorded. Video is in
+out/demos/20260906-004703-forge-fresh-region-movement/raw.mp4; eight evenly
+spaced frames were reviewed. This was not an identical-spawn A/B comparison,
+nor a direct wall/prop validation. Log SHA-256:
+143325756D4F9E99F4314742741AF8D79E94C47263C12E699ACDFA37B5B7AEB8.
+
+Review found the fresh-render selection did not require haveTrackedNodes or
+the current proposal's consumed-offset provenance. An old compatible approval
+does not establish that the current raw palette came from tracked-hand
+reconstruction. Disable the opt-in experiment before correcting this admission
+hole. The run's 62 missing-pose observations do not say which render disposition
+was used, so no observed video motion is attributed to that hole without more
+evidence. Normal launches already leave this experiment disabled.

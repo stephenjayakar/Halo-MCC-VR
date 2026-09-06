@@ -38,7 +38,8 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     wchar_t value[2]{};
     const bool probeRequested = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_DEBUG_CLEARANCE", value, 2) == 1 && value[0] == L'1';
-    const bool freshRequested = GetEnvironmentVariableW(
+    constexpr bool kEnableHalo3FreshRegionExperiment = false;
+    const bool freshRequested = kEnableHalo3FreshRegionExperiment && GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_FRESH_REGION", value, 2) == 1 && value[0] == L'1';
     if (!probeRequested && !freshRequested)
         return;
