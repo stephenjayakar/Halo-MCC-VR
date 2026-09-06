@@ -2022,3 +2022,75 @@ The blade remains contingent on exact tag/weapon/native selection pairing and
 freshness. The runtime replay test exercises visible -> hidden -> visible,
 retained full-size blade geometry, and rejection of a changed hidden matrix.
 Native bindings, collision feature math and visible leash stay unchanged.
+
+### 2026-09-06 13:50Z final-draw pairing: Guardian sword PASS, limited scope
+
+Runtime0bb5f1232d8721ec0b474d13e1c62837875426e2, package
+out/candidates/0bb5f12-h3-physical-contact-20260906-134950468Z;
+DLL8AF75D573AA3F47EC3D6398D51A250044E5EBA6EC8ABFD852AB6B520C699F8B7,
+launcherD489C5763E21FC339999DC734CED09A2068AAC6C035EA8B7BF4339B6810FA450.
+Release build and both CTests pass; sword runtime replay131 checks0 failures.
+All present editions installed: E:Steam only; N:Steam and N:Store absent.
+Backup out/deploy-backups/8b80f85-steam-before-0bb5f12-20260906-134951338Z.
+
+Steam / SteamVR null / Null Model Number,13:50:14.232-13:59:25.562Z.
+Result out/debug-openxr/20260906-135008475Z-controller-contact-result.json;
+preserved log3E60F7F09E3C724233C72030A426937E28E458C3A266B9F5A74A3440BFD80662.
+Started in the corridor toward the upper blue fixture room. First sword spawn
+was not picked up; those setup movements prove no blade contact. Spawned a
+second sword in the upper room, picked it up after W1300/W600/W250 and E1500,
+then faced its flat paneled wall next to the overshield doorway.
+
+Controller X.18/Y-.18: Z-1.05 at13:55:47.468Z gave shallow correction;
+Z-1.23 at13:56:01.382Z produced visible positive pairs. Audit73 raw/submitted
+inside8/0,crossings32/0,gap0.28769m; sustained visible pairs followed. At
+13:56:45.481Z extended to Z-1.5, then withdrew to Z-.65 at13:56:48.081Z.
+Hidden audit90 retained256/256 triangles, active sword1, inside8/0,cross32/0,
+gap0.38656m; audit91 likewise retained full blades. Unlike2d04ac7, hiding did
+not switch to12 handle-only triangles. Visible recovery was checked in the
+13:57:05.236Z capture. Recontact Z-1.2 at13:57:07.595Z resumed visible pairs
+(e.g. audit107 raw8/0,cross32/0,gap0.23378m). A second deep cycle at
+13:57:56.868Z added W100, then S200 and Z-.65 at13:58:00.503Z. Subsequent
+visible audits were full256/256,raw/submitted0/0 with near-zero correction;
+13:58:20.728Z capture confirms visible sword. These are actual accepted
+controller commands and normal keyboard movement, not teleport/memory writes.
+
+Harness pass including the full180s follow-up hold to13:59:07Z.147 audits,
+36 positive visible pairs, maximum positive gap0.29726m. No detected visible
+submitted mesh intersections/native faults. Final preserved caches21649,
+seeds4,frames127714,blocks19633,holds2140,hidden2157,missingSeed0. Historical
+seed revalidation13/13 clear; no rejected recovery snapshot was generated.
+Sword observations118712,paired118690,appends13332,stale1,rejected0,active1.
+One early/final ownership loss at13:57:05 was a reset identity change during
+clear withdrawal, gap0.00012m (reason8/4, reset reason33); not a penetration.
+308 region misses during the second deeper movement held previous clearance
+and recovered;54 query-budget exhaustion events occurred in the first retreat.
+Do not erase these concerns because the cumulative harness passed. No cache
+capacity/invalid/plan/cast faults. Mean render solver5.8us,max2834.4us;
+cover6.6us/max2195.1us,gather85.5us/max2546us; mesh auditmax9530.8us.
+These diagnostic null timings include audit work and are not headset latency.
+
+Actual50s recording:
+out/demos/20260906-135622-guardian-sword-full-blade-recovery/raw.mp4,
+SHA4DBE8ED9290006A65944E97FFF02D1F4343275C8CD8669EB7B614FE65A04CBA4.
+Trimmed seconds18-50 without synthetic imagery to sword-contact-and-withdrawal.mp4
+in the same folder, SHA92C0B49B905F47F79A6A459927FD2BAA3B3CA9BF03D3EBDE5629F842A72D0946.
+Contact and withdrawn frames were inspected. It demonstrates this limited
+sword contact/recovery; displaced electrical effects remain visible and are
+not fixed. It is not a props/NPC/melee/Floodgate/full-surface showcase.
+
+MCC/SteamVR are closed. Independently verified installed DLL above, config
+C570089F47A17AE8645310C02688CA1454E1A02C9239BC24C5CC316E4DA94946 and
+normal SteamVR298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44
+(null false, forcedDriver empty, requireHmd true). Three original Campaign
+checkpoints and all four Steam metadata records match. AceSettings wrapper
+changed but decoded content equals the preserved pre-run profile exactly;
+current SHA A1F17DE454DFC8A9CFCBCFA9670BEB57455177D31F77FB354DDB48CC972ADF5B,
+comparison out/research/20260906-native-volume/blade-pairing-profile-comparison.json.
+No save restoration needed. No old-demo cleanup attempted this turn.
+
+Accepted pointer unchanged. World partitions and blades still require their
+existing explicit launch opt-ins; ordinary headset launches do not silently
+enable this experiment. Pending: original angled-pillar repeat, Floodgate rocks,
+prop/NPC/AR regressions with this path, visual effects alignment, region-miss
+recovery and ordinary headset tracking. This is progress, not full readiness.

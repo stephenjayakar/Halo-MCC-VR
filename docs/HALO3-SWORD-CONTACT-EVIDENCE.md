@@ -819,3 +819,19 @@ for ordinary launches. Installed source/DLL and config are unchanged. User
 asked to test the installed build; leave the game free for that test. The
 accepted pointer remains unchanged. Blade-only contact, props, gentle NPC
 shove versus melee, Campaign, lag and full functionality videos remain open.
+
+## 2026-09-06 final hidden draw pairing repair
+
+Runtime0bb5f1232d8721ec0b474d13e1c62837875426e2 fixes a concrete feedback defect:
+selection previously compared native post-hide matrices with pre-hide physical
+matrices. Hiding therefore removed the live blade and let the world solver
+seed the handle alone. Selection now compares a separate exact submitted-draw
+publication; physical geometry stays unscaled. The runtime replay adds hidden
+pairing and full-size blade retention cases (131 checks,0 failures).
+
+Guardian null run20260906-135008475Z passed36 visible native mesh pairs and a
+180s hold, including hidden full256-triangle blades, withdrawal and recontact.
+Full identity, failure comparison, measurements, recording and limitations are
+in docs/HALO3-NATIVE-VOLUME-EVIDENCE.md under the13:50Z final-draw pairing result.
+The electrical effects remain offset at constrained poses. This is not a
+headset acceptance or permission to advance docs/CURRENT-STATE.md.
