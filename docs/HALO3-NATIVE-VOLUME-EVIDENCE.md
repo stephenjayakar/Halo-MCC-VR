@@ -246,3 +246,62 @@ in addition to the original 32 bounded native sphere observations. A seeded
 query failure fails the run. These conditions do not prove universal scene
 coverage or performance; rotation results, costs and skipped seeds still need
 inspection. This remains an opt-in probe without production pose changes.
+
+### Retail whole-cover result
+
+Source `068d808a886a6d0378a1f2a4e871704f7aabecec`, package
+`out/candidates/068d808-h3-physical-contact-20260906-073340007Z`.
+Installed DLL SHA-256 independently rechecked:
+`4EB9241331E742A685E11F5C81CA81355008D6700C95B73986A9DB0F83D63064`.
+Launcher SHA remains `D489C5763E21FC339999DC734CED09A2068AAC6C035EA8B7BF4339B6810FA450`.
+Release, both CTest suites and packaging checks passed. E: Steam installed;
+alternate Steam and Store roots absent. Existing config unchanged.
+
+First attempt `out/debug-openxr/20260906-073357821Z-wall-result.json` failed
+during MCC menu startup. Log SHA
+`FAC039C3F8F4FE3C27A82DF023C14C9FB63F7FC21EF13C3621ABD50BC4623303`.
+The captured dialog says Fatal error. The minidump has execute-access violation
+at address zero with `chrome_elf.dll+247CB` at the fault thread's stack top;
+`halo3.dll` is absent from its loaded modules. No volume binding or probe ran.
+The dump is preserved under
+`out/research/20260906-native-volume/startup-chrome-elf.dmp`. This identifies the
+observed null-call site, not the root cause of that MCC startup failure. The
+prior preserved deployment log reached its native probe; this attempt did not.
+The harness closed MCC and restored VR settings before a same-artifact retry.
+
+Retry `out/debug-openxr/20260906-073809913Z-wall-result.json` passed. Log SHA:
+`13CA2EC6398902474D62F8BFB157CC58478E0A42B7E51FE978D8659EA2F58689`.
+Steam / SteamVR OpenXR 2.17.8 null / Null Model Number / 90 Hz / Construct Forge.
+The map was verified in lobby image
+`out/debug-openxr/20260906-073911136Z-forge-menu-ocr/0000-073911325Z.jpg` before
+requesting Start. Parsed observations are in
+`out/research/20260906-native-volume/whole-runtime-observations.json`.
+
+All 32 covers built with eight spheres; 31 seeds were proved clear, and one
+object retreat seed was unknown and skipped. All 31 admitted sweeps were valid
+and none exhausted the 192-query budget. The current weapon geometry is the
+existing authored collision shape (`shapeSource=1`, 36 triangles in the contact
+status), not a proof that every rendered weapon triangle is enclosed. No live
+sword coverage is claimed by this run.
+
+- Structure type 1: two inward, two inward/tangential and two yaw/inward cases
+  blocked. Minimum reference-plane clearance was 5 mm, matching the skin.
+  Both retreat controls completed their full motion.
+- Object type 4: six inward, six inward/tangential and six yaw/inward cases
+  blocked; five admitted retreats completed. Some final covers crossed the
+  original reference plane by up to 5.14 cm. A plane extended beyond the hit
+  object's finite face is not an object-overlap test. These cases need actual
+  shape/feature checks; neither penetration nor correct nonpenetration is
+  established by the reference-plane number alone.
+- Maximum total observation cost, including cover construction and seed tests,
+  was 354.2 us. Cast counts were 8 for retreat, 16 for translation contact and
+  up to 48 for yaw/inward contact. This is a small local eight-sphere fixture,
+  not a worst-case budget or evidence that normal headset lag is fixed.
+
+The harness completed its cleanup. MCC and SteamVR are closed. The restored VR
+settings SHA independently matches
+`298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`:
+null disabled, forcedDriver empty, requireHmd true. No normal weapon rendering
+policy changed. Sliding toward an obstructed hand target, clear-pose lifetime,
+recovery, dynamic impulses, latency and headset acceptance remain unfinished.
+The accepted pointer is unchanged, and no new functionality video is claimed.
