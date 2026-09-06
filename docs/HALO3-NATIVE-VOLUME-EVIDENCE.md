@@ -989,3 +989,77 @@ of this render observation. Cold logging consumes each record once. All
 existing collision, pose mutation, recovery and draw decisions are unchanged.
 This diagnostic must establish whether the proposed handoff gap actually
 occurs before a repair is selected.
+
+#### eec4c0b Floodgate handoff run
+
+Source `eec4c0bfdeaebc34f5d4f9e4f459a842147cddba`; package
+`out/candidates/eec4c0b-h3-physical-contact-20260906-101431091Z`.
+Release build and both CTests passed. E: Steam DLL independently verified as
+`BA6C22D8FD0C735065700B37A6702E2E4D9C129ABFF1613DB7AD261FFE00BBC5`;
+launcher/config unchanged. Alternate Steam and Store installations were absent.
+Prior artifact is in
+`out/deploy-backups/43cc1f1-steam-before-eec4c0b-20260906-101431914Z`.
+
+Run `out/debug-openxr/20260906-101446436Z-controller-contact-result.json`
+used Steam / SteamVR null / Null Model Number, Campaign, WorldPartitions,
+BladeGeometry and explicit mesh audit. It **failed to reach its pass condition**
+in 180 seconds; it never entered the requested 90-second post-pass hold.
+Log SHA: `BE69AF97B2933BA5595D5C37BA176CF04BCA7B488A8B37D7A043DB0DD28C0ED1`.
+The original checkpoint was loaded. The initial 500 ms D approach was
+interrupted by combat; its screenshot had no first-person weapon/HUD. Later
+A 500 ms, D 500 ms, D 1,000 ms and A 1,000 ms pulses sampled approach/retreat
+but did not reproduce the prior controlled rock contact. The 32 mesh records
+contained zero positive visible counterfactuals. Do not claim another collision
+acceptance result or demo. Audit maximum was 23,289.6 us.
+
+Final observations: 8,264 complete caches / 62,608 regions, capacity/invalid/
+plan failures/cast-invalid all zero, peak counts 61/116/124, mean gather
+264.3 us, maximum 1,557.7 us. Solver totals: 39,047 admitted frames, 985 blocks,
+10,423 holds, 7,417 hidden decisions across the two calls, 5,410 unknown results
+(all region misses), 846 shape rejects, no exhausted budget and no native fault.
+There were 44,457 attempts, mean 7.2 us, maximum 197.6 us. Final-draw handoff
+categories counted one lost early ownership, zero visible-over-leash without
+loss, 4,411 hidden draws and 20,397 controls. These are different denominators.
+Parsed records: `out/research/20260906-native-volume/handoff-observation-audit.json`.
+
+The one lost-ownership frame (`serial=4097`) was decisions 1/0, reason 8/4
+(final cache identity rejection), proof 1, origin age 16 ms, gap 0.00009 m.
+Thus a handoff exists, but this run does **not** establish it as the cause of
+the earlier distant cached draw. No visible over-30-cm final pose was observed
+by this diagnostic. The record captures cache reset, not the call's requested
+reset/generation/tag, so do not name the precise identity mismatch component.
+
+A separate directly recorded timing case is `serial=5786`: decisions 1/2,
+matching 1/1, fresh 1/0, gap effectively zero, both seeded and safe, same
+shape/reset/active state. The frame timestamp was `96505421`, while the final
+cache timestamp was `96505437`. The renderer takes `nowMs` before the two
+constraint calls; the worker can publish between them. The final hide predicate
+explicitly includes `nowMs < cache.ms`, so this newer-cache/older-frame-time
+combination hides even a matching near-hand pose. Re-evaluating freshness after
+pinning the cache is a concrete next repair to validate, retaining the age and
+epoch guards. This does not explain all region misses or detached sword effects.
+
+Source review also finds that cover reuse currently checks node transforms and
+identity but does not compare the incoming compound child geometry. A selection
+change with unchanged node transforms is therefore a separate coverage question;
+the current observations do not establish that transition's live cache contents.
+
+After the run, all four original files were restored and verified
+(`post-handoff-observation/restoration.json`). Start-screen refresh harness
+`20260906-101946954Z` synchronized their Steam metadata. Final MenuOnly check
+showed Resume at `20260906-102259439Z-menu-ocr/0000-102259591Z.jpg` (inspected),
+without entering Campaign. Both surrounding menu-only harnesses intentionally
+report closure during external control, not an interaction failure or pass.
+After final harness `20260906-102116008Z` closed, all three checkpoint files
+still matched the original bytes. AceSettings changed its encoded bytes during
+the ordinary menu session, but decoding both zlib JSON payloads proves exact
+semantic equality with no setting differences. Its current SHA-256 is
+`FFC8C7E64319CC140C50656A8C5E1F259BFCD5DF1DF6A4626F0BFA8973B9C2BE`.
+All four Steam metadata entries match their current files. Evidence is in
+`out/test-runs/20260906-resume-cache-check/final-handoff-menu-cache.json` and
+`handoff-profile-comparison.json`; do not claim all four remain byte-identical.
+Normal VR settings independently match
+`298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`.
+MCC/SteamVR are closed, null disabled, forced driver empty, requireHmd true.
+World partitions and blade geometry remain opt-in, and the accepted pointer
+has not advanced.
