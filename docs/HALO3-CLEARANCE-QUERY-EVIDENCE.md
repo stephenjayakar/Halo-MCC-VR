@@ -1,8 +1,9 @@
 # Halo 3 clearance-query investigation
 
-September 5, 2026. Offline official H3EK evidence only. No new retail binding,
-runtime hook, or headset acceptance. This investigation began on affb3cb;
-the separately validated startup-readiness candidate d8f10b6 is now installed.
+Chronological investigation begun September 5, 2026 on affb3cb. Later sections
+record verified retail bindings, opt-in runtime experiments and their results.
+Read the latest candidate entry for installation identity. None of these
+experiments advances the accepted pointer in CURRENT-STATE.md.
 
 ## Problem and intended behavior
 
@@ -447,3 +448,40 @@ reconstruction. Disable the opt-in experiment before correcting this admission
 hole. The run's 62 missing-pose observations do not say which render disposition
 was used, so no observed video motion is attributed to that hole without more
 evidence. Normal launches already leave this experiment disabled.
+
+### Current-frame guard and second opt-in runtime result
+
+Disable commit 1a8f94e preserved the experiment before retry 9b6e502 added
+haveTrackedNodes plus finite paired-offset provenance to render admission.
+The corrected experiment remains opt-in. Source
+9b6e502924771193819ae67048c5c5824f60d23a, package
+out/candidates/9b6e502-h3-physical-contact-20260906-005037612Z,
+installed DLL independently verified:
+CF5E81DEE76ED412EAD47CFA59D20D188ED96532D4364E4BF8770E572834496D.
+Core tests and Reach consistency passed; only the present E: Steam edition
+was installed (alternate Steam and Store locations absent).
+
+Run out/debug-openxr/20260906-005112737Z-controller-contact-result.json passed
+with -FreshRegion, Steam / SteamVR null / Null Model Number. Final observations:
+8,647 queries, 4,020 clear regions, 11,851 fresh-region render permissions,
+zero shape rejects and zero faults. These are palette/callback counts, not
+headset frame counts. Normal wall collision recorded 513 wall blocks. No
+hand-distance recovery or missing-hand-pose observation occurred in this run.
+Log SHA-256: BC8F4C98834D2AD541E00EE111C345C0B6F1C307D381C4F7942AAA6A1544AC3C.
+
+Video: out/demos/20260906-005333-forge-fresh-region-frontal-wall/raw.mp4.
+The setup used six 15-degree right turns, then recorded D approach/pressure
+and A retreat. Eight evenly spaced frames were reviewed alongside telemetry.
+The video contains an actual wall approach and retreat, and native wall
+constraints remained active with zero leash resets. It is not an exact
+whole-weapon nonpenetration measurement or a controlled same-spawn A/B.
+No moving-prop, NPC, Campaign, sword, or headset result is implied.
+
+The query-reserve and rendered-dynamic-object coverage limitations remain;
+normal launches keep fresh-region tracking disabled. Next work must supply
+controlled moving-controller/prop observations, rather than enabling it from
+these wall/open-space observations alone. Both harnesses completed, closed
+MCC/SteamVR and restored the original settings hash
+175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E.
+The live game configuration remained byte-identical, SHA-256
+C570089F47A17AE8645310C02688CA1454E1A02C9239BC24C5CC316E4DA94946.
