@@ -767,3 +767,55 @@ Replay executable SHA-256:
 The installed DLL independently still matches the candidate hash above;
 SteamVR remains `driver_null.enable=false`, empty `forcedDriver`, and
 `requireHmd=true`. Steam still shows `Sign in to Steam` with `ActiveUser=0`.
+
+### First live blade candidate run (2026-09-06 05:41–05:50 UTC)
+
+Steam subsequently signed in. Candidate `8436e79` ran in Steam MCC, Halo 3
+Forge Construct, SteamVR OpenXR with Null Model Number. MCC menus, Forge
+spawning, pickup, weapon switching and controller trajectories were driven by
+the existing programmatic tools. No computer-use interaction or game-file
+patch was needed. The first spawned sword fell to a lower level; the second
+was spawned beside the walkway pillar and picked up normally.
+
+Result: `out/debug-openxr/20260906-054132857Z-controller-contact-result.json`.
+Preserved log SHA-256:
+`C4905B6FB08E3A415F92B825E67976EBA9A3AC11B56F87D343802FD3324834DE`.
+The harness's geometry-admission condition passed: held sword contact had 256
+triangles and 134 wall vertices. Final counters were 121102 observations,
+121075 exact paired observations, 13429 geometry appends, zero stale reads,
+zero rejected geometry and zero selection-probe faults. Rifle switch produced
+36 triangles; re-equipping the sword restored 256. The descriptor's logged
+`active=1` can remain the last sword selection while a rifle is held; the
+consumer identity checks correctly prevented appending blades to the rifle.
+
+Initial lateral controller movements did not register a wall constraint.
+Extending the controller forward to local z=-1.3 m near the pillar did: peak
+logged wall setback was 0.201 m. During the recorded second cycle, setback
+was 0 at 22:49:57.197, 0.116 m at 22:49:59.217, and back to 0 at
+22:50:03.258 after retreat to z=-0.65 m. This demonstrates a whole-sword
+wall constraint and release; it does not isolate blade-only contact from
+handle contact. No prop impulse or melee was demonstrated in this run.
+
+Video: `out/demos/20260906-054944-sword-pillar-stop-and-release/raw.mp4`,
+SHA-256 `B2BF029DD564727AF7D51DE559C45F1054D7E76A01CFF0377C5A9BFC5E8A882E`.
+Six sampled frames were reviewed; `review.json` labels its limited scope.
+The earlier `20260906-054816-sword-pillar-contact-runtime-test` clip is labelled
+diagnostic because those initial motions did not register constraints.
+Neither clip is a complete interaction showcase or headset acceptance.
+Audit: `out/research/20260905-sword-contact/live-blade-runtime-audit.json`.
+
+The read-only header snapshot `live-blade-runtime-header.json` in that research
+directory observed the loaded sword render definition prefix at +8 equal to
+470289425, matching the official sword checksum. The snapshot was unchanged
+on immediate reread but is not atomic. This strengthens the header evidence;
+the installed classifier still uses the previously documented structure and
+inverse fingerprint, with no new runtime change in this turn.
+
+The harness exited successfully and restored the exact original SteamVR
+settings SHA-256 `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
+MCC and SteamVR closed; null driver false, forcedDriver empty, requireHmd true.
+The blade experiment is absent at process/user/machine scope and remains off
+for ordinary launches. Installed source/DLL and config are unchanged. User
+asked to test the installed build; leave the game free for that test. The
+accepted pointer remains unchanged. Blade-only contact, props, gentle NPC
+shove versus melee, Campaign, lag and full functionality videos remain open.
