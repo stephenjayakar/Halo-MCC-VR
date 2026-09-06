@@ -1759,3 +1759,14 @@ never call a rejected seed clear or infer player-body clearance proves a long
 weapon clear. Preserve complete swept regions and hand-distance limits. The
 legacy fallback must not be mistaken for collision ownership. Full surface,
 Forge/Campaign, props/NPC and headset latency acceptance remain outstanding.
+
+Disabled-candidate install: source `0cdb9fab28f0819e018f62638b831c9925adbbb1`,
+package `out/candidates/0cdb9fa-h3-physical-contact-20260906-125420099Z`.
+Release build and both CTests passed. Installed Steam DLL SHA
+`4DEE4DA8FE818336544DF888C8AFB93F886A72DD7808EAFB4F3595C86B0EBAFB`;
+launcher unchanged, existing config preserved. Other Steam/Store roots absent.
+Backup: `out/deploy-backups/ae68ae9-steam-before-0cdb9fa-20260906-125421125Z`.
+No session has used this disabled package. Campaign checkpoint bytes still
+match the original snapshot; all four Steam metadata entries match their live
+files. AceSettings has the same SHA1 as before this run, including the previously
+preserved completion data. No save or profile restoration was performed.
