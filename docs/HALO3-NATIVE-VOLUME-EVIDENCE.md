@@ -1498,5 +1498,24 @@ the next recovery experiment, not a recovery fix.
 
 After the run, MCC/SteamVR were independently confirmed closed, normal settings
 SHA `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`, null=false,
-forcedDriver empty and requireHmd=true. All four original Campaign files and
-their Steam metadata matched; no save restoration was needed.
+forcedDriver empty and requireHmd=true. The three Campaign checkpoint files
+remain byte-identical to the original snapshot; all four Steam metadata entries
+match their files. AceSettings has changed and must not be called byte-identical.
+Both wrappers independently decode as zlib JSON at offset 44. Only 22 highest
+completed-difficulty fields in DifficultyTracking[57..68] differ, from 255 to
+values 1, 2 or 3; other JSON values match. This Forge test completed no Campaign
+missions. The origin of those updates is not established, so do not overwrite
+potentially synchronized completion records merely to force the original hash.
+Current profile SHA `A1F17DE454DFC8A9CFCBCFA9670BEB57455177D31F77FB354DDB48CC972ADF5B`;
+comparison: `out/test-runs/20260906-resume-cache-check/sword-reset-profile-comparison.json`.
+No save restoration was performed.
+
+The disabled experiment plus diagnostic/validation preparation is packaged as
+`out/candidates/1ee2468-h3-physical-contact-20260906-120038834Z`, source
+`1ee2468495cca968e7713f071ec8faf946f3b3b7`. Release and both CTests passed.
+Installed Steam DLL SHA
+`A55163A073C07B4521C1569B80ACB96017FAAB3F06DC8FBAFF297AA3799A9C30`;
+launcher/config unchanged. Backup:
+`out/deploy-backups/ab43bb7-steam-before-1ee2468-20260906-120039794Z`.
+Other Steam/Store roots remain absent. No game session has used this package;
+the partition solver is disabled even when requested. Accepted pointer unchanged.
