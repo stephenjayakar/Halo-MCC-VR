@@ -2094,3 +2094,64 @@ existing explicit launch opt-ins; ordinary headset launches do not silently
 enable this experiment. Pending: original angled-pillar repeat, Floodgate rocks,
 prop/NPC/AR regressions with this path, visual effects alignment, region-miss
 recovery and ordinary headset tracking. This is progress, not full readiness.
+
+### 2026-09-06 14:03Z Floodgate: sampled clearance PASS, recovery inconclusive
+
+No code/package change: runtime0bb5f12, validator a6c60e5. Steam / SteamVR null /
+Null Model Number, WorldPartitions+WorldReplay+BladeGeometry. Campaign result
+out/debug-openxr/20260906-140318180Z-controller-contact-result.json, preserved log
+676ED43B2EA9D74D26DABD03799A9CCB42E694F9337F8C1088A41C35F54388BC.
+14:03:23.914-14:08:49.222Z. Original Floodgate sword checkpoint resumed.
+Initial setup was interrupted by combat/death. A subsequent D500 approach and
+neutral controller command at14:05:25.403Z produced two visible rock pairs:
+raw/submitted inside109/0,crossings80/0,maxgap0.21575m. Harness passed and
+completed180s follow-up hold, but this is NOT sustained Campaign acceptance.
+
+Of83 audit observations,62 valid and21 incomplete (all triangles256/0);
+19 were hidden,18 of those incomplete, maximum hidden root gap3.02021m.
+Only2 positive visible pairs. Final caches10708,seeds177,frames55404,
+blocks2274,holds14469,hidden5870,shapeRejects8965,unknown/regionMisses332,
+missingSeed0. No native faults, invalid/capacity/plan/cast failures or budget
+exhaustion. Mean solve10.2us,max507.8us; gather219.7us,max2992.8us;
+cover7.8us,max220.2us; diagnostic native mesh auditmax27111.3us.
+These diagnostic timings are not a headset tracking result.
+
+The14:06:53.888Z screenshot showed a hidden physical sword with visible hand
+and electrical effects, while later observations recovered a clear full blade.
+Combat, deaths and respawns occurred during the run. At14:07:04.902Z audit53
+had draw2,invalid,256/0 triangles,gap3.01972m; audit54 at14:07:06.922Z was
+visible/valid/256/256,inside0/0 and near-zero gap. This establishes a change in
+render admission, not its cause. Current logs do not capture the rejected node
+matrices or enough lifetime state to distinguish death animation from a normal
+player-controlled tracking defect. Do not normalize matrices or widen tolerances
+on this evidence alone. Next diagnostic should preserve the exact cache/current
+matrices during sustained shape rejection and correlate player lifetime state.
+The no-seed feedback defect did not recur here (missingSeed0).
+
+Attempted rock recording out/demos/20260906-140546-floodgate-sword-rock-withdrawal/raw.mp4,
+SHA E93AACB5B53430104FCA89C6297A48DF1F5544EA1525D1A450294FB62B30634C,
+is40s diagnostic footage interrupted by combat/death, not a clean withdrawal
+demo. review.json explicitly marks working_demo=false. No new polished video
+was claimed and no old-demo cleanup was attempted.
+
+Before this run, all4 current save/profile files were copied and hash verified
+under out/test-runs/20260906-140317-before-full-blade-campaign/manifest.json.
+The run changed deepSave/header. With MCC closed, all4 files were preserved
+under after-campaign and restored from this new current snapshot (NOT the older
+profile snapshot that lacks completion data). restoration.json verifies hashes.
+Normal menu refresh20260906-141009010Z initially showed no Resume due stale
+Steam metadata; closed through the normal window request. The subsequent
+MenuOnly check20260906-141252043Z showed Resume at
+20260906-141345364Z-menu-ocr/0000-141345519Z.jpg (visually inspected), entered
+no mission and closed normally. Their harness closure failures are intentional
+menu-only outcomes, not new contact failures.
+
+Final original3 checkpoint hashes match and all4 Steam metadata entries match.
+Profile compression/header bytes changed after menu access but decoded content
+matches the immediate pre-run snapshot exactly; final-restored-comparison.json
+records this. MCC/SteamVR absent; normal SteamVR SHA298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44,
+installed DLL8AF75D573AA3F47EC3D6398D51A250044E5EBA6EC8ABFD852AB6B520C699F8B7,
+configC570089F47A17AE8645310C02688CA1454E1A02C9239BC24C5CC316E4DA94946 independently
+verified. All tool sessions terminal. Accepted pointer unchanged. Previous goal
+turn was progress; this turn adds Campaign evidence and restores the test state.
+Full surface/interaction/readiness remains unproved.
