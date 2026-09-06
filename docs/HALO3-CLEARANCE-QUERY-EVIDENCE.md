@@ -293,3 +293,33 @@ wall/fixed-object fixture checks passed separately. No demo video is claimed
 for this diagnostic. MCC and SteamVR were closed by the harness; original
 SteamVR settings were independently verified restored, SHA-256
 175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E.
+
+### Object transforms can change after the current contact worker
+
+Offline inspection of the same pinned official and retail modules disproves
+the previous worker comment calling objects_update a final-transform boundary.
+The official primary caller at 36DAE0 calls A52920 at 36DDDF, then A520D0 at
+36DE02 and A524C0 at 36DE07. The matching retail caller EF120 calls the
+currently hooked 34067C at EF344, then 3407D8 at EF39F and 3408F0 at EF3A4.
+
+The later official stage follows A524C0 -> A45B40 (A5267D) -> A4ABA0
+(A45B94) -> A4CDA0 (A4AD1C). A4ABA0 obtains a component transform through
+475130 at A4ACAC. The setter writes position x/y to object+50 at A4E152 and
+z to object+58 at A4E15E. The homologous retail chain is 3408F0 -> 3483A4
+(340962) -> 347FF8 (3483FD) -> 340D7C (3481CC), with component-transform
+call 1645C0 at 34813E and object-position writes at 340E46/340E50. These
+are actual instructions and verified call edges, not inferred engine names.
+
+The expanded verify-h3-clearance-gather.py pins both module hashes, checks
+these call edges and position-write bytes, and requires the 39-byte retail
+3408F0 entry pattern to be unique. It passed both pinned inputs. Disassembly
+is retained under out/research/20260905-clearance-query, including
+official_objects_update_caller.txt, official_object_after_move.txt,
+official_position_setter.txt, retail_objects_update_caller.txt and
+retail_after_3408f0.txt. The retail later stage ends with a tail call from
+34099F to 34B4CC; any hook must let the original complete that call too.
+
+This proves the current contact worker can precede native object-position
+updates. It does not prove that the later stage is the final transform writer
+for the whole frame, that render interpolation is covered, or that moving the
+worker will fix the user's flicker. No later-stage hook has been tested yet.

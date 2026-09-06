@@ -13361,8 +13361,10 @@ namespace
     // at +0x34067C carries the same object-list/update-loop invariants. Native
     // melee stays before Halo's update. Sustained whole-body velocity is
     // applied immediately after it so a floor-loaded body cannot overwrite the
-    // correction in the same tick. The visual/contact solver then observes the
-    // final post-physics transforms before approving a palette for rendering.
+    // correction in this stage. The solver currently observes transforms here,
+    // but later native object stages can write positions again (retail 3408F0
+    // -> 3483A4 -> 347FF8 -> 340D7C). This is not a final-transform boundary;
+    // see docs/HALO3-CLEARANCE-QUERY-EVIDENCE.md before using it for clearance.
     // The original always runs after a failure.
     void __fastcall Halo3ObjectsUpdateHook()
     {
