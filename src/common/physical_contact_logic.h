@@ -100,6 +100,18 @@ inline bool PhysicalContactHandLeashExceeded(
         limit * limit;
 }
 
+// Retreat is needed to keep an obstructed weapon from repeatedly rearming
+// against the same surface. A known uncorrected stale pose has no surface to
+// retreat from: restart normal contact sampling after its bounded cooldown.
+inline bool PhysicalContactRecoveryNeedsRetreat(
+    bool displayedCorrected, bool candidateCorrected, bool targetGuardRequired,
+    bool consumedOffsetValid, PhysicalContactVec3 consumedOffset)
+{
+    return displayedCorrected || candidateCorrected || targetGuardRequired ||
+        !consumedOffsetValid || !PhysicalContactFinite(consumedOffset) ||
+        PhysicalContactLengthSquared(consumedOffset) > 1.0e-12f;
+}
+
 inline float PhysicalContactLength(PhysicalContactVec3 v)
 {
     return std::sqrt(PhysicalContactLengthSquared(v));

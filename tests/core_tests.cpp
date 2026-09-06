@@ -257,10 +257,30 @@ __declspec(noinline) static void TestRecordedSolidOverlap()
     }
 }
 
+static void TestHandRecoveryRetreatPolicy()
+{
+    Check(!PhysicalContactRecoveryNeedsRetreat(false, false, false, true, {}),
+        "known uncorrected free-space recovery resumes after cooldown");
+    Check(PhysicalContactRecoveryNeedsRetreat(true, false, false, true, {}),
+        "displayed wall correction still requires retreat");
+    Check(PhysicalContactRecoveryNeedsRetreat(false, true, false, true, {}),
+        "current candidate correction still requires retreat");
+    Check(PhysicalContactRecoveryNeedsRetreat(false, false, true, true, {}),
+        "failed body guard still requires retreat");
+    Check(PhysicalContactRecoveryNeedsRetreat(false, false, false, true, {.001f, 0, 0}),
+        "a consumed correction cannot be misclassified as free space");
+    Check(PhysicalContactRecoveryNeedsRetreat(false, false, false, false, {}),
+        "missing correction provenance retains conservative retreat");
+    Check(PhysicalContactRecoveryNeedsRetreat(false, false, false, true,
+        {std::numeric_limits<float>::quiet_NaN(), 0, 0}),
+        "nonfinite correction provenance retains conservative retreat");
+}
+
 int main()
 {
     TestNullControllerPath();
     TestRecordedSolidOverlap();
+    TestHandRecoveryRetreatPolicy();
     {
         const auto shove = PhysicalContactNpcShoveDelta({0.4f, 0, 0}, {0.4f, 0, 0}, {-1, 0, 0}, 1.5f, 1.0f/60, 1);
         Check(shove.x > 0 && shove.x <= 0.15f && shove.z == 0, "Slow inward NPC contact produces bounded horizontal motor input");

@@ -266,3 +266,34 @@ same-pose visible A/B of the sniper contact, nor Campaign or headset acceptance.
 After normal harness completion, the installed DLL/configuration hashes were
 unchanged, the original normal SteamVR hash matched, null was disabled,
 forcedDriver empty, requireHmd true, and MCC/SteamVR were stopped.
+
+## Free-space recovery latch, September 5, 19:00–19:05 PDT
+
+Normal-controller run on installed 4ea27bf, Steam / SteamVR / Null Model Number,
+fresh region off: `out/debug-openxr/20260906-015844877Z-controller-contact-result.json`.
+Log SHA-256 `069599686AAA09F3E168D3CACDCFB1BE3DA17CFC69EFD3E74378F14DA70B8BCC`.
+This run did not establish a normal prop shove. The nearby equipment disappeared
+during ordinary approach and its icon appeared on the HUD, consistent with auto
+pickup. No successful interaction video is claimed from this attempt.
+
+It did record a distinct recovery problem. At 19:02:01, the stale final root
+was (0.671679, -2.349108, 11.173552), while the tracked root had moved to
+(0.226826, -2.443632, 11.211394), scale 0.33. The event had corrected=0,
+finalGuard=0/1, target=FFFFFFFF and consumedOffset=(0,0,0); wallBlocks and
+contact hits were zero. Recovery restored the tracked palette, but subsequent
+logs remained awaitingMotion=1 and stage=visible-pose while the hand was lowered
+in open space. Code unconditionally required retreat/rotation after every leash
+reset, including uncorrected stale poses with no obstacle direction.
+
+The next candidate distinguishes only this known uncorrected case. Displayed
+correction, candidate correction, a required target guard, missing/nonfinite
+offset provenance, or a nonzero consumed correction all retain retreat. Only
+when all are absent may normal contact sampling resume after the existing
+500 ms cooldown. The awaiting flag stays set during publication and cooldown;
+the renderer clears it only after both the reference timestamp plus 500 ms
+and the published cooldown expire. Collision/approval checks then run normally;
+this does not grant an unqueried pose approval or enable the fresh-region
+experiment. The event logger records retreatRequired for verification.
+
+This is separate from the swept-normal fix. It does not resolve the cause of
+stale approvals, and obstructed recovery behavior remains under headset review.

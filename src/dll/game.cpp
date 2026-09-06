@@ -978,6 +978,7 @@ namespace
     std::atomic<uint64_t> g_halo3ContactHeldPalettes{0};
     std::atomic<uint64_t> g_halo3ContactHandRecoveryUntilMs{0};
     std::atomic<bool> g_halo3ContactHandRecoveryAwaitingMotion{false};
+    std::atomic<bool> g_halo3ContactHandRecoveryRequiresRetreat{true};
     // Only the render publisher writes this reference. Its serial stores the
     // runtime generation; its two roots are the uncorrected and displaced
     // recovery poses, not an approval. Their difference is the release side.
@@ -995,6 +996,7 @@ namespace
         float scale = 0.0f;
         PhysicalContactVec3 tracked{}, final{}, consumedOffset{};
         bool corrected = false, finalGuardRequired = false, finalGuardProved = false;
+        bool retreatRequired = true;
     };
     // First 16 immutable records per DLL lifetime. Unique reservations avoid
     // overwriting data the logger is reading. States: 0 not published,
@@ -5995,8 +5997,10 @@ namespace
                             {recoveryNodes[1].translation[0] - recoveryPosition[0],
                              recoveryNodes[1].translation[1] - recoveryPosition[1],
                              recoveryNodes[1].translation[2] - recoveryPosition[2]});
-                        if (identityChanged || (moved && nowMs >=
-                                g_halo3ContactHandRecoveryUntilMs.load(std::memory_order_acquire)))
+                        const bool releaseAllowed = moved ||
+                            !g_halo3ContactHandRecoveryRequiresRetreat.load(std::memory_order_acquire);
+                        if (identityChanged || (releaseAllowed && nowMs >= recoveryMs + 500 &&
+                                nowMs >= g_halo3ContactHandRecoveryUntilMs.load(std::memory_order_acquire)))
                             g_halo3ContactHandRecoveryAwaitingMotion.store(false, std::memory_order_release);
                     }
                 }
@@ -6270,6 +6274,9 @@ namespace
                     const uint64_t recordIndex =
                         g_halo3HandRecoveryRecordReservations.fetch_add(
                             1, std::memory_order_relaxed);
+                    const bool retreatRequired = PhysicalContactRecoveryNeedsRetreat(
+                        displayedCorrected, candidateCorrectionApplied, finalGuardRequired,
+                        proposalConsumedOffsetValid, proposalConsumedOffset);
                     if (recordIndex < kHalo3HandRecoveryRecordCount)
                     {
                         auto& record = g_halo3HandRecoveryRecords[recordIndex];
@@ -6288,6 +6295,7 @@ namespace
                         record.corrected = displayedCorrected;
                         record.finalGuardRequired = finalGuardRequired;
                         record.finalGuardProved = finalGuardProved;
+                        record.retreatRequired = retreatRequired;
                         g_halo3HandRecoveryRecordStates[recordIndex].store(
                             2, std::memory_order_release);
                     }
@@ -6300,6 +6308,7 @@ namespace
                     g_halo3ContactHandRecoveryAwaitingMotion.store(true, std::memory_order_release);
                     g_halo3ContactHandRecoveryUntilMs.store(
                         nowMs + 500, std::memory_order_release);
+                    g_halo3ContactHandRecoveryRequiresRetreat.store(retreatRequired, std::memory_order_release);
                     g_halo3ContactHandRecoveries.fetch_add(1, std::memory_order_relaxed);
                     displayedSerial = proposalSerial;
                     displayedCorrected = false;
@@ -18778,12 +18787,12 @@ namespace
                     published, 3, std::memory_order_acquire))
                 continue;
             const auto& r = g_halo3HandRecoveryRecords[index];
-            LOG("H3 contact hand recovery event: index=%u ms=%llu weapon=0x%08X target=0x%08X proposal=%llu displayed=%llu proof=%u corrected=%d finalGuard=%d/%d scale=%.6f tracked=(%.6f %.6f %.6f) final=(%.6f %.6f %.6f) consumedOffset=(%.6f %.6f %.6f)",
+            LOG("H3 contact hand recovery event: index=%u ms=%llu weapon=0x%08X target=0x%08X proposal=%llu displayed=%llu proof=%u corrected=%d finalGuard=%d/%d scale=%.6f tracked=(%.6f %.6f %.6f) final=(%.6f %.6f %.6f) consumedOffset=(%.6f %.6f %.6f) retreatRequired=%d",
                 (unsigned)index, (unsigned long long)r.ms, (unsigned)r.weapon, (unsigned)r.target,
                 (unsigned long long)r.proposalSerial, (unsigned long long)r.displayedSerial,
                 r.proof, r.corrected, r.finalGuardRequired, r.finalGuardProved, r.scale,
                 r.tracked.x, r.tracked.y, r.tracked.z, r.final.x, r.final.y, r.final.z,
-                r.consumedOffset.x, r.consumedOffset.y, r.consumedOffset.z);
+                r.consumedOffset.x, r.consumedOffset.y, r.consumedOffset.z, r.retreatRequired);
         }
         LOG("H3 contact hand recovery: resets=%llu checks=%llu missingPose=%llu limit=0.30m cooldown=500ms active=%d awaitingMotion=%d",
             (unsigned long long)g_halo3ContactHandRecoveries.load(std::memory_order_relaxed),
