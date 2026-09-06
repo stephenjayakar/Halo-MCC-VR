@@ -67,8 +67,11 @@ struct Halo3WorldMeshAudit
     int disposition{};
     bool valid{},faulted{};
 };
-std::array<Halo3WorldMeshAudit,32> g_halo3WorldMeshAudits{};
-std::array<std::atomic<uint32_t>,32> g_halo3WorldMeshAuditStates{};
+// 128 observations at 2.5 s spacing cover the 180 s validation + 90 s
+// recovery hold without exhausting the mesh audit on the initial contact.
+// Native queries remain diagnostic-only and never run from rendering.
+std::array<Halo3WorldMeshAudit,128> g_halo3WorldMeshAudits{};
+std::array<std::atomic<uint32_t>,128> g_halo3WorldMeshAuditStates{};
 struct Halo3WorldGatherAudit
 {
     uint64_t ms{};
@@ -252,7 +255,7 @@ void Halo3AuditWorldDraw(uint64_t nowMs,uint32_t generation,int32_t weapon,int32
         !std::isfinite(worldScale) || worldScale<.05f || worldScale>2) return;
     static uint64_t lastMs=0,lastSerial=0;
     static unsigned next=0,freeSamples=0,hiddenSamples=0;
-    if (next>=g_halo3WorldMeshAudits.size() || nowMs<lastMs || nowMs-lastMs<250) return;
+    if (next>=g_halo3WorldMeshAudits.size() || nowMs<lastMs || nowMs-lastMs<2500) return;
     auto draw=g_halo3WorldDraws.read();
     if (!draw) return;
     const auto& d=draw.get();
@@ -262,8 +265,10 @@ void Halo3AuditWorldDraw(uint64_t nowMs,uint32_t generation,int32_t weapon,int32
         Halo3WorldTransform(d.tracked[0]).position)/worldScale;
     if (!std::isfinite(gap) || (gap<.005f && freeSamples>=4) ||
         (d.disposition==2 && hiddenSamples>=4)) return;
-    if (gap<.005f) ++freeSamples;
-    if (d.disposition==2) ++hiddenSamples;
+    // Limit consecutive controls, not lifetime controls. A later withdrawal
+    // must regain samples even when the initial free-hand quota was spent.
+    if (gap<.005f) ++freeSamples; else freeSamples=0;
+    if (d.disposition==2) ++hiddenSamples; else hiddenSamples=0;
     lastMs=nowMs; lastSerial=d.serial;
     const unsigned index=next++;
     auto& record=g_halo3WorldMeshAudits[index];

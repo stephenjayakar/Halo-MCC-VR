@@ -1309,3 +1309,18 @@ Final read-only save check found all four files byte-identical to the original
 Campaign snapshot and all Steam metadata matching. No restore was necessary.
 Accepted pointer unchanged. Next evidence gaps are the same-doorway failure
 sequence and event-spaced mesh samples that survive through recontact.
+
+### Mesh-audit duration correction
+
+The prior 32-record/250-ms sampler exhausted its nontrivial-gap observations
+within seconds of first contact. Its four free controls were lifetime quotas,
+so withdrawal could also go unobserved after the initial free-hand samples.
+The two Guardian recordings demonstrate why the cumulative pass is insufficient.
+
+The diagnostic-only candidate spaces mesh audits by 2.5 seconds and reserves
+128 records, covering the configured 180-second validation plus 90-second
+recovery hold. Free and hidden quotas apply consecutively: an audited contact
+rearms free samples for subsequent withdrawal, and a visible sample rearms
+hidden observations. The finite session budget still applies and the audit
+remains opt-in; it is not an exhaustive per-frame geometry proof. No solver,
+cache ownership, collision bound, hand tracking or native binding changes.
