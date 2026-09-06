@@ -366,3 +366,92 @@ a controller-contact regression pass.
 MCC and SteamVR were confirmed stopped after completion. Original real-headset
 settings hash `175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`
 was independently verified restored. Accepted pointer unchanged.
+
+## Equipped retail sword observed, September 5, 19:33–19:45 PDT
+
+Source remained `3afef90ecafd9e0af2885f234a68300799fd805e`, DLL SHA-256
+`B348B0E219E164EF45E62A9C582F91A44D74617F182C42299A9F5AA245D01302`.
+Validator source was `16aeb0686e809bafd244708969d7dd15c607fb51`; the opt-in
+keyboard gamepad and 600-second hold were enabled, fresh-region off. Steam MCC,
+Construct Forge, SteamVR OpenXR 2.17.8 / Null Model Number. Result:
+`out/debug-openxr/20260906-023350117Z-controller-contact-result.json` (passed).
+Log SHA-256 `100CA0D57557919897A18A2870B7BFF6643C2103FDD65D33FF85D348187AC953`.
+The pass proves sampling returned after editor use and weapon changes; it is
+not blade-collision acceptance.
+
+### Native equip route now demonstrated
+
+The programmatic gamepad Up entered Forge editor; X opened the weapon inventory.
+After screenshot-verified Energy Sword selection, A spawned the sword, another
+A dropped it, and Up returned to the player. The menu row was observed at
+`out/debug-openxr/20260906-023649735Z-sword-highlight/0000-023649977Z.jpg` and
+placement at `out/debug-openxr/20260906-023708844Z-sword-placement/0000-023709058Z.jpg`.
+Normal W movement approached it. A focused E hold picked it up once close
+enough, with the native "Picked up an Energy Sword" message and active sword
+visible at `out/debug-openxr/20260906-024020844Z-sword-pickup-close/0000-024021058Z.jpg`.
+The earlier X attempts on foot did not establish pickup. No map was saved and
+no game-file or process-memory write tool was used.
+
+Menu pulses remain state-verified: ten 650 ms Down pulses advanced fifteen rows
+in this run, and a 400 ms Up returned one row to the sword. Do not encode a
+fixed pulse count as a reliable selection. Runtime input-source switching and
+repeat behavior were not separately attributed.
+
+### Live identity, inverse bind, and selection
+
+The equipped sword's observed handle was `0xE46900B6` and its render tag was
+`0xEF060D90`. These are observed session identities, not cross-map constants.
+The corresponding first-person palette has two nodes. Its second loaded
+inverse has identity basis/unit scale and translation
+`(-0.11773931980133057, 0, 0)`; the first inverse is identity. This matches the
+official sword's handle/blades rest skeleton within the export's decimal
+precision. Samples under `out/research/20260905-sword-contact/`:
+
+| Snapshot | SHA-256 | Sword draw observations |
+| --- | --- | --- |
+| `forge-sword-equipped.json` | `C78D5B8859073BBAEFB860EBFC2F9CD1CF3F582787784CC42DDE89D490505723` | 10 |
+| `forge-sword-tilted.json` | `A1D544EBD9E0ABA4F12B922A7A9396F76D08FC18CF0064A7961CB28C92FF9952` | 8 |
+
+Both select region meshes `[0, 1]`, corresponding to the official blade/handle
+meshes. The second sample followed an accepted analytic controller pitch change
+to -30 degrees. Their loaded inverses differ from the audited export by at most
+3.20e-7. Transforming the authored blade rest position through each live root
+predicts the child position within 6.54e-7 world units; child/root bases agree
+in these two settled poses. Comparison report `live-sword-rest-comparison.json`,
+SHA-256 `A985ED03A26BAAEB312D388F963C8392ECEB3D97981EB96BF7E8FF79593818B8`.
+This verifies this live mapping at two settled poses, not arbitrary animation
+or equality of every retail vertex to the exported resource.
+
+The earlier `forge-equipped-first.json` filename is misleading: its screenshot
+still shows the rifle before pickup. Do not use it as a sword sample.
+
+A 750 ms Y pulse switched to the rifle; its palette replaced the sword entry
+with render `0xECA10B2B`, five nodes, matching screenshot and
+`forge-after-switch.json`. Re-equipping restored the sword and selected meshes
+`[0, 1]` in 19 observed records. Transition capture
+`forge-sword-reequip-transition.json`, SHA-256
+`69DDC0468A80EA0D0A7C6C8CDF52DF25E4BB2E3E3012B8915D2CA12AEE3CA468`.
+**No blade-off mesh selection was observed.** Sparse external sampling cannot
+establish that no such transition exists. The stable `[0,1]` result must not
+be substituted for a per-frame visibility gate in production.
+
+### Remaining gap and recording scope
+
+With the sword visibly active, the normal contact logger reports
+`shapeSource=1 weaponTriangles=12 nativeSamples=33`: the handle-only authored
+collision mesh is still being used. No runtime blade geometry was added in
+this run. The next implementation must preserve the verified inverse/live-node
+transform and source active selection from a synchronous render consumer;
+the external record array is not a safe negative visibility test.
+
+`out/demos/20260906-024059-forge-sword-geometry-diagnostic/raw.mp4`, SHA-256
+`4952AF8A703DD527026D2235253A692937CEDE8DF2A2F44FD009DD1D8A2B24E4`, is a
+30-second live geometry diagnostic. Six sampled frames show the equipped sword
+and final controller tilt, not wall contact or a successful shove. It is not a
+functionality showcase. The diagnostic hand pose returned to default afterward.
+
+The harness completed normally on foot, MCC/SteamVR stopped, and original
+real-headset settings SHA-256
+`175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E` was
+independently verified restored. Installed DLL/configuration and accepted
+pointer unchanged.
