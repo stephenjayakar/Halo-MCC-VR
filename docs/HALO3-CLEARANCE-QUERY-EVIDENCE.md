@@ -600,3 +600,52 @@ draws have the current proposal origin; cached poses retain the original origin.
 This measures the contact pipeline's pose age, not controller sensor latency
 or motion-to-photon latency. Corrected-pose separation includes intentional
 contact displacement. Runtime measurements are still pending at this commit.
+
+### Paired pose-age measurements and comprehensive collision direction
+
+Diagnostic source `ab90bd3fcacb67bb099412eab0b6a312eae4ea51`, package
+`out/candidates/ab90bd3-h3-physical-contact-20260906-062831532Z`, DLL SHA-256
+`5699F60224D6DFBC100949EE98EF5745351604BD93E72663F637BFE76833434B`.
+Release, both tests and Reach consistency passed. Present E: Steam install
+verified independently; alternate Steam and Store roots absent. No pose policy
+changed in this diagnostic. Normal launch keeps fresh-region and sword off.
+
+Both following runs entered Guardian Forge, Steam / SteamVR null / Null Model
+Number. They used different spawn positions, so they are not a same-scene A/B.
+`tools/analyze-h3-pose-timing.ps1` preserves the grouped window measurements
+without pretending window percentiles can produce a session percentile.
+
+- Baseline `out/debug-openxr/20260906-062849511Z-controller-contact-result.json`;
+  log SHA `F113DA8DD203F784D61CB84D6AB757FA2EA2E35F196B3940CDDDCEA07601E555`.
+  8360 sampled approved/unconstrained draws: every window median 16 ms,
+  maximum window p95 31 ms. One startup maximum was 94 ms with zero root gap.
+  Controlled 0.8 m/1500 ms lateral sweeps showed up to 0.0188 m paired root gap;
+  1.4 m/700 ms sweeps up to 0.0645 m. Walking windows reached 0.1707 m.
+  These GetTickCount64 values are quantized proposal ages, not precise sensor
+  delay, and sampled submissions are not headset frames.
+- Same DLL with `-FreshRegion`:
+  `out/debug-openxr/20260906-063415702Z-controller-contact-result.json`;
+  log SHA `50909D5CADC86981C70233F49F99C5E21C956E6B516CFF0024240FD3510FED50`.
+  Enclosed spawn had zero permissions; walking onto the bridge admitted them.
+  All 4936 sampled permitted draws had zero proposal age and zero paired root
+  gap, including controlled slow and fast sweeps. Other draws still used old
+  approvals. This establishes the limited tracking benefit, not full coverage.
+  The later Forge prop placement attempt ended in a fall to death; the screenshot
+  `out/debug-openxr/20260906-063940118Z-guardian-fresh-prop-approach/0000-063940385Z.jpg`
+  records it. No prop nudge was established. Subsequent respawn/floor-pose wall
+  constraints and recovery resets are not a successful contact regression.
+
+Both harnesses closed MCC/SteamVR, and the independently checked restored
+settings SHA is `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`.
+Null driver disabled, requireHmd true, forcedDriver empty. Neither test is
+headset acceptance or a functionality demo. The experimental path remains off.
+
+The user now explicitly prefers comprehensive surface collision, using player
+collision as a reference, instead of surface-by-surface patches. The next work
+should trace the native volume movement/feature solver already identified above
+and its callers. Establish whether/how player movement uses it; that connection
+is not yet proved. The intended weapon response should use common world
+collision geometry with weapon-sized coverage, handle motion between poses,
+and retain separate dynamic-object impulse/melee decisions. Player dimensions
+are not a suitable substitute for weapon dimensions. Do not label the native
+movement caller a verified player-capsule API before proving that contract.
