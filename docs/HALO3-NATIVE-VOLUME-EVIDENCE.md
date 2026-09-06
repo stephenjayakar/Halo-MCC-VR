@@ -1324,3 +1324,62 @@ rearms free samples for subsequent withdrawal, and a visible sample rearms
 hidden observations. The finite session budget still applies and the audit
 remains opt-in; it is not an exhaustive per-frame geometry proof. No solver,
 cache ownership, collision bound, hand tracking or native binding changes.
+
+#### dd461a3 paired contact / withdrawal / recontact
+
+Source `dd461a3890a9c41b66385e6d595712178f15f5bd`; Release and both CTests
+passed. Package `out/candidates/dd461a3-h3-physical-contact-20260906-111941745Z`;
+installed Steam DLL independently verified at
+`282C8648B2541A996E43259A3B1E795D3E389D12A64872175EEB273A4ACAA0A4`.
+Previous installation is preserved under
+`out/deploy-backups/317d07e-steam-before-dd461a3-20260906-111942762Z`.
+Other Steam/Store roots absent; launcher and config unchanged.
+
+Run `20260906-112007680Z-controller-contact-result.json` passed the paired
+mesh criteria and 90-second post-pass hold. Steam / SteamVR null / Null Model
+Number, Guardian Forge, WorldPartitions + mesh audit, no BladeGeometry.
+Log SHA `16F5C89E3483F4E2B7D836637182FF86D47A4236DC35CB71A43170A902A440E6`.
+Spawn was a different room again, with two blue floor fixtures; W 1600 ms,
+A 900 ms then W 1300 ms reached its flat paneled wall. Initial correction
+about 0.41 m hid the gun because it exceeded the existing 30 cm limit. This
+is an unresolved user-experience limitation, not a polished overall pass.
+Controller retraction from Z -0.65 to -0.48 restored visible contact.
+
+The longer sampler retained 43 observations rather than exhausting at 32.
+There were 21 positive visible paired samples, maximum gap 0.29990 m. Stable
+contact had 31 raw interior points and 44 directed edge crossings, with zero
+of both in the submitted mesh. S 500 ms produced clear, near-hand samples
+(indices 27-30); W 500 ms recontact produced positive samples again at indices
+31-38, still with zero submitted interiors/crossings. A second S 500 ms
+produced four more clear, near-hand samples (39-42). Thus both release and
+recontact now have paired geometry observations. This remains a bounded mesh
+sampling result, not a full triangle-interior/per-frame proof. All native mesh
+audits were valid and fault-free; maximum audit cost was 878.3 us.
+
+Last preserved counters: 8,992 caches / 24,273 regions, 53,004 admitted solves,
+12,108 blocks, 847 holds, 6,294 hide decisions accumulated during the initial
+over-limit approach. No unknown solves, missing regions, capacity errors,
+invalid regions/casts, plan failures, shape rejects, exhausted budgets or native
+faults. No paired ownership loss or visible-over-leash event. Cover mean/max
+5.9/1,990.9 us, gather 41.8/1,767.9 us, solve 3.3/207.5 us. The late counters
+did not continue accumulating hidden draws after retraction. These instrumented
+null-driver timings do not prove headset responsiveness. Parsed summary:
+`out/research/20260906-native-volume/guardian-long-audit-summary.json`.
+
+Actual 45-second recording:
+`out/demos/20260906-112335-guardian-wall-paired-recovery/raw.mp4`, SHA
+`B2ABA45EC245ADE4A182F2902C7E83DBB694A3A16BCC6FA154148E29EB157CC8`.
+Continuous captioned trim of seconds 7-42: `wall-recovery.mp4` in that directory,
+SHA `097D3234C6320CA257E5C2FDD42F58C36161067213E6D1FE28FED8F9F9277149`.
+The clip shows contact, first withdrawal and recontact; the second withdrawal
+occurs after the raw recording and is established by the log. Encoded frame at
+27 seconds and live contact/release/recontact screenshots were inspected.
+
+Harness terminated successfully. MCC/SteamVR are closed. Normal settings
+independently verified at
+`298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`, null disabled,
+forcedDriver empty, requireHmd true. Read-only Campaign check found all four
+original files and matching Steam metadata. Accepted pointer unchanged;
+ordinary launches still do not enable the world/blade experiments. The exact
+overshield-doorway failure remains a separate regression target, as do full
+sword shape/effects, moving bodies, NPC interaction and headset latency.
