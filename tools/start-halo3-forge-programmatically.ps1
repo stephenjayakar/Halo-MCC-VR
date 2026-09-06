@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param([ValidateRange(30,300)][int]$TimeoutSeconds = 180)
+param(
+    [ValidateRange(30,300)][int]$TimeoutSeconds = 180,
+    [switch]$LobbyOnly
+)
 # State-driven navigation to the currently selected Halo 3 Forge map.
 # Every transition requires OCR evidence; unfamiliar pages receive no input.
 $ErrorActionPreference = 'Stop'
@@ -29,6 +32,10 @@ while ([DateTime]::UtcNow -lt $deadline) {
     }
     if ($state -and $state -ne $lastState) {
         Write-Host "Observed MCC menu: $state ($frame)"
+        if ($state -eq 'halo3-forge-lobby' -and $LobbyOnly) {
+            Write-Host 'Stopped at the verified Forge lobby for visible map selection; Start was not requested.'
+            exit 0
+        }
         & "$PSScriptRoot/send-mcc-keys.ps1" -Keys $keys -Background
         $lastState = $state
         if ($state -eq 'halo3-forge-lobby') { Write-Host 'Halo 3 Forge Start requested; gameplay readiness must be verified from the runtime log.'; exit 0 }

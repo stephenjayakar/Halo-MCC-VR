@@ -560,3 +560,31 @@ Null driver false, forcedDriver empty, requireHmd true; config unchanged at
 `C570089F47A17AE8645310C02688CA1454E1A02C9239BC24C5CC316E4DA94946`.
 Sword/fresh-region experiments remain off. Guardian wall/prop verification
 and explicit headset acceptance are still required.
+
+### Guardian normal-controller run and tracking complaint (2026-09-06 UTC)
+
+The user additionally reports that weapon tracking has become very laggy.
+This is a separate acceptance failure from frame rate. The renderer copies
+an older approved palette even without a contact correction. Its publication
+timestamp is refreshed by the worker, and last-drawn publication stamps the
+current render time; neither timestamp measures the original proposal age.
+Consequently the existing two-second status samples cannot quantify this lag.
+
+On installed `2269d6f`, a subsequent normal controller-contact run actually
+entered **Guardian Forge**, verified from the launch screenshot
+`out/debug-openxr/20260906-061547746Z-guardian-forge-options/0000-061547946Z.jpg`.
+The menu helper's new `-LobbyOnly` stops before Start for observed map selection.
+Result: `out/debug-openxr/20260906-061237142Z-controller-contact-result.json`;
+log SHA-256 `4FC24C9970183F01A83F9D7A59DA6AC850A4B370E619EA597A42FF6F193D5715`.
+Steam / SteamVR null / Null Model Number; fresh-region and sword flags off.
+Final counters: 12978 sweeps, 68 wall blocks, zero recoveries, one object hit,
+zero impulses. The spawned rifle remained ahead of the hand at the end of the
+approach. This does not establish a failed contact impulse at actual overlap,
+nor does it demonstrate nudging or reliable wall coverage.
+
+Recording `out/demos/20260906-061721-guardian-tracking-and-wall-diagnostic/raw.mp4`
+has six representative frames reviewed in `review.jpg`: visible weapon motion
+and an approach beside the wall, not a demonstrated nudge or a measured tracking
+delay. It remains a diagnostic, not a functionality demo. The harness closed
+MCC/SteamVR and restored the exact preceding settings hash `298D6E80...C4D44`
+(full hash above), independently rechecked. Normal headset mode is restored.
