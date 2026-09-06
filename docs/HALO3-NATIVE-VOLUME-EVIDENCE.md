@@ -1519,3 +1519,48 @@ launcher/config unchanged. Backup:
 `out/deploy-backups/ab43bb7-steam-before-1ee2468-20260906-120039794Z`.
 Other Steam/Store roots remain absent. No game session has used this package;
 the partition solver is disabled even when requested. Accepted pointer unchanged.
+
+### Expanded-feature seed-clearance candidate
+
+The reset-gap diagnosis exposed an overly broad seed rule in
+Halo3NativeVolumeSeedClear: after an outside-solid point test it rejected every
+nonempty gather with expansion zero. As the comment itself stated, nonempty
+features mean nearby geometry, not overlap. That rule cannot re-establish a
+seed near many walls even when the expanded weapon sphere is clear.
+
+The candidate gathers with the actual sphere radius as the native expansion
+argument, retains the independent native outside-solid point test, and checks
+whether the sphere center is outside the complete expanded feature union.
+It does not reuse a pre-reset approval, skip the reset, or use a directional
+zero-motion cast as an overlap proof. Scene/weapon/reset/active-mask, capacity,
+nested-count, finite-value and canary guards remain. Gathering and seed tests
+remain worker-only. The existing opt-in partition flag is re-enabled for this
+single seed-clearance behavior; ordinary launch configuration is unchanged.
+
+Pure point-membership math follows the already reviewed, pinned native feature
+helpers. Sphere fields +14/+20 are center/radius. Cylinder +14 is the start,
++20 the complete axis vector and +2C the radius: retail 24B43F..24B486 clips
+its longitudinal coordinate to [0,axis length squared], while 24B4C2..24B4F8
+removes the axis projection for the radial normal. Prism 24B5FB..24B710 clips
+normal-dot-point minus +20 to [0,+24]; 24B712..24B78D projects onto the base
+plane, and 24B7C7..24B863 clips against each directed 2D edge halfspace.
+The official 71A4B0 and 71C450 helpers retain the corresponding field access
+and clipping math. No new engine function binding is introduced.
+
+The full six-row axis table is now independently checked in the official and
+retail modules by tools/verify-h3-feature-math.py: official FEFC68 (addressed
+at 71C6A7) and retail 768EF0 (24B749). Rows are (2,1,0), (1,2,0), (0,2,1),
+(2,0,1), (1,0,2), (0,1,2). Both module identities, reviewed retail math closure
+hashes and tables passed verification in
+out/research/20260906-native-volume/verified-seed-feature-math.json.
+
+The new helper uses double arithmetic and an outward tolerance of at least
+1e-5 world units, scaled for float input magnitude. Tangency, degenerate
+cylinders/edges, invalid normals/thickness/polygon counts and malformed storage
+cannot grant clearance. Core tests cover sphere interior/tangency/separation,
+finite cylinder sides/end disks and the union with vertex spheres, all six
+prism projections with face/edge/corner cases, a tilted prism, malformed inputs
+and saturated storage. Both CTests passed after recompiling the final fixtures.
+Cold counters distinguish accepted nonempty feature sets from rejected ones.
+This is source/math evidence only; the next runtime must demonstrate recovery
+and retain paired mesh checks. Accepted pointer unchanged.

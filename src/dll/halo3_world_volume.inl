@@ -681,6 +681,8 @@ void Halo3LogWorldVolume()
         g_halo3WorldUnknown.load(),g_halo3WorldShapeRejects.load(),g_halo3WorldQueries.load(),
         g_halo3WorldExhausted.load(),g_halo3WorldFaults.load());
     LARGE_INTEGER frequency{}; QueryPerformanceFrequency(&frequency);
+    LOG("H3 world seed clearance: mode=expanded-feature-membership nonemptyClear=%llu nonemptyRejected=%llu; outside-solid proof and native capacity guards retained",
+        g_halo3SeedFeatureClear.load(),g_halo3SeedFeatureRejected.load());
     LOG("H3 world handoff counts: lost=%llu visibleOverLeashWithoutLoss=%llu hidden=%llu controls=%llu clockCases=%llu missingSeed=%llu",
         g_halo3WorldHandoffCounts[0].load(),g_halo3WorldHandoffCounts[1].load(),
         g_halo3WorldHandoffCounts[2].load(),g_halo3WorldHandoffCounts[3].load(),g_halo3WorldHandoffCounts[4].load(),

@@ -11,6 +11,7 @@ Halo3VolumeSolveFn g_halo3VolumeSolve = nullptr;
 using Halo3VolumeFirstHitFn = bool(__fastcall*)(const void*, const float*, const float*, void*);
 Halo3VolumeFirstHitFn g_halo3VolumeFirstHit = nullptr;
 std::atomic<bool> g_halo3VolumeProbeEnabled{false};
+std::atomic<uint64_t> g_halo3SeedFeatureClear{0},g_halo3SeedFeatureRejected{0};
 struct Halo3VolumeProbeRecord
 {
     uint64_t ms{};
@@ -76,8 +77,8 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     constexpr bool kEnableHalo3WorldVolumeExperiment = false;
     const bool worldFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_VOLUME", value, 2) == 1 && value[0] == L'1';
-    // Disabled after the Guardian sword lost its clear seed across a reset.
-    constexpr bool kEnableHalo3WorldPartitionsExperiment = false;
+    // Opt-in candidate: seed clearance tests expanded feature membership.
+    constexpr bool kEnableHalo3WorldPartitionsExperiment = true;
     const bool partitionsFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS", value, 2) == 1 && value[0] == L'1';
     const bool partitions = kEnableHalo3WorldPartitionsExperiment && partitionsFlag;
@@ -235,9 +236,10 @@ PhysicalContactVolumeCast Halo3CastNativeVolume(PhysicalContactVec3 start,
     return result;
 }
 
-// Empty broadphase plus outside point is a conservative seed only. Nonempty
-// features mean unknown, not overlap. A zero-motion first-hit cast cannot
-// replace this test: the native query filters contacts by movement direction.
+// Prove the center outside native solid interiors, then outside every feature
+// expanded by this sphere's radius. Nearby features alone are not overlap.
+// First-hit with zero motion cannot replace point membership: it filters by
+// movement direction. All native work remains on the simulation worker.
 bool Halo3NativeVolumeSeedClear(PhysicalContactVec3 center,float radius,int32_t ignored,uint64_t flags)
 {
     if (!g_halo3ClearancePoint || !g_halo3ClearanceGather || !g_halo3ClearanceActiveMask ||
@@ -250,11 +252,15 @@ bool Halo3NativeVolumeSeedClear(PhysicalContactVec3 center,float radius,int32_t 
         if (!active || (active&0xFFFF0000u)) return false;
         int32_t type=0;
         if (g_halo3ClearancePoint(flags,&center.x,ignored,-1,&type)) return false;
-        const bool gathered=g_halo3ClearanceGather(flags,&center.x,radius,0,0,ignored,-1,features);
+        const bool gathered=g_halo3ClearanceGather(flags,&center.x,radius,0,radius,ignored,-1,features);
         uint16_t counts[3]{}; memcpy(counts,features,sizeof(counts));
-        if (gathered || counts[0] || counts[1] || counts[2] || active!=*g_halo3ClearanceActiveMask) return false;
+        const bool nonempty=counts[0] || counts[1] || counts[2];
+        if ((!gathered && nonempty) || !Halo3VolumeFeaturesValid(features,sizeof(features))) return false;
         for (size_t i=0xC408;i<sizeof(features);++i) if (features[i]!=0xCD) return false;
-        return true;
+        const bool clear=Halo3VolumePointOutsideFeatures(features,sizeof(features),&center.x);
+        if (active!=*g_halo3ClearanceActiveMask) return false;
+        if (nonempty) (clear ? g_halo3SeedFeatureClear : g_halo3SeedFeatureRejected).fetch_add(1,std::memory_order_relaxed);
+        return clear;
     }
     __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
 }

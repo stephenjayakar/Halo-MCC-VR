@@ -76,7 +76,18 @@ def verify(official, retail):
         if i.address-pe.OPTIONAL_HEADER.ImageBase == iat]
     if matches != [('api-ms-win-crt-math-l1-1-0.dll', 'sqrtf')]:
         raise ValueError(f'Unreviewed math import: {matches}')
+    expected_axes = (2, 1, 0, 1, 2, 0, 0, 2, 1, 2, 0, 1, 1, 0, 2, 0, 1, 2)
+    # Official 71C6A7 and retail 24B749 address the same six rows. Both
+    # helpers form row=projection*2+orientation and use its first two axes.
+    official_pe = pefile.PE(str(official), fast_load=True)
+    projection_tables = {}
+    for label, image, rva in [('official', official_pe, 0xFEFC68), ('retail', pe, 0x768EF0)]:
+        table = struct.unpack('<18h', image.get_data(rva, 36))
+        if table != expected_axes:
+            raise ValueError(f'{label}: prism projection table changed')
+        projection_tables[label] = {'rva': hex(rva), 'rows': [table[i:i+3] for i in range(0,18,3)]}
     return {'module_hashes': baseline['module_hashes'], 'functions': records,
+        'prism_projection_tables': projection_tables,
         'only_external_callee': {'thunk': '0x6F5612', 'iat': hex(iat), 'import': matches[0]},
         'interpretation': 'Reviewed closure uses supplied feature storage, points/vectors, result storage, local scratch and read-only constants; no object lookup, world gather, engine TLS, allocation or logging calls.',
         'limits': ['This is pinned-code evidence, not a render-thread runtime test.',

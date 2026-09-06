@@ -228,8 +228,64 @@ static void TestPhysicalContactCoverReuse()
         "equal centres do not establish containment of the complete incoming volume");
 }
 
+static void TestHalo3ExpandedFeatureClearance()
+{
+    auto f=std::make_unique<Halo3VolumeFeatures>();
+    const auto word=[&](size_t at,uint16_t v) { std::memcpy(f->bytes.data()+at,&v,2); };
+    const auto integer=[&](size_t at,int32_t v) { std::memcpy(f->bytes.data()+at,&v,4); };
+    const auto real=[&](size_t at,float v) { std::memcpy(f->bytes.data()+at,&v,4); };
+    const auto clear=[&](float x,float y,float z) {
+        const float p[]{x,y,z}; return Halo3VolumePointOutsideFeatures(f->bytes.data(),f->bytes.size(),p);
+    };
+    Check(clear(0,0,0),"empty complete features are a point-clear negative control");
+    word(0,1); real(8+0x20,1);
+    Check(!clear(0,0,0) && !clear(1,0,0) && !clear(.999f,0,0),
+        "expanded sphere interiors and boundaries cannot seed a weapon");
+    Check(clear(1.01f,0,0),"a nearby expanded sphere does not reject a separated point");
+    *f={}; word(2,1); real(0x2408+0x28,2); real(0x2408+0x2C,.5f);
+    Check(!clear(.49f,0,1) && !clear(.5f,0,1) && clear(.51f,0,1),
+        "finite cylinder radial clearance distinguishes interior, tangent and free points");
+    Check(clear(0,0,-.01f) && clear(0,0,2.01f) && !clear(0,0,0) && !clear(0,0,2),
+        "finite cylinder includes end disks while points beyond it are separate");
+    // Native vertex spheres complete the rounded cylinder ends.
+    word(0,1); real(8+0x20,.5f);
+    Check(!clear(0,0,-.25f) && clear(0,0,-.51f),"the full feature union retains end-cap overlap");
+    *f={}; word(2,1); real(0x2408+0x2C,.5f);
+    Check(!clear(5,5,5),"a degenerate cylinder stays unknown rather than clearing the pose");
+    constexpr unsigned axes[6][3]{{2,1,0},{1,2,0},{0,2,1},{2,0,1},{1,0,2},{0,1,2}};
+    constexpr float polygon[4][2]{{-1,-1},{1,-1},{1,1},{-1,1}};
+    for (unsigned row=0;row<6;++row)
+    {
+        *f={}; word(4,1); word(0x5408+0x28,row/2); f->bytes[0x5408+0x2A]=row%2;
+        integer(0x5408+0x2C,4); real(0x5408+0x14+axes[row][2]*4,1); real(0x5408+0x24,.2f);
+        for (unsigned j=0;j<4;++j) for (unsigned k=0;k<2;++k) real(0x5408+0x30+j*8+k*4,polygon[j][k]);
+        const auto prismClear=[&](float x,float y,float height) {
+            float p[3]{}; p[axes[row][0]]=x; p[axes[row][1]]=y; p[axes[row][2]]=height;
+            return clear(p[0],p[1],p[2]);
+        };
+        Check(!prismClear(0,0,.1f) && !prismClear(1,0,.1f) && !prismClear(1,1,.1f),
+            "every native prism projection rejects interior, edge and corner starts");
+        Check(prismClear(1.01f,0,.1f) && prismClear(0,1.01f,.1f) && prismClear(1.01f,1.01f,.1f),
+            "every native prism projection permits separated edge and corner starts");
+        Check(prismClear(0,0,-.01f) && prismClear(0,0,.21f) &&
+            !prismClear(0,0,0) && !prismClear(0,0,.2f),"both prism slab faces retain conservative boundaries");
+    }
+    // The polygon test projects onto the base plane along its normal, not by
+    // simply dropping an axis. For n=(.6,0,.8), z-thickness shifts projected x.
+    real(0x5408+0x14,.6f); real(0x5408+0x1C,.8f);
+    Check(!clear(.66f,0,-.37f),"tilted prism interior is measured from its projected base point");
+    Check(clear(1.3f,0,-.85f),"tilted prism separates outside its projected polygon");
+    real(0x5408+0x24,-1);
+    Check(!clear(0,0,5),"negative prism thickness is not a clearance proof");
+    *f={}; word(4,256);
+    Check(!clear(0,0,0),"saturated feature storage cannot prove clearance");
+    *f={};
+    Check(!clear(std::numeric_limits<float>::quiet_NaN(),0,0),"nonfinite seed input is rejected");
+}
+
 static void TestPhysicalContactVolumeSweep()
 {
+    TestHalo3ExpandedFeatureClearance();
     TestPhysicalContactCoverReuse();
     TestPhysicalContactRecoveryRegions();
     TestPhysicalContactVolumeRegions();
