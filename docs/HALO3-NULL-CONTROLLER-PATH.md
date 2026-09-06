@@ -297,3 +297,32 @@ experiment. The event logger records retreatRequired for verification.
 
 This is separate from the swept-normal fix. It does not resolve the cause of
 stale approvals, and obstructed recovery behavior remains under headset review.
+
+Candidate `9988fa3867186fd908dedf2795af1911e9f2440a` passed the full Release
+build/core tests and was installed from
+`out/candidates/9988fa3-h3-physical-contact-20260906-021013195Z`. Independently
+verified DLL SHA-256:
+`0205A2C43D091E6834F0032342BE951C793E4C3F9BBF1A1487F2B8A7D6677A14`.
+The installer checked every configured edition; only E: Steam was present.
+
+Forge Construct free-space regression, Steam / SteamVR OpenXR 2.17.8 /
+Null Model Number: `out/debug-openxr/20260906-021258024Z-controller-contact-result.json`.
+Log SHA-256 `7819F369A9C7A3F43E601FAF9D05CFE8D4709145EB02AD1F234D844F711E3BCB`.
+The opt-in diagnostic injected one 40 cm final-palette separation; the production
+30 cm leash caught it. Event index 0 records corrected=0, finalGuard=0/1,
+zero consumed offset and retreatRequired=0. No controller-path or player-motion
+commands were sent after entering Forge. By the first cold event report,
+awaitingMotion was already zero and normal sweeps had resumed. Over the next
+32 seconds the reset count stayed at one, leash checks rose from 13 to 5,819,
+and sweeps rose from 12 to 1,948, with missingPose=0. This independently verifies
+continued sampling after recovery; the harness's generic pass alone only
+checks that a reset occurred. Cold log cadence does not measure exact 500 ms
+rearm timing. There were no contact hits, impulses or melee in this stationary
+free-space test; it is not an interaction demo or headset acceptance.
+
+The harness completed normally. MCC and SteamVR were independently confirmed
+closed; normal SteamVR settings restored exactly to SHA-256
+`175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`, with null
+disabled, forcedDriver empty and requireHmd true. Existing game configuration
+remained `C570089F47A17AE8645310C02688CA1454E1A02C9239BC24C5CC316E4DA94946`.
+The accepted pointer remains unchanged.
