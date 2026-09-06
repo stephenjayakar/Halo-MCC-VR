@@ -449,3 +449,71 @@ the math path separately. The harness requires actual blocked current-pose
 sweeps before passing; it still does not establish visible nonpenetration,
 contact feel, prop impulses, all maps, sword animation, or headset acceptance.
 Those are runtime tests, not conclusions from compilation.
+
+### First current-pose retail result
+
+Candidate source `52a813f67d10abbca901d107eb93fa706486861a`; package
+`out/candidates/52a813f-h3-physical-contact-20260906-082800602Z`.
+Installed DLL was independently checked as
+`6B246D06DA13FAF32D99D23A041DD3AF4CA9B9B5ACC6E688A3BD96982ABDB2ED`.
+Launcher SHA remains `D489C5763E21FC339999DC734CED09A2068AAC6C035EA8B7BF4339B6810FA450`.
+Existing configuration remains `C570089F47A17AE8645310C02688CA1454E1A02C9239BC24C5CC316E4DA94946`.
+Release, both CTest suites and packaging checks passed; Steam E: installed,
+alternate Steam and Store roots checked absent. Prior deployment is preserved
+under `out/deploy-backups/4eb9241-steam-before-52a813f-20260906-082801716Z`.
+
+Run `out/debug-openxr/20260906-082818973Z-controller-contact-result.json`
+passed its bounded current-pose blocking condition. Log SHA:
+`E6B154214324A49F3FFAC4D80CC31E1DD0E284A4CABB9A46AED343AB2F64FE46`.
+Steam / SteamVR OpenXR 2.17.8 null / Null Model Number / 90 Hz panel, 60 fps
+reported gameplay / Guardian Forge. Guardian was verified before Start in
+`20260906-082951834Z-world-volume-launch/0000-082952034Z.jpg` (see actual
+capture directory for timestamped image); gameplay was the enclosed blue room
+with the ceiling lift. The prior 068d808 preserved log reached its worker-only
+probe; this run binds and exercises current-pose rendering instead.
+
+Last cold counters: 14,439 geometry caches; three clear seeds; 83,080 admitted
+solves; 4,526 blocked solves; 3,525 held submissions; 8,365 hidden submissions;
+one shape rejection; zero unknown casts, exhausted budgets or native faults.
+Solves are pre/post palette calls, not unique displayed frames or separate
+contacts. The mean math-query cost was 3.4 microseconds, maximum 264.7 us;
+this excludes worker gathering and the rest of the legacy contact pipeline.
+The runtime nested-feature validation admitted the gathered geometry with no
+reported query failure in this room.
+
+A lateral controller sweep to X=1.3 m reached the right wall and exceeded the
+30 cm leash. The weapon draw was hidden while held there. Retreat to X=.18 m
+restored the visible gun: compare `20260906-083119925Z-world-volume-contact2`
+with `20260906-083143647Z-world-volume-retreat`. A subsequent -65 degree yaw,
+lateral/down/forward sequence increased blocked solves from 4,082 to 4,526
+without increasing hidden submissions; retreat again restored the forward
+pose. These are observed constraint/recovery transactions. The mirror often
+cropped the contact point, so visible nonpenetration and sliding accuracy are
+not established by the screenshots. No prop was contacted: impulses and
+melees were zero, so this run says nothing about nudging or enemy regression.
+
+Timing analysis is saved in
+`out/research/20260906-native-volume/current-pose-timing.json`. Of 12,726 sampled
+uncorrected palettes, 12,358 (97.1%) used fresh-region admission with zero
+proposal age and zero recorded root gap. The residual 363 worker-approved
+uncorrected samples had window p50 15-32 ms and maximum age 47 ms. This confirms
+that the new path removes the worker approval age for most admitted samples in
+this room, but it is neither an exact same-motion A/B nor sensor-to-photon
+measurement. Deliberately constrained/hidden physical roots are recorded
+separately as corrected; their gap is not free-space tracking error. Overall
+60 fps behavior remains unresolved; recording also changes frame cost.
+
+Three local MP4s under `out/demos/20260906-083048-guardian-world-volume-wall-test`,
+`20260906-083253-guardian-volume-turn-contact-retreat` and
+`20260906-083406-guardian-volume-wall-slide-view` are explicitly marked
+DIAGNOSTIC-NOT-ACCEPTANCE. They are not finished functionality demonstrations.
+The final clip crosses harness shutdown after about 14 seconds; its tail is
+not gameplay and must not be presented as a demo.
+
+Harness cleanup completed. MCC and SteamVR are closed; the restored settings
+SHA independently matches `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`.
+Null disabled, forced driver empty, real HMD required. Normal launches still
+leave WorldVolume off. The accepted pointer is unchanged. Clearer visible
+contact tests, Campaign/instance coverage, sword animation, props/NPCs and
+headset acceptance remain open; this is a successful initial integration
+probe, not a ready-for-headset or completed-goal claim.
