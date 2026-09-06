@@ -6044,7 +6044,12 @@ namespace
                         static_cast<uint32_t>(renderNodeCount),
                         previousNodeCount, proposalSerial, previousSerial,
                         previousMs, nowMs);
-                const bool freshRegion = compatibleApproval && !approvedCorrected &&
+                // An old approval cannot vouch for the current renderer's
+                // input. Only admit a current tracked reconstruction with its
+                // paired offset provenance, never an intervening stock palette.
+                const bool freshRegion = haveTrackedNodes && proposalConsumedOffsetValid &&
+                    PhysicalContactFinite(proposalConsumedOffset) &&
+                    compatibleApproval && !approvedCorrected &&
                     !candidateCorrectionApplied && Halo3AllowFreshRegion(
                         contactGeneration, approvedSerial, nowMs, approvedNodes.data(),
                         destination, static_cast<uint32_t>(renderNodeCount));
