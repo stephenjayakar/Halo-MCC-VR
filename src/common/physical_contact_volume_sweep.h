@@ -42,6 +42,39 @@ inline bool PhysicalContactVolumeSeedClear(const PhysicalContactVolumeCover& cov
     return true;
 }
 
+// Bounded depenetration proposals for a changed cover at an old contact pose.
+// Directions are proposals only: the callback must prove the full incoming
+// cover clear in current complete geometry. Failure leaves output untouched.
+template<class ClearSphere>
+inline bool PhysicalContactRecoverVolumeSeed(const PhysicalContactVolumeCover& cover,
+    const PhysicalContactTransform& historical,PhysicalContactVec3 preferred,
+    float skin,float maximumShift,uint32_t budget,PhysicalContactTransform& output,
+    uint32_t& queries,ClearSphere&& clearSphere)
+{
+    queries=0;
+    if (!PhysicalContactVolumeRigid(historical) || !PhysicalContactFinite(preferred) ||
+        !std::isfinite(maximumShift) || maximumShift<=0 || maximumShift>1 || !budget || budget>4096)
+        return false;
+    const auto direction=PhysicalContactNormalize(preferred);
+    const PhysicalContactVec3 directions[]{direction,{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (float fraction : {.05f,.15f,.30f,.60f,1.f})
+        for (const auto axis:directions)
+        {
+            if (PhysicalContactLengthSquared(axis)<.5f) continue;
+            auto candidate=historical;
+            candidate.position=candidate.position+axis*(maximumShift*fraction);
+            const bool clear=PhysicalContactVolumeSeedClear(cover,candidate,skin,
+                [&](PhysicalContactVec3 center,float radius) {
+                    if (queries==budget) return false;
+                    ++queries;
+                    return clearSphere(center,radius);
+                });
+            if (clear) { output=candidate; return true; }
+            if (queries==budget) return false;
+        }
+    return false;
+}
+
 inline bool PhysicalContactBuildVolumePath(const PhysicalContactTransform& from,
     const PhysicalContactTransform& to, PhysicalContactVolumePath& path)
 {

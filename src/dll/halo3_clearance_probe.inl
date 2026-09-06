@@ -77,9 +77,8 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     constexpr bool kEnableHalo3WorldVolumeExperiment = false;
     const bool worldFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_VOLUME", value, 2) == 1 && value[0] == L'1';
-    // Disabled after historical seed revalidation still fell through to an
-    // unconstrained sword draw during deep Guardian doorway contact.
-    constexpr bool kEnableHalo3WorldPartitionsExperiment = false;
+    // Opt-in bounded depenetration candidate for rejected changed-cover seeds.
+    constexpr bool kEnableHalo3WorldPartitionsExperiment = true;
     const bool partitionsFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS", value, 2) == 1 && value[0] == L'1';
     const bool partitions = kEnableHalo3WorldPartitionsExperiment && partitionsFlag;

@@ -1770,3 +1770,35 @@ No session has used this disabled package. Campaign checkpoint bytes still
 match the original snapshot; all four Steam metadata entries match their live
 files. AceSettings has the same SHA1 as before this run, including the previously
 preserved completion data. No save or profile restoration was performed.
+
+#### Bounded depenetration of changed-cover seeds (2026-09-06 candidate)
+
+50681c9 proved that a historical transform is insufficient when incoming blade
+geometry overlaps there. After the separate 0cdb9fa disable, this next candidate
+searches at most 35 translated poses around a rejected historical seed (five
+shells up to 0.10m, preferred direction away from raw followed by six world
+axes). Directions only propose poses: every incoming cover sphere must fit a
+complete region with EXACT matching expansion, be outside its expanded feature
+union, and pass the pinned native solid-interior point query against the same
+active structure. Reset and object epoch are still checked before publication.
+No radius is reduced and no rejected pose is granted clearance. The existing
+historical identity/0.60m admission bound and 0.30m visual leash remain.
+
+The simulation worker reuses complete cached native features instead of doing
+new native gathers at every search position. At most 512 sphere callbacks are
+allowed; budget exhaustion or failed containment leaves the output unmodified.
+The 0.40m region reserve covers a possible 0.10m seed displacement plus the
+existing 0.30m solver correction; actual cast containment still enforces this
+rather than assuming it. Cold counters record attempts, complete clear seeds,
+sphere checks, mean/maximum duration and native query faults. The new native
+point helper uses the existing pinned signature and SEH; a fault contributes
+to the existing world-volume failure counter checked by the harness.
+
+Unit fixture: both tips overlap two analytic corner faces at the old pose;
+a diagonal candidate clears both and fits complete regions. Single-query
+exhaustion cannot publish a partial proof, fully enclosed/unknown space rejects
+all proposals, and a 0.33 world scale preserves the metric displacement bound.
+Initial Release and both CTests passed; final packaging will compile the helper
+relocation that makes native faults visible in the existing counter. This is
+opt-in partition recovery only. No runtime or headset result is claimed yet;
+no-seed fallback still needs verification if all bounded proposals fail.

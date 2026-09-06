@@ -42,6 +42,8 @@ std::atomic<uint64_t> g_halo3WorldQueries{0},g_halo3WorldExhausted{0};
 std::atomic<uint64_t> g_halo3WorldClockAdvances{0};
 std::atomic<uint64_t> g_halo3WorldCoverReused{0},g_halo3WorldCoverChanged{0};
 std::atomic<uint64_t> g_halo3WorldSeedRetests{0},g_halo3WorldSeedRetestClear{0},g_halo3WorldSeedRetestRejected{0};
+std::atomic<uint64_t> g_halo3WorldRecoveryAttempts{0},g_halo3WorldRecoveryClear{0},g_halo3WorldRecoveryQueries{0};
+std::atomic<uint64_t> g_halo3WorldRecoveryTicks{0},g_halo3WorldRecoveryMaxTicks{0};
 std::atomic<uint64_t> g_halo3WorldCoverChecks{0},g_halo3WorldCoverTicks{0},g_halo3WorldCoverMaxTicks{0};
 std::atomic<uint64_t> g_halo3WorldSolveMaxTicks{0},g_halo3WorldSolveTicks{0},g_halo3WorldSolveCount{0};
 std::atomic<uint64_t> g_halo3WorldPartitionCalls{0},g_halo3WorldPartitionRegions{0};
@@ -390,6 +392,23 @@ bool Halo3GatherWorldPartitions(Halo3WorldVolumeCache& c,int32_t ignored)
     { g_halo3WorldFaults.fetch_add(1,std::memory_order_relaxed); return false; }
 }
 
+// Cached expanded features prove boundary clearance separately. This native
+// test supplies the solid-interior proof; it never authorizes a sphere alone.
+bool Halo3NativeSeedPointOutside(PhysicalContactVec3 center,int32_t ignored,uint32_t expectedActive)
+{
+    if (!g_halo3ClearancePoint || !g_halo3ClearanceActiveMask || !expectedActive ||
+        (expectedActive&0xFFFF0000u) || !PhysicalContactFinite(center)) return false;
+    __try
+    {
+        if (*g_halo3ClearanceActiveMask!=expectedActive) return false;
+        int32_t type=0;
+        return !g_halo3ClearancePoint(9,&center.x,ignored,-1,&type) &&
+            *g_halo3ClearanceActiveMask==expectedActive;
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    { g_halo3WorldFaults.fetch_add(1,std::memory_order_relaxed); return false; }
+}
+
 void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
     uint16_t tag,int32_t ignored,const PhysicalContactCompoundShape& shape,
     const BoneMatrix* nodes,uint32_t count,float worldScale)
@@ -528,6 +547,32 @@ void Halo3PublishWorldVolume(uint64_t nowMs,uint32_t generation,int32_t weapon,
         (clear ? g_halo3WorldSeedRetestClear : g_halo3WorldSeedRetestRejected)
             .fetch_add(1,std::memory_order_relaxed);
         if (clear) { c.seed=safe.get().root; c.seeded=true; }
+        else
+        {
+            LARGE_INTEGER begin{},end{}; QueryPerformanceCounter(&begin);
+            uint32_t queries=0;
+            g_halo3WorldRecoveryAttempts.fetch_add(1,std::memory_order_relaxed);
+            const bool recovered=PhysicalContactRecoverVolumeSeed(c.cover,safe.get().root,
+                safe.get().root.position-raw.position,c.skin,.10f*worldScale,512,c.seed,queries,
+                [&](PhysicalContactVec3 center,float radius) {
+                    for (uint32_t index=0;index<c.regions.count;++index)
+                    {
+                        if (!PhysicalContactVolumeRegionContains(c.regions.regions[index],center,center,radius)) continue;
+                        return Halo3VolumePointOutsideFeatures(c.regionFeatures[index].bytes.data(),
+                            Halo3VolumeFeatures::kBytes,&center.x) &&
+                            Halo3NativeSeedPointOutside(center,ignored,c.active);
+                    }
+                    return false;
+                });
+            if (recovered) { c.seeded=true; g_halo3WorldRecoveryClear.fetch_add(1,std::memory_order_relaxed); }
+            g_halo3WorldRecoveryQueries.fetch_add(queries,std::memory_order_relaxed);
+            QueryPerformanceCounter(&end);
+            const auto ticks=static_cast<uint64_t>(std::max<LONGLONG>(0,end.QuadPart-begin.QuadPart));
+            g_halo3WorldRecoveryTicks.fetch_add(ticks,std::memory_order_relaxed);
+            auto peak=g_halo3WorldRecoveryMaxTicks.load(std::memory_order_relaxed);
+            for (unsigned attempt=0;ticks>peak && attempt<3;++attempt)
+                if (g_halo3WorldRecoveryMaxTicks.compare_exchange_weak(peak,ticks,std::memory_order_relaxed)) break;
+        }
     }
     // Re-seed only at an independently clear raw pose. A stationary native
     // first-hit query is directional and cannot prove an inside-wall reset.
@@ -704,6 +749,12 @@ void Halo3LogWorldVolume()
         g_halo3ContactFutureMotionSkips.load());
     LOG("H3 world historical seed: tested=%llu clear=%llu rejected=%llu; full current cover and scene revalidation, 0.60m candidate bound",
         g_halo3WorldSeedRetests.load(),g_halo3WorldSeedRetestClear.load(),g_halo3WorldSeedRetestRejected.load());
+    const auto recoveryAttempts=g_halo3WorldRecoveryAttempts.load();
+    if (recoveryAttempts && frequency.QuadPart>0)
+        LOG("H3 world seed depenetration: attempts=%llu clear=%llu queries=%llu meanUs=%.1f maxUs=%.1f; maxShift=0.10m queryBudget=512, cached boundary plus native interior proof",
+            recoveryAttempts,g_halo3WorldRecoveryClear.load(),g_halo3WorldRecoveryQueries.load(),
+            g_halo3WorldRecoveryTicks.load()*1.e6/frequency.QuadPart/recoveryAttempts,
+            g_halo3WorldRecoveryMaxTicks.load()*1.e6/frequency.QuadPart);
     LOG("H3 world handoff counts: lost=%llu visibleOverLeashWithoutLoss=%llu hidden=%llu controls=%llu clockCases=%llu missingSeed=%llu",
         g_halo3WorldHandoffCounts[0].load(),g_halo3WorldHandoffCounts[1].load(),
         g_halo3WorldHandoffCounts[2].load(),g_halo3WorldHandoffCounts[3].load(),g_halo3WorldHandoffCounts[4].load(),

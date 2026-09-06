@@ -232,6 +232,48 @@ static void TestPhysicalContactChangedCoverSeed()
         "query skin cannot mask an invalid negative cover radius");
 }
 
+static void TestPhysicalContactSeedDepenetration()
+{
+    // A changed two-tip cover overlaps both faces of a doorway corner by
+    // 10 mm. Independent analytic clearance admits neither an embedded seed
+    // nor a one-axis escape which still overlaps the other face.
+    PhysicalContactVolumeCover cover{}; cover.count=2;
+    cover.spheres[0]={{.93f,.93f,.1f},.075f,0};
+    cover.spheres[1]={{.93f,.93f,-.1f},.075f,1};
+    PhysicalContactTransform historical{},raw{},recovered{};
+    raw.position={.1f,.1f,0}; recovered.position={9,9,9};
+    PhysicalContactVolumeRegions regions{};
+    Check(PhysicalContactBuildVolumeRegions(cover,historical,raw,.005f,.4f,.2f,.08f,regions),
+        "changed-cover corner fixture gathers complete recovery reserves");
+    const auto clear=[&](PhysicalContactVec3 center,float radius) {
+        bool contained=false;
+        for (unsigned i=0;i<regions.count;++i)
+            contained=contained || PhysicalContactVolumeRegionContains(regions.regions[i],center,center,radius);
+        return contained && center.x+radius<1.f && center.y+radius<1.f;
+    };
+    Check(!PhysicalContactVolumeSeedClear(cover,historical,.005f,clear),
+        "new tips overlap the doorway at the historical pose");
+    uint32_t queries=0;
+    Check(PhysicalContactRecoverVolumeSeed(cover,historical,{-1,-1,0},.005f,.1f,512,recovered,queries,clear) &&
+        queries<=512 && PhysicalContactLength(recovered.position-historical.position)<=.1f &&
+        recovered.position.x<0 && recovered.position.y<0 &&
+        PhysicalContactVolumeSeedClear(cover,recovered,.005f,clear),
+        "bounded whole-cover depenetration recovers both corner faces inside gathered regions");
+    auto untouched=recovered; untouched.position={9,9,9};
+    Check(!PhysicalContactRecoverVolumeSeed(cover,historical,{-1,-1,0},.005f,.1f,1,untouched,queries,clear) &&
+        queries==1 && untouched.position.x==9,
+        "exhausted depenetration cannot publish a partial cover or mutate the old seed");
+    Check(!PhysicalContactRecoverVolumeSeed(cover,historical,{-1,-1,0},.005f,.1f,512,untouched,queries,
+        [](PhysicalContactVec3,float) { return false; }) && queries<=35 && untouched.position.x==9,
+        "an enclosed or unknown scene rejects all bounded proposals without inventing clearance");
+    auto scaled=historical; scaled.scale=.33f;
+    Check(PhysicalContactRecoverVolumeSeed(cover,scaled,{-1,-1,0},.005f*.33f,.1f*.33f,512,untouched,queries,
+        [](PhysicalContactVec3 center,float radius) {
+            return center.x+radius<.33f && center.y+radius<.33f;
+        }) && PhysicalContactLength(untouched.position-scaled.position)<=.033f,
+        "depenetration respects world-scaled weapon radius, skin and maximum displacement");
+}
+
 static void TestPhysicalContactCoverReuse()
 {
     auto shape=std::make_unique<PhysicalContactCompoundShape>();
@@ -345,6 +387,7 @@ static void TestPhysicalContactVolumeSweep()
     TestHalo3ExpandedFeatureClearance();
     TestPhysicalContactCoverReuse();
     TestPhysicalContactChangedCoverSeed();
+    TestPhysicalContactSeedDepenetration();
     TestPhysicalContactRecoveryRegions();
     TestPhysicalContactVolumeRegions();
     TestContactSnapshotLifetime();
