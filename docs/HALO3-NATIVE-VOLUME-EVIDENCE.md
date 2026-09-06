@@ -933,3 +933,37 @@ is not weakened to pass without geometric evidence. Audit-enabled run timings
 must not be presented as ordinary tracking performance. A live audit-off
 comparison and headset latency acceptance remain outstanding; the experimental
 world and blade paths still default off.
+
+The diagnostic scheduling change is source
+`f9ddf32aef7032630c734fd341922747a582fd8d`, packaged as
+`out/candidates/f9ddf32-h3-physical-contact-20260906-100951472Z`.
+Release build and both CTests passed; PowerShell parsed the updated harness
+without errors. Installed DLL independently verified:
+`43CC1F19215538F13D0579C95FDE382A4558E0D2E14F9CC4B71E588FC4D1FAE2`.
+E: Steam installed; alternate Steam and Store roots absent. Prior install is
+preserved in `out/deploy-backups/05d6292-steam-before-f9ddf32-20260906-100952384Z`.
+Launcher/config hashes are unchanged. No MCC or headset session has run on
+this source yet. MCC/SteamVR remain closed and normal VR settings match the
+previous restoration hash. The accepted pointer has not advanced.
+
+#### Next diagnostic lead: legacy cached-pose handoff
+
+Re-reading the preserved 4500848 log changes the next investigation. At
+`02:52:38.446`, proof-2 cached poses report origin age up to 1,031 ms and a
+peak root gap of 4.1201 m. In the same reporting window the blade append is
+inactive, weapon geometry drops from 256 to 12 triangles, shape rejects rise
+from 2 to 162, and body render separation failures reach 165. These are
+co-occurring observations, not an established causal chain or per-frame proof.
+The pose timing record precedes the optional hidden-draw scale, so it alone
+does not prove that every distant physical pose was visibly drawn.
+
+The code contains two separate world constraint calls around the legacy
+approval/body-follow path. The legacy final leash is skipped when the first
+call returns nonzero. The second call independently reads the cache and may
+return zero before applying any transform if the cache has no seed or matching
+safe pose. Hidden drawing then depends only on that second return being 2.
+A between-call ownership/shape transition is therefore a specific candidate
+handoff gap to instrument, not a verified explanation of the logged frame.
+The next observation must pair both return values, final gap, hide disposition
+and cache identity on the same frame before selecting a behavioral fix. Do
+not treat audit opt-out as resolving this older cached-pose problem.
