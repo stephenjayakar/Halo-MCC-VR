@@ -523,3 +523,40 @@ This rollback is not a promise of zero wall clipping. Resetting a weapon to a
 hand already deep inside a surface remains an unresolved placement case, and
 native collision coverage, current-pose approval and prop response still need
 Guardian runtime/headset verification. The accepted pointer is unchanged.
+
+### Recovery-pause rollback candidate and bounded runtime result
+
+Source `2269d6fd10fdede9be0d077e912179cd733163fb` passed the cumulative
+Release build, both CTest suites, and Reach consistency check. Package:
+`out/candidates/2269d6f-h3-physical-contact-20260906-060713837Z`.
+Installed DLL independently verified:
+`F185CB0E71CDDB44D8DE81157422E17B2009EAE13F98F9B2048044E669C16E87`.
+Launcher remains `D489C5763E21FC339999DC734CED09A2068AAC6C035EA8B7BF4339B6810FA450`.
+Only E: Steam is present; both alternate edition roots were checked and absent.
+Prior files, including the failed Guardian log, are backed up under
+`out/deploy-backups/0417f56-steam-before-2269d6f-20260906-060714955Z`.
+The earlier backup before `8436e79` only contains the failed signed-out launch,
+so it cannot supply a working interaction baseline; the preserved Floodgate
+headset session remains the earlier partial-success comparison.
+
+Runtime result:
+`out/debug-openxr/20260906-060733010Z-controller-contact-result.json`, passed.
+Log SHA-256 `8DB510181248A8F60303724DC93EA57D12EC99D28A537D1B745F6B4673C8DE49`.
+Steam / SteamVR OpenXR / Null Model Number, Forge **Construct**, as verified
+from the lobby screenshot. A screenshot prefix says Guardian-recovery because
+it names the reported defect; it does not identify the test map. The forced
+40 cm startup palette displacement generated one recovery. Normal sampling
+continued without user motion: final counters were 3671 sweeps, 234944 wall
+rays, 10913 approved palettes, one recovery, `awaitingMotion=0`, `contactPause=0`.
+The two-second log does not resolve next-tick timing; timestamp boundary tests
+and code inspection cover that policy. Subsequent short movement/pose commands
+did not reach a wall or prop: zero wall blocks and impulses. This run verifies
+recovery and continued sampling only, not repaired Guardian interaction.
+
+The harness completed and closed MCC/SteamVR. Restored SteamVR hash matches
+the immediately preceding headset settings:
+`298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`.
+Null driver false, forcedDriver empty, requireHmd true; config unchanged at
+`C570089F47A17AE8645310C02688CA1454E1A02C9239BC24C5CC316E4DA94946`.
+Sword/fresh-region experiments remain off. Guardian wall/prop verification
+and explicit headset acceptance are still required.
