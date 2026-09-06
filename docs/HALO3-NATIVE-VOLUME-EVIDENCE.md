@@ -1252,3 +1252,60 @@ cache cannot authorize the first sweep; the retained-safe path reaches contact
 within 30 cm of raw and releases immediately on retreat. This synthetic case
 proves the coverage correction, not native performance or headset behavior.
 The experiment remains opt-in pending a repeat-approach runtime result.
+
+#### fcb4bc0 green-panel runtime check
+
+Source `fcb4bc0e3ee9547af17df5163e4ec54eca8d4cde`, package
+`out/candidates/fcb4bc0-h3-physical-contact-20260906-110719783Z`, installed Steam
+DLL independently verified at
+`317D07ED3E8A875E96E3986A9CB7D046805C31716B37E47484428D35DB9279DF`.
+Release and both CTests passed; previous files are preserved in
+`out/deploy-backups/a803c95-steam-before-fcb4bc0-20260906-110720791Z`.
+Other Steam/Store roots were absent. Launcher and config hashes unchanged.
+
+Run `20260906-110739828Z-controller-contact-result.json`: Steam / SteamVR null /
+Null Model Number, Guardian Forge, WorldPartitions and mesh audit, no blade
+geometry. Spawn was the blue lift room rather than the prior overshield room.
+D 500 ms then W 4000 + 1000 ms approached the green panel. Controller Z -0.95
+produced a conservative block before sampled requested mesh penetration;
+Z -1.15 deepened contact. Retraction to Z -0.48 plus S 500 ms, then W 500 ms
+plus Z -1.15, kept the gun visible in inspected captures. A second retraction
+and S 500 ms released again. These are different geometry and controls from
+the earlier failure, so this is not an exact regression reproduction.
+
+The harness **timed out without its positive paired-mesh condition**; its
+requested 90-second post-pass hold never began. All 32 detailed mesh samples
+were used before the deeper contact, with zero positive counterfactuals.
+Therefore it does not establish penetration-free submitted geometry during
+recontact. Log SHA:
+`77B685AA20697A2E214AE447EAA393C11372B8247748E39982773A45B8CFBA33`.
+Parsed result: `out/research/20260906-native-volume/guardian-safe-path-audit.json`.
+
+Last preserved counters: 10,806 caches / 26,937 regions; zero capacity errors,
+invalid regions, planning failures, missing regions, invalid casts, native
+faults, unknown solves or exhausted query budgets. 62,187 admitted solves,
+15,480 blocks, 2,649 holds and six early hide decisions / shape rejects; final
+handoff hidden counter zero. One ownership loss had a near-hand 0.00001 m gap,
+not a distant visible weapon. Cover mean/max 5.2/99.2 us, native gather mean/max
+143.7/764.0 us, solve mean/max 14.1/314.2 us, mesh audit max 3,437.3 us. These are
+instrumented null-driver measurements, not headset latency or FPS acceptance.
+No clock-race or changing-geometry reuse case was captured.
+
+Thirty-second captioned actual-gameplay clip (raw seconds 7-37):
+`out/demos/20260906-111141-guardian-green-panel-recovery-check/recovery-check.mp4`,
+SHA `710BAABBC11044E0EF0DBDEADDFB630DA5490AEF3A22CB4055E6497AF3756034`.
+Raw 45-second source SHA:
+`A7AEF6DF56A02FE1A59712367796FD4039D7176CF8A5C5FBE87E94AEB4EFB244`.
+Raw frames at 16 and 33 seconds and encoded frame at 22 seconds were inspected.
+This demonstrates the visible contact/release sequence only; no prop/NPC,
+sword, exhaustive collision, headset tracking or overall completion claim.
+
+MCC and SteamVR closed; independently verified normal settings SHA
+`298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`, null false,
+forced driver empty, requireHmd true. No persistent world-partition/audit
+environment overrides in process, user or machine scope. The new solver stays
+off in normal launches; the existing physical-contact config remains enabled.
+Final read-only save check found all four files byte-identical to the original
+Campaign snapshot and all Steam metadata matching. No restore was necessary.
+Accepted pointer unchanged. Next evidence gaps are the same-doorway failure
+sequence and event-spaced mesh samples that survive through recontact.
