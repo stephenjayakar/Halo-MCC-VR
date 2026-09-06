@@ -30,6 +30,7 @@
 #include "sigscan.h"
 #include "odst_vehicle_logic.h"
 #include "physical_contact_logic.h"
+#include "physical_contact_volume_logic.h"
 #include "halo3_sword_contact_logic.h"
 #include "fixtures/h3_solid_overlap_replay.h"
 #include "null_controller_path.h"
@@ -11497,10 +11498,147 @@ __declspec(noinline) static int RunCoreTests()
     return g_failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
+__declspec(noinline) static void TestPhysicalContactVolumeCover()
+{
+    auto shape = std::make_unique<PhysicalContactCompoundShape>();
+    auto mesh = std::make_unique<PhysicalContactTriangleMesh>();
+    PhysicalContactVolumeCover cover{};
+    const auto contains = [&](PhysicalContactVec3 p, const PhysicalContactTransform& t,
+                              int child = -1) {
+        for (uint16_t i = 0; i < cover.count; ++i)
+        {
+            const auto& sphere = cover.spheres[i];
+            if (child >= 0 && sphere.child != child) continue;
+            const auto center = PhysicalContactTransformPoint(t,sphere.center);
+            const double dx = double(p.x)-center.x, dy = double(p.y)-center.y, dz = double(p.z)-center.z;
+            const double radius = double(sphere.radius)*t.scale;
+            if (dx*dx+dy*dy+dz*dz <= radius*radius) return true;
+        }
+        return false;
+    };
+    const auto box = [&](PhysicalContactVec3 half, PhysicalContactVec3 offset) {
+        *shape = {};
+        shape->childCount = 1;
+        auto& child = shape->children[0];
+        child.vertexCount = 8;
+        for (int i = 0; i < 8; ++i)
+            child.vertices[i] = offset + PhysicalContactVec3{
+                (i&1) ? half.x : -half.x, (i&2) ? half.y : -half.y, (i&4) ? half.z : -half.z};
+    };
+    PhysicalContactTransform identity{};
+    unsigned samples = 0, misses = 0;
+    for (const auto half : {PhysicalContactVec3{.45f,.035f,.09f},
+                           PhysicalContactVec3{.035f,.45f,.09f},
+                           PhysicalContactVec3{.035f,.09f,.45f}})
+    {
+        box(half,{});
+        shape->children[0].radius = .013f;
+        Check(PhysicalContactBuildVolumeCover(*shape,.10f,cover),"whole-volume cover admits each long-axis weapon orientation");
+        for (int x = -10; x <= 10; ++x)
+        for (int y = -10; y <= 10; ++y)
+        for (int z = -10; z <= 10; ++z)
+        {
+            const PhysicalContactVec3 point{half.x*x/10,half.y*y/10,half.z*z/10};
+            for (const auto direction : {PhysicalContactVec3{1,0,0},PhysicalContactVec3{-1,0,0},
+                    PhysicalContactVec3{0,1,0},PhysicalContactVec3{0,-1,0},
+                    PhysicalContactVec3{0,0,1},PhysicalContactVec3{0,0,-1},
+                    PhysicalContactNormalize(PhysicalContactVec3{1,1,1})})
+            {
+                misses += !contains(point+direction*.013f,identity,0);
+                ++samples;
+            }
+        }
+    }
+    Check(samples == 194481 && misses == 0,
+        "volume union covers box faces, interior and authored round padding between all sampled rays");
+
+    // Actual authored blade triangles, including their edges and interiors,
+    // under a separately animated blade node and a transformed/scaled root.
+    unsigned swordSamples = 0, swordMisses = 0, maximumSpheres = 0;
+    for (float scale : {.5f,1.f,1.5f})
+    for (float angle : {-.7f,.3f,1.2f})
+    {
+        *shape = {}; *mesh = {};
+        PhysicalContactTransform root{}, blade{}, inverse{};
+        root.position = {13.25f,-4.5f,2.75f}; root.scale = scale;
+        root.forward = {std::cos(angle),0,std::sin(angle)};
+        root.up = {-std::sin(angle),0,std::cos(angle)};
+        blade = root;
+        blade.forward = {std::cos(angle+.5f),0,std::sin(angle+.5f)};
+        blade.up = {-std::sin(angle+.5f),0,std::cos(angle+.5f)};
+        blade.position = PhysicalContactTransformPoint(root,{.11773932f,0,0});
+        inverse.position.x = -.11773932f;
+        Check(Halo3AppendSwordBladeGeometry(inverse,blade,root,*shape,mesh.get()),
+            "real sword blade fixture builds for volume coverage");
+        Check(PhysicalContactBuildVolumeCover(*shape,.033f/scale,cover),
+            "both animated sword prongs fit the bounded volume budget");
+        maximumSpheres = std::max(maximumSpheres,unsigned(cover.count));
+        for (uint16_t face = 0; face < mesh->triangleCount; ++face)
+        for (int a = 0; a <= 8; ++a)
+        for (int b = 0; b <= 8-a; ++b)
+        {
+            const auto& t = mesh->triangles[face];
+            const auto local = t.vertices[0]*(a/8.f) + t.vertices[1]*(b/8.f) + t.vertices[2]*((8-a-b)/8.f);
+            swordMisses += !contains(PhysicalContactTransformPoint(root,local),root,face/122);
+            ++swordSamples;
+        }
+    }
+    Check(swordSamples == 98820 && swordMisses == 0,
+        "whole-volume cover includes every real blade triangle's sampled edges and interior under animation and world transforms");
+    std::cout << "Volume cover: " << samples << " padded box samples, " << swordSamples
+              << " sword samples; max sword spheres=" << maximumSpheres << '\n';
+
+    box({.05f,.03f,.01f},{100000.f,-100000.f,100000.f});
+    Check(PhysicalContactBuildVolumeCover(*shape,.01f,cover),"large finite local center is bounded without overflowing midpoint arithmetic");
+    for (unsigned i = 0; i < 8; ++i)
+        Check(contains(shape->children[0].vertices[i],identity),"stored-center rounding does not uncover a large-coordinate corner");
+    box({2.f,.03f,.01f},{});
+    Check(!PhysicalContactBuildVolumeCover(*shape,.001f,cover) && cover.count == 0,
+        "excessive volume demand rejects instead of silently leaving part of a weapon uncovered");
+    box({.05f,.03f,.01f},{});
+    shape->childCount = 16;
+    for (int i = 1; i < 16; ++i) shape->children[i] = shape->children[0];
+    Check(!PhysicalContactBuildVolumeCover(*shape,.01f,cover) && cover.count == 0,
+        "cumulative child capacity failure publishes no partial coverage");
+    shape->childCount = 1;
+    Check(!PhysicalContactBuildVolumeCover(*shape,0,cover) && cover.count == 0,
+        "invalid slab size rejects coverage");
+    shape->children[0].vertices[0].x = std::numeric_limits<float>::quiet_NaN();
+    Check(!PhysicalContactBuildVolumeCover(*shape,.1f,cover) && cover.count == 0,
+        "nonfinite authored geometry cannot enter the native sweep");
+
+    for (float angle : {.0001f,.2f,1.57f,3.1415926f})
+    for (float lever : {.02f,.4f,2.f})
+    {
+        const float bound = PhysicalContactVolumeArcError(lever,angle);
+        Check(bound > 0,"small positive rotation retains a nonzero coverage bound");
+        bool enclosed = true;
+        for (unsigned i = 0; i <= 100; ++i)
+        {
+            const double a = double(angle)*(double(i)/100-.5);
+            const double actual = lever*(std::cos(a)-std::cos(double(angle)*.5));
+            enclosed = enclosed && actual <= bound;
+        }
+        Check(enclosed,"angular skin encloses the full rotation arc above its swept chord");
+        const unsigned steps = PhysicalContactVolumeAngularSteps(lever,angle,.005f,64);
+        Check(steps > 0 && PhysicalContactVolumeArcError(lever,angle/steps) <= .005f,
+            "rotation subdivision meets a fixed five-millimeter arc allowance");
+    }
+    Check(!PhysicalContactVolumeAngularSteps(2.f,3.1415926f,.000001f,16),
+        "rotation beyond the fixed work budget does not silently lose swept coverage");
+    Check(!PhysicalContactVolumeAngularSteps(2.f,3.1415926f,.005f,16),
+        "two-meter half-turn requires more than sixteen steps even at five-millimeter tolerance");
+    Check(!PhysicalContactVolumeAngularSteps(-1.f,.1f,.005f) &&
+          !PhysicalContactVolumeAngularSteps(1.f,4.f,.005f) &&
+          !PhysicalContactVolumeAngularSteps(1.f,.1f,0),
+        "invalid rotation and allowance reject before a native call");
+}
+
 int main()
 {
     // The legacy suite's compiler-sized frame is already near Windows' stack
     // reserve. Exercise the mesh kernel before entering that separate frame.
     TestHalo3SwordGeometry();
+    TestPhysicalContactVolumeCover();
     return RunCoreTests();
 }

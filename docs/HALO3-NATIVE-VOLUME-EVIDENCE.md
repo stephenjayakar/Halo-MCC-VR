@@ -131,3 +131,75 @@ hash `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`.
 Null driver disabled, forcedDriver empty, requireHmd true. No production weapon
 response changed, no functionality video is claimed, and the accepted pointer
 in CURRENT-STATE remains unchanged.
+
+## Whole-weapon coverage foundation (not installed behavior)
+
+`src/common/physical_contact_volume_logic.h` constructs an enclosing union of
+at most 64 spheres from all authored convex children. Each child is divided
+into slabs along its longest local axis; each sphere encloses a complete slab,
+including the child's authored round padding. Therefore the construction covers
+the hull's faces and interior, not just vertices or selected triangle rays.
+The output remains in local coordinates. Callers must transform centers and
+scale radii consistently with the actual weapon palette.
+
+Centers and radii account for stored-float rounding. Invalid geometry, invalid
+slab size, or exceeding the cumulative sphere budget returns no cover, never a
+partial cover. The helper also bounds rotation arc/chord error using a stable
+sine expression and rejects rotation subdivision beyond the caller's budget.
+This is only a geometric bound: it does not itself implement rotation
+interpolation, collision response, or a safe starting-pose policy.
+
+Release core tests exercise 194,481 padded box points over all three long-axis
+orientations, plus 98,820 points on the actual 244 sword blade triangles under
+nine animated scale/rotation cases. All were enclosed. The largest blade-only
+cover in these fixtures used 36 spheres. Tests also cover large-coordinate
+center rounding, invalid input, cumulative capacity rejection, and rotation arc
+coverage. An initial test incorrectly expected a two-meter half-turn to fit 16
+steps at 5 mm tolerance; the helper correctly rejected it. The test now verifies
+that rejection and checks admissible subdivision with an explicit larger budget.
+Both CTest suites pass after that correction.
+
+These are enclosing volumes, not an exact mesh decomposition. They can cause
+early contact and can enclose empty space, including parts of the sword-prong
+gap, despite retaining separate child identities. Tighter coverage and native
+query cost need measurement before this can be a polished player-facing solver.
+No runtime code includes this new helper yet; no candidate was installed for
+this foundation, and the existing installed identity above remains unchanged.
+
+## Verified first-contact output for a rigid weapon
+
+Read-only matching found the feature query called by both movement solvers:
+official `71BCC0`, retail `24B8B0`, with call shape
+`bool(features*, start*, displacement*, collision_record*)`. The verifier now
+checks a unique 52-byte retail entry, the official/retail argument flow, the
+closest-fraction comparisons, and these output writes:
+
+- `+0x10`: first contact fraction. Both functions select a smaller candidate
+  fraction and write it here. The movement solvers subtract it from one before
+  scaling remaining displacement.
+- `+0x14`: three-float center position, calculated explicitly as start plus
+  displacement times that fraction in both modules.
+- `+0x20`: normal xyz and plane distance. Official `64F3DE` names the field
+  `&collision->plane` in its plane-validation assertion; both modules copy the
+  corresponding 16-byte value here.
+
+Retail's no-hit branch writes fraction one and start plus full displacement;
+its plane is unspecified on that branch and must not be read. The comparison
+also rejects contacts whose normal does not face against movement. This remains
+a first-contact query, not an initial-overlap or interior recovery method.
+
+Verification output is
+`out/research/20260906-native-volume/first-hit-verification.json`, against the
+same pinned official and retail hashes. The earlier 34-byte entry prefix was
+nonunique; verification rejected it. No runtime binding used that prefix. The
+52-byte entry is unique in the pinned retail executable sections. The function
+has not yet been directly called by the mod; the previous native movement probe
+used it indirectly inside the engine solver.
+
+This provides the first-contact information needed to constrain one rigid
+weapon by the earliest of all its enclosing volumes. Applying each sphere's
+independent final slide position would not define a single rigid weapon pose.
+Integration must still maintain a clear start, cover the actual rotation path,
+recast any changed motion, bound query work, and keep movable-object impulses
+and melee as separate features. The native map geometry does not establish
+collision for purely visual meshes that the engine never gave a collider.
