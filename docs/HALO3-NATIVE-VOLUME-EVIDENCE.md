@@ -1063,3 +1063,8 @@ Normal VR settings independently match
 MCC/SteamVR are closed, null disabled, forced driver empty, requireHmd true.
 World partitions and blade geometry remain opt-in, and the accepted pointer
 has not advanced.
+
+The partition experiment was subsequently disabled in its own source commit
+after the repeated failed Floodgate runs and directly observed false-future
+cache rejection. Its implementation and diagnostics remain intact. This
+disable precedes the next behavioral candidate; it does not advance acceptance.
