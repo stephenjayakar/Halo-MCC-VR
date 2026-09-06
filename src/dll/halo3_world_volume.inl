@@ -67,11 +67,11 @@ struct Halo3WorldMeshAudit
     int disposition{};
     bool valid{},faulted{};
 };
-// 128 observations at 2.5 s spacing cover the 180 s validation + 90 s
-// recovery hold without exhausting the mesh audit on the initial contact.
+// 256 observations at 2.5 s spacing cover the 300 s validation + 90 s
+// recovery hold, including raw poses that never acquire solver ownership.
 // Native queries remain diagnostic-only and never run from rendering.
-std::array<Halo3WorldMeshAudit,128> g_halo3WorldMeshAudits{};
-std::array<std::atomic<uint32_t>,128> g_halo3WorldMeshAuditStates{};
+std::array<Halo3WorldMeshAudit,256> g_halo3WorldMeshAudits{};
+std::array<std::atomic<uint32_t>,256> g_halo3WorldMeshAuditStates{};
 struct Halo3WorldGatherAudit
 {
     uint64_t ms{};
@@ -93,11 +93,11 @@ struct Halo3WorldHandoffObservation
     PhysicalContactVec3 tracked{},submitted{};
     Halo3WorldConstraintObservation before{},after{};
 };
-std::array<Halo3WorldHandoffObservation,80> g_halo3WorldHandoffRecords{};
-std::array<std::atomic<uint32_t>,80> g_halo3WorldHandoffStates{};
-std::array<std::atomic<uint64_t>,5> g_halo3WorldHandoffCounts{};
-std::array<std::atomic<uint64_t>,5> g_halo3WorldHandoffNextMs{};
-std::array<std::atomic<uint32_t>,5> g_halo3WorldHandoffReservations{};
+std::array<Halo3WorldHandoffObservation,96> g_halo3WorldHandoffRecords{};
+std::array<std::atomic<uint32_t>,96> g_halo3WorldHandoffStates{};
+std::array<std::atomic<uint64_t>,6> g_halo3WorldHandoffCounts{};
+std::array<std::atomic<uint64_t>,6> g_halo3WorldHandoffNextMs{};
+std::array<std::atomic<uint32_t>,6> g_halo3WorldHandoffReservations{};
 
 void Halo3ObserveWorldHandoff(uint64_t nowMs,uint64_t serial,uint64_t originMs,
     int32_t weapon,int proposal,int final,uint32_t proof,const BoneMatrix& tracked,
@@ -114,17 +114,19 @@ void Halo3ObserveWorldHandoff(uint64_t nowMs,uint64_t serial,uint64_t originMs,
     if (!std::isfinite(gap)) return;
     // Independent reservations preserve late failures after initial controls.
     // Category 0: early ownership lost; 1: visible over-leash; 2: hidden;
-    // 3: remaining controls; 4: final cache newer than the frame timestamp.
+    // 3: remaining controls; 4: final cache newer than the frame timestamp;
+    // 5: final cache has neither a clear seed nor a matching safe pose.
     // Failures retain priority over clock cases. Decisions are unchanged here.
     const bool newer=after.cacheMs>nowMs && after.cacheMs<=after.evaluationMs;
     const uint32_t category=proposal && !final ? 0u :
-        (final!=2 && gap>.30f ? 1u : (newer ? 4u : (final==2 ? 2u : 3u)));
+        (final!=2 && gap>.30f ? 1u : (newer ? 4u :
+        (final==2 ? 2u : (after.reason==5 ? 5u : 3u))));
     g_halo3WorldHandoffCounts[category].fetch_add(1,std::memory_order_relaxed);
-    const uint32_t limit=category<2 || category==4 ? 16u : 4u;
+    const uint32_t limit=category<2 || category>=4 ? 16u : 4u;
     if (g_halo3WorldHandoffReservations[category].load(std::memory_order_relaxed)>=limit) return;
     uint64_t next=g_halo3WorldHandoffNextMs[category].load(std::memory_order_relaxed);
     if (nowMs<next || !g_halo3WorldHandoffNextMs[category].compare_exchange_strong(
-            next,nowMs+100,std::memory_order_relaxed)) return;
+            next,nowMs+(category==5 ? 1000 : 100),std::memory_order_relaxed)) return;
     const auto ordinal=g_halo3WorldHandoffReservations[category].fetch_add(1,std::memory_order_relaxed);
     if (ordinal>=limit) return;
     const auto index=category*16+ordinal;
@@ -254,7 +256,7 @@ void Halo3AuditWorldDraw(uint64_t nowMs,uint32_t generation,int32_t weapon,int32
         g_halo3WorldGatherOnly.load(std::memory_order_acquire) ||
         !std::isfinite(worldScale) || worldScale<.05f || worldScale>2) return;
     static uint64_t lastMs=0,lastSerial=0;
-    static unsigned next=0,freeSamples=0,hiddenSamples=0;
+    static unsigned next=0;
     if (next>=g_halo3WorldMeshAudits.size() || nowMs<lastMs || nowMs-lastMs<2500) return;
     auto draw=g_halo3WorldDraws.read();
     if (!draw) return;
@@ -263,12 +265,9 @@ void Halo3AuditWorldDraw(uint64_t nowMs,uint32_t generation,int32_t weapon,int32
         d.reset!=g_halo3WorldReset.load(std::memory_order_acquire) || nowMs<d.ms || nowMs-d.ms>50) return;
     const float gap=PhysicalContactLength(Halo3WorldTransform(d.nodes[0]).position-
         Halo3WorldTransform(d.tracked[0]).position)/worldScale;
-    if (!std::isfinite(gap) || (gap<.005f && freeSamples>=4) ||
-        (d.disposition==2 && hiddenSamples>=4)) return;
-    // Limit consecutive controls, not lifetime controls. A later withdrawal
-    // must regain samples even when the initial free-hand quota was spent.
-    if (gap<.005f) ++freeSamples; else freeSamples=0;
-    if (d.disposition==2) ++hiddenSamples; else hiddenSamples=0;
+    if (!std::isfinite(gap)) return;
+    // A raw/unowned pose also has zero correction. Skipping consecutive zero
+    // gaps would suppress precisely the samples needed to detect that failure.
     lastMs=nowMs; lastSerial=d.serial;
     const unsigned index=next++;
     auto& record=g_halo3WorldMeshAudits[index];
@@ -681,9 +680,10 @@ void Halo3LogWorldVolume()
         g_halo3WorldUnknown.load(),g_halo3WorldShapeRejects.load(),g_halo3WorldQueries.load(),
         g_halo3WorldExhausted.load(),g_halo3WorldFaults.load());
     LARGE_INTEGER frequency{}; QueryPerformanceFrequency(&frequency);
-    LOG("H3 world handoff counts: lost=%llu visibleOverLeashWithoutLoss=%llu hidden=%llu controls=%llu clockCases=%llu",
+    LOG("H3 world handoff counts: lost=%llu visibleOverLeashWithoutLoss=%llu hidden=%llu controls=%llu clockCases=%llu missingSeed=%llu",
         g_halo3WorldHandoffCounts[0].load(),g_halo3WorldHandoffCounts[1].load(),
-        g_halo3WorldHandoffCounts[2].load(),g_halo3WorldHandoffCounts[3].load(),g_halo3WorldHandoffCounts[4].load());
+        g_halo3WorldHandoffCounts[2].load(),g_halo3WorldHandoffCounts[3].load(),g_halo3WorldHandoffCounts[4].load(),
+        g_halo3WorldHandoffCounts[5].load());
     LOG("H3 world cache clock: mode=after-pin newerThanFrame=%llu; freshness=20ms hold=100ms, raw pose timestamps unchanged",
         g_halo3WorldClockAdvances.load());
     LOG("H3 world cover reuse: contained=%llu geometryChanged=%llu; complete incoming spheres plus 5mm deformation reserve required",

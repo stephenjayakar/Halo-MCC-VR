@@ -1383,3 +1383,40 @@ original files and matching Steam metadata. Accepted pointer unchanged;
 ordinary launches still do not enable the world/blade experiments. The exact
 overshield-doorway failure remains a separate regression target, as do full
 sword shape/effects, moving bodies, NPC interaction and headset latency.
+
+### dd461a3 full-sword ownership gap and diagnostic follow-up
+
+Run `20260906-112946313Z-controller-contact-result.json` used Steam / SteamVR
+null / Null Model Number, Guardian Forge, WorldPartitions + mesh audit +
+BladeGeometry. Runtime source and DLL are the dd461a3 identity above; validator
+source was b828cc7. Preserved log SHA:
+`3CC0CD0C59EF981D48D41818F1E4149605C048B6A77C082E2C7EA8E87887464E`.
+The harness timed out without a wall-contact pass; its 90-second hold never
+started. The sword was spawned through the Forge palette and picked up with
+normal player input. Full 256-triangle blade geometry was selected, with four
+incoming-cover geometry changes observed and no sword geometry rejection.
+
+During the late approach, admitted solves stopped at 44,891 while caches kept
+publishing. Withdrawal restored progress to 45,281 and seeds increased from
+14 to 15. Last counters: 10,394 caches, 46,326 regions, zero blocks, 1,229 holds,
+17 hide decisions/shape rejects, and zero unknown solves, region misses,
+capacity/validation/planning/cast failures, exhausted budgets or native faults.
+Existing handoff controls do not identify this late return reason. Missing a
+clear seed after a shape change is a hypothesis, not an established cause.
+Only nine native mesh audits survived the consecutive-control quotas; none
+proved contact. No new demonstration video was produced from this failed test.
+Parsed evidence: `out/research/20260906-native-volume/guardian-sword-ownership-summary.json`.
+
+Diagnostic follow-up removes free/hidden quotas from the opt-in mesh sampler:
+a zero-correction raw/unowned pose must still receive native geometry checks.
+The 2.5-second cadence remains, with a fixed 256-record session budget. A new
+independent handoff category reserves sixteen records, at one-second spacing,
+for final return reason 5 (neither a clear seed nor a matching safe pose).
+Counters continue after records fill. This changes observations only; it does
+not claim a sword fix or change solver ownership, collision binding, or normal
+headset configuration. Native mesh audits remain worker-only and opt-in.
+
+After the sword run, MCC/SteamVR were closed and normal SteamVR settings
+restored to SHA `298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`.
+The read-only Campaign check found all four original files and matching Steam
+metadata. No save restoration was necessary. Accepted pointer unchanged.
