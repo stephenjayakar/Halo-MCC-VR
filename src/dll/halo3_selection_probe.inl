@@ -65,14 +65,14 @@ void Halo3ObserveSelection(uint32_t tag, const uint16_t* meshes, int32_t matrixC
         if (!entry) return;
         key.weapon = *reinterpret_cast<const int32_t*>(entry + 4);
         memcpy(key.meshes, meshes, key.regions * sizeof(uint16_t));
-        // One immutable record per selection change, not one per eye/frame.
-        // Each caller thread owns its dedupe key; reservations are shared atomically.
+        // Keep the first selection and its first exact published-palette match.
+        // A switch's first palette may not match the contact publication;
+        // selection-only deduplication would hide every later settled match.
         static thread_local Halo3SelectionProbeKey previous{};
-        if (!memcmp(&previous, &key, sizeof(key))) return;
-        previous = key;
-        const uint64_t index = g_halo3SelectionProbeReservations.fetch_add(1, std::memory_order_relaxed);
-        if (index >= kHalo3SelectionProbeRecords) return;
-        auto& record = g_halo3SelectionProbeRecords[index];
+        static thread_local bool previousPaired = false;
+        const bool sameSelection = !memcmp(&previous, &key, sizeof(key));
+        if (sameSelection && previousPaired) return;
+        Halo3SelectionProbeRecord record{};
         record.key = key;
         record.ms = GetTickCount64();
         record.matrices = matrixCount;
@@ -103,6 +103,12 @@ void Halo3ObserveSelection(uint32_t tag, const uint16_t* meshes, int32_t matrixC
             record.matchesDrawn = true;
             record.drawnSerial = serial;
         }
+        if (sameSelection && !record.matchesDrawn) return;
+        previous = key;
+        previousPaired = record.matchesDrawn;
+        const uint64_t index = g_halo3SelectionProbeReservations.fetch_add(1, std::memory_order_relaxed);
+        if (index >= kHalo3SelectionProbeRecords) return;
+        g_halo3SelectionProbeRecords[index] = record;
         g_halo3SelectionProbeStates[index].store(2, std::memory_order_release);
     }
     __except (EXCEPTION_EXECUTE_HANDLER)

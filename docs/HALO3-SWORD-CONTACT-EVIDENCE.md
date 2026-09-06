@@ -493,3 +493,46 @@ The harness requires at least one exact palette-paired record and zero probe
 faults, rather than treating its generic contact pass as probe verification.
 This candidate does not enable sword blade collision. Runtime capture of a
 blade-off selection and a production geometry/selection policy remain pending.
+
+### Live synchronous capture and deduplication limitation
+
+Candidate `029e660f3f0d3206b2831cf701d703bf46e6cd3d`, DLL SHA-256
+`63BD9D76808FA1301B4548A4BB1648A4A5E3E8851CD7688EAA3729B6ADE25DA0`,
+installed from `out/candidates/029e660-h3-physical-contact-20260906-025708882Z`,
+ran in Steam / SteamVR OpenXR 2.17.8 / Null Model Number, Forge Construct.
+The installed hash was verified separately. Harness result
+`out/debug-openxr/20260906-030053441Z-controller-contact-result.json` passed;
+preserved log SHA-256
+`990B970BA5740DB3675E01A80986D7A90BB30CDF8AB9350D3C37FA537FA674C5`.
+This proves the diagnostic's base condition, not sword collision acceptance.
+
+All four signatures bound, with zero observation faults or rejected bounds.
+The rifle's first record selected `[0]` and byte-matched its published palette
+(`drawnSerial=6`). Native Forge spawn/drop, movement and E pickup equipped sword
+object `0xE45200B8`, render `0xEF060D90`. The synchronous record selected `[0,1]`,
+two nodes and two matrices. Y switched to the rifle, then back to the sword.
+Each switch produced a new identity record. No blade-off selection appeared.
+The first sword pickup and both first switch palettes did not match the contact
+publication. The cause of those mismatches was not measured by this version.
+
+Selection-only deduplication recorded only those first frames, so it cannot
+answer whether the later settled palettes pair. The next diagnostic preserves
+the first record and the first exact palette match for each selection, then
+deduplicates subsequent frames. It retains the 64-record cap and optional-only
+failure isolation. It adds no collision behavior.
+
+Pickup required a read-only position check: on this spawn, forward moved
+approximately `(+0.49,-0.87)` and left `(+0.87,+0.49)` in world XY. The railing
+blocked the initial approach. Native editor movement to the other side and a
+return to player mode permitted E pickup. These directions are observed for
+this session only. Diagnostic inputs must be state-verified; two Up pulses in
+one sequence did not reliably produce two mode transitions.
+
+Video `out/demos/20260906-030939-sword-selection-switch-diagnostic/raw.mp4`,
+SHA-256 `62D9D8346E884D958D47AE19F203DC6200FF4BAFBD57387DAB61A76AF18CBC22`,
+shows the equipped sword followed by the rifle in six reviewed sample frames.
+The return switch occurred after recording ended. This is a diagnostic,
+not a wall/contact/shove demonstration. Normal contact sampling remained
+handle-only (`weaponTriangles=12 nativeSamples=33`) with no hits or impulses.
+Harness cleanup completed normally and restored the original headset settings;
+the accepted-build pointer is unchanged.
