@@ -536,3 +536,60 @@ not a wall/contact/shove demonstration. Normal contact sampling remained
 handle-only (`weaponTriangles=12 nativeSamples=33`) with no hits or impulses.
 Harness cleanup completed normally and restored the original headset settings;
 the accepted-build pointer is unchanged.
+
+### Settled palette pairing, second synchronous candidate
+
+`bf488fde1d2ca0b846181370ed4ab35bb48ae94e` preserves the first selection
+and its first exact published-palette match. Release build and core tests
+passed. Package `out/candidates/bf488fd-h3-physical-contact-20260906-031345744Z`
+installed DLL SHA-256
+`FE9BF5A14A06B835841A66F607D5AB482BC473FF3D188B298FFBF0D29B8973DC`;
+the installed file was hashed separately. The installer checked all configured
+edition roots; only E: Steam is currently present.
+
+Steam / SteamVR OpenXR 2.17.8 / Null Model Number / Forge Construct repeated
+native sword spawn, E pickup and Y switch away/back. Sword object `0xE46400B3`
+and render `0xEF060D90` selected `[0,1]`, two nodes, two matrices. Pickup's
+unmatched record at tick `71427531` was followed by an exact match at `71427546`
+(`drawnSerial=14202`): 15 ms later. Switching to the rifle produced unmatched
+and matched records in tick `71450531`; switching back to the sword did the
+same in tick `71466578` (`drawnSerial=21218`). Tick equality does not prove zero
+elapsed time. The selection remained unchanged between each unmatched/matched
+pair. No blade-off selection was captured. This establishes exact positive
+pairing in pickup/switch cases, not a universal visibility or animation rule.
+
+The selected-mesh hook is before skinning/submission. A future contact consumer
+must pair generation, full weapon identity and the exact pose/selection, and
+reject missing or stale observations. It must not reuse an initial unmatched
+switch pose. The diagnostic's deduplicated records are evidence, not a
+per-frame publication suitable for directly driving that consumer.
+
+An offline audit of `blade-triangles.txt` partitioned triangles by authored Y:
+122 triangles and 63 distinct positions on each side; zero triangles cross Y=0.
+Each side extends from x=-0.076511398 to x=0.362303019. Positive-side Y stays
+within [0.00541535765,0.0924675018]; negative-side Y mirrors that range.
+`out/research/20260905-sword-contact/blade-side-partition-audit.json` records
+the counts/bounds. Two convex blade children plus the existing handle would
+fit the current four-child held-weapon limit and 256-vertex child capacity.
+That is a feasible collider construction, not a tested runtime collider:
+convex prongs are conservative approximations, and exact triangle contact,
+wall sampling, selection freshness and melee integration still require tests.
+
+The second harness completed successfully at 03:22:42 UTC:
+`out/debug-openxr/20260906-031403238Z-controller-contact-result.json`.
+Preserved runtime log SHA-256
+`9B8220C41176F81E5A1B23935C6D6A829201CA26CE8E6E75A5508C74A803F426`.
+Final probe status: 161,801 calls, seven records, zero rejected observations,
+zero faults. `synchronous-paired-selection-audit.json` in the sword research
+directory parses every record and matrix from that immutable log. The two
+paired sword records have identical root/child bases, while the child position
+differs from root-transformed rest by 2.37e-5 and 2.82e-6 world units. Use the
+actual child matrix, not an assumed rigid rest offset, for animated geometry.
+The audit is an offline calculation, not additional runtime acceptance.
+
+MCC and SteamVR were closed after the harness; the independently hashed
+restored `steamvr.vrsettings` is
+`175C79EDD6BBD58D1B7638BFFF7AAFF784625710BBEBE2A574BE76E4AC8BA89E`.
+The diagnostic is absent from normal launches unless its environment flag is
+explicitly enabled. The installed build still uses handle-only sword contact;
+no new physical-interaction showcase or headset acceptance is claimed.
