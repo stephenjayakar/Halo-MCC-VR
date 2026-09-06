@@ -77,6 +77,53 @@ struct Halo3WorldGatherAudit
 };
 std::array<Halo3WorldGatherAudit,20> g_halo3WorldGatherAudits{};
 std::array<std::atomic<uint32_t>,20> g_halo3WorldGatherAuditStates{};
+struct Halo3WorldHandoffObservation
+{
+    uint64_t ms{},serial{},age{};
+    int32_t weapon{-1};
+    int proposal{},final{};
+    uint32_t proof{},category{};
+    float gapMeters{};
+    PhysicalContactVec3 tracked{},submitted{};
+    Halo3WorldConstraintObservation before{},after{};
+};
+std::array<Halo3WorldHandoffObservation,64> g_halo3WorldHandoffRecords{};
+std::array<std::atomic<uint32_t>,64> g_halo3WorldHandoffStates{};
+std::array<std::atomic<uint64_t>,4> g_halo3WorldHandoffCounts{};
+std::array<std::atomic<uint64_t>,4> g_halo3WorldHandoffNextMs{};
+std::array<std::atomic<uint32_t>,4> g_halo3WorldHandoffReservations{};
+
+void Halo3ObserveWorldHandoff(uint64_t nowMs,uint64_t serial,uint64_t originMs,
+    int32_t weapon,int proposal,int final,uint32_t proof,const BoneMatrix& tracked,
+    const BoneMatrix& submitted,const Halo3WorldConstraintObservation& before,
+    const Halo3WorldConstraintObservation& after)
+{
+    if (!g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) ||
+        g_halo3WorldGatherOnly.load(std::memory_order_acquire)) return;
+    const float scale=g_worldScale.load(std::memory_order_relaxed);
+    const PhysicalContactVec3 a{tracked.translation[0],tracked.translation[1],tracked.translation[2]};
+    const PhysicalContactVec3 b{submitted.translation[0],submitted.translation[1],submitted.translation[2]};
+    if (!PhysicalContactFinite(a) || !PhysicalContactFinite(b) || !std::isfinite(scale) || scale<.05f || scale>2) return;
+    const float gap=PhysicalContactLength(a-b)/scale;
+    if (!std::isfinite(gap)) return;
+    // Independent reservations preserve late failures after initial controls.
+    // Category 0: early ownership lost; 1: visible over-leash; 2: hidden;
+    // 3: remaining controls. This records existing decisions, changing none.
+    const uint32_t category=proposal && !final ? 0u :
+        (final!=2 && gap>.30f ? 1u : (final==2 ? 2u : 3u));
+    g_halo3WorldHandoffCounts[category].fetch_add(1,std::memory_order_relaxed);
+    const uint32_t limit=category<2 ? 16u : 4u;
+    if (g_halo3WorldHandoffReservations[category].load(std::memory_order_relaxed)>=limit) return;
+    uint64_t next=g_halo3WorldHandoffNextMs[category].load(std::memory_order_relaxed);
+    if (nowMs<next || !g_halo3WorldHandoffNextMs[category].compare_exchange_strong(
+            next,nowMs+100,std::memory_order_relaxed)) return;
+    const auto ordinal=g_halo3WorldHandoffReservations[category].fetch_add(1,std::memory_order_relaxed);
+    if (ordinal>=limit) return;
+    const auto index=category*16+ordinal;
+    g_halo3WorldHandoffRecords[index]={nowMs,serial,nowMs>=originMs?nowMs-originMs:0,
+        weapon,proposal,final,proof,category,gap,a,b,before,after};
+    g_halo3WorldHandoffStates[index].store(2,std::memory_order_release);
+}
 
 // Simulation worker only; cold logging consumes immutable records. Reserve
 // sixteen failure records independently of four success controls.
@@ -468,8 +515,10 @@ bool Halo3WorldVolumeOwns(uint32_t generation,int32_t weapon,uint64_t nowMs)
 // weapon must be hidden during an unproved or over-leash recovery. The caller
 // retains the physical pose separately from its final hidden draw matrices.
 int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int32_t weapon,
-    uint32_t generation,uint64_t serial,uint64_t nowMs,const BoneMatrix* tracked,bool publishRequest)
+    uint32_t generation,uint64_t serial,uint64_t nowMs,const BoneMatrix* tracked,bool publishRequest,
+    Halo3WorldConstraintObservation& observation)
 {
+    observation={}; observation.reason=1;
     if (!g_halo3WorldVolumeEnabled.load(std::memory_order_acquire) ||
         !g_config.physical_weapon_contact || !Halo3PhysicalContactRenderGuardOnFoot(generation) ||
         !tracked || !nodes || !count || count>16) return 0;
@@ -484,16 +533,21 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
             memcpy(r.nodes.data(),tracked,count*sizeof(BoneMatrix)); write.publish(serial);
         }
     }
-    if (g_halo3WorldGatherOnly.load(std::memory_order_acquire)) return 0;
+    if (g_halo3WorldGatherOnly.load(std::memory_order_acquire)) { observation.reason=2; return 0; }
     auto cache=g_halo3WorldCaches.read();
-    if (!cache) return 0;
+    if (!cache) { observation.reason=3; return 0; }
     const auto& c=cache.get();
-    if (c.generation!=generation || c.reset!=reset || c.weapon!=weapon || c.tag!=tag) return 0;
+    observation.count=c.count; observation.reset=c.reset; observation.active=c.active;
+    observation.cacheMs=c.ms; observation.epoch=c.epoch; observation.shape=c.shape;
+    observation.seeded=c.seeded;
+    if (c.generation!=generation || c.reset!=reset || c.weapon!=weapon || c.tag!=tag)
+    { observation.reason=4; return 0; }
     auto safe=g_halo3WorldPoses.read();
     const bool haveSafe=safe && safe.get().generation==generation && safe.get().reset==reset &&
         safe.get().weapon==weapon && safe.get().tag==tag && safe.get().shape==c.shape &&
         safe.get().active==c.active;
-    if (!c.seeded && !haveSafe) return 0;
+    observation.safe=haveSafe;
+    if (!c.seeded && !haveSafe) { observation.reason=5; return 0; }
     auto pose=haveSafe ? safe.get().root : c.seed;
     // A worker's independently clear recovery seed supersedes an over-leash
     // old pose. It never authorizes a reset at an untested raw hand position.
@@ -503,6 +557,7 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
     const bool matching=Halo3WorldNodesMatch(c,nodes,count);
     const bool fresh=matching && nowMs>=c.ms && nowMs-c.ms<=20 &&
         c.epoch==g_halo3ClearanceEpoch.load(std::memory_order_acquire);
+    observation.matching=matching; observation.fresh=fresh;
     if (!matching) g_halo3WorldShapeRejects.fetch_add(1,std::memory_order_relaxed);
     bool solved=false;
     const auto lastClear=pose;
@@ -550,7 +605,7 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
     }
     if (c.epoch!=g_halo3ClearanceEpoch.load(std::memory_order_acquire))
     { pose=lastClear; solved=false; }
-    if (reset!=g_halo3WorldReset.load(std::memory_order_acquire)) return 2;
+    if (reset!=g_halo3WorldReset.load(std::memory_order_acquire)) { observation.reason=6; return 2; }
     if (!solved) g_halo3WorldHolds.fetch_add(1,std::memory_order_relaxed);
     BoneMatrix desired=nodes[0],inverse{},delta{};
     desired.scale=pose.scale;
@@ -560,7 +615,7 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
     std::array<BoneMatrix,16> moved{};
     bool valid=InvertBoneMatrix(nodes[0],inverse) && ComposeBoneMatrices(desired,inverse,delta);
     for (uint32_t i=0;valid && i<count;++i) valid=ComposeBoneMatrices(delta,nodes[i],moved[i]);
-    if (!valid) return 2;
+    if (!valid) { observation.reason=7; return 2; }
     memcpy(nodes,moved.data(),count*sizeof(BoneMatrix));
     if (solved && reset==g_halo3WorldReset.load(std::memory_order_acquire))
     {
@@ -574,6 +629,7 @@ int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int3
     const bool hide=!matching || nowMs<c.ms || nowMs-c.ms>100 ||
         PhysicalContactLength(pose.position-Halo3WorldTransform(tracked[0]).position)>.30f*c.worldScale;
     if (hide) g_halo3WorldHidden.fetch_add(1,std::memory_order_relaxed);
+    observation.reason=hide?9:8;
     return hide ? 2 : 1;
 }
 
@@ -586,6 +642,21 @@ void Halo3LogWorldVolume()
         g_halo3WorldUnknown.load(),g_halo3WorldShapeRejects.load(),g_halo3WorldQueries.load(),
         g_halo3WorldExhausted.load(),g_halo3WorldFaults.load());
     LARGE_INTEGER frequency{}; QueryPerformanceFrequency(&frequency);
+    LOG("H3 world handoff counts: lost=%llu visibleOverLeashWithoutLoss=%llu hidden=%llu controls=%llu",
+        g_halo3WorldHandoffCounts[0].load(),g_halo3WorldHandoffCounts[1].load(),
+        g_halo3WorldHandoffCounts[2].load(),g_halo3WorldHandoffCounts[3].load());
+    for (uint32_t index=0;index<g_halo3WorldHandoffRecords.size();++index)
+    {
+        uint32_t ready=2;
+        if (!g_halo3WorldHandoffStates[index].compare_exchange_strong(ready,3,std::memory_order_acquire)) continue;
+        const auto& r=g_halo3WorldHandoffRecords[index];
+        const auto& a=r.before; const auto& b=r.after;
+        LOG("H3 world handoff: index=%u category=%u ms=%llu serial=%llu weapon=0x%08X decisions=%d/%d proof=%u originAgeMs=%llu gapM=%.5f reasons=%u/%u cacheMs=%llu/%llu epochs=%llu/%llu shapes=%llu/%llu resets=%u/%u active=%u/%u nodes=%u/%u seeded=%d/%d safe=%d/%d matching=%d/%d fresh=%d/%d tracked=(%.6f %.6f %.6f) submitted=(%.6f %.6f %.6f)",
+            index,r.category,r.ms,r.serial,static_cast<uint32_t>(r.weapon),r.proposal,r.final,r.proof,r.age,r.gapMeters,
+            a.reason,b.reason,a.cacheMs,b.cacheMs,a.epoch,b.epoch,a.shape,b.shape,a.reset,b.reset,a.active,b.active,
+            a.count,b.count,a.seeded?1:0,b.seeded?1:0,a.safe?1:0,b.safe?1:0,a.matching?1:0,b.matching?1:0,
+            a.fresh?1:0,b.fresh?1:0,r.tracked.x,r.tracked.y,r.tracked.z,r.submitted.x,r.submitted.y,r.submitted.z);
+    }
     const auto partitionCalls=g_halo3WorldPartitionCalls.load();
     if (partitionCalls && frequency.QuadPart>0)
         LOG("H3 world partitions: calls=%llu regions=%llu capacity=%llu invalid=%llu planFailures=%llu regionMisses=%llu castInvalid=%llu peaks=%u/%u/%u meanGatherUs=%.1f maxGatherUs=%.1f",

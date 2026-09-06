@@ -967,3 +967,25 @@ handoff gap to instrument, not a verified explanation of the logged frame.
 The next observation must pair both return values, final gap, hide disposition
 and cache identity on the same frame before selecting a behavioral fix. Do
 not treat audit opt-out as resolving this older cached-pose problem.
+
+### Same-frame world handoff observation
+
+Both constraint calls now return a diagnostic record alongside their unchanged
+integer result. The record captures the actual pinned cache's timestamp,
+epoch, shape, reset, active structure and node count, plus seed/safe-pose and
+match/freshness state. Exit reasons distinguish inactive, gather-only, missing
+cache, identity mismatch, missing seed/safe pose, reset change, invalid
+transform, visible and hidden results. No extra cache read reconstructs these
+facts after the call.
+
+Before publication and hidden draw scaling, a bounded observer pairs both
+records with the frame serial, raw/final roots, origin age, old proof and
+actual world decisions. Exclusive categories prioritize lost early ownership,
+then visible over-leash without ownership loss, then hidden, then controls.
+Each late-failure category reserves sixteen samples independently; hidden and
+control categories reserve four each. Atomic publication and a 100 ms
+per-category cadence keep formatting, I/O, allocation and native queries out
+of this render observation. Cold logging consumes each record once. All
+existing collision, pose mutation, recovery and draw decisions are unchanged.
+This diagnostic must establish whether the proposed handoff gap actually
+occurs before a repair is selected.

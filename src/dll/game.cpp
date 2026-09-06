@@ -981,8 +981,22 @@ namespace
     std::atomic<bool> g_halo3WorldPartitions{false};
     std::atomic<bool> g_halo3WorldMeshAuditEnabled{false};
     std::atomic<uint32_t> g_halo3WorldReset{1};
+    struct Halo3WorldConstraintObservation
+    {
+        // 0 not called, 1 inactive, 2 gather-only, 3 no cache, 4 identity,
+        // 5 no seed/safe pose, 6 reset changed, 7 invalid transform,
+        // 8 visible result, 9 hidden result. Observations never grant ownership.
+        uint32_t reason{},count{},reset{},active{};
+        uint64_t cacheMs{},epoch{},shape{};
+        bool seeded{},safe{},matching{},fresh{};
+    };
     int Halo3ConstrainWorldVolume(BoneMatrix* nodes,uint32_t count,uint16_t tag,int32_t weapon,
-        uint32_t generation,uint64_t serial,uint64_t nowMs,const BoneMatrix* tracked,bool publishRequest);
+        uint32_t generation,uint64_t serial,uint64_t nowMs,const BoneMatrix* tracked,bool publishRequest,
+        Halo3WorldConstraintObservation& observation);
+    void Halo3ObserveWorldHandoff(uint64_t nowMs,uint64_t serial,uint64_t originMs,
+        int32_t weapon,int proposal,int final,uint32_t proof,const BoneMatrix& tracked,
+        const BoneMatrix& submitted,const Halo3WorldConstraintObservation& before,
+        const Halo3WorldConstraintObservation& after);
     void Halo3PublishWorldDraw(const BoneMatrix* nodes,const BoneMatrix* tracked,uint32_t count,
         uint16_t tag,int32_t weapon,uint32_t generation,uint64_t serial,uint64_t ms,int disposition);
     bool Halo3AllowFreshRegion(uint32_t generation, uint64_t approvedSerial,
@@ -6010,12 +6024,13 @@ namespace
                     g_halo3ContactActiveWeaponHandle.load(
                         std::memory_order_acquire);
                 int worldProposal=0;
+                Halo3WorldConstraintObservation worldProposalObservation{},worldFinalObservation{};
                 if (haveTrackedNodes && proposalConsumedOffsetValid)
                 {
                     auto worldNodes=trackedNodes;
                     worldProposal=Halo3ConstrainWorldVolume(worldNodes.data(),renderNodeCount,tag,
                         activeWeaponHandle,g_halo3RuntimeGeneration.load(std::memory_order_acquire),
-                        proposalSerial,nowMs,trackedNodes.data(),true);
+                        proposalSerial,nowMs,trackedNodes.data(),true,worldProposalObservation);
                     if (worldProposal)
                     {
                         for (int node=0;node<renderNodeCount;++node)
@@ -6422,7 +6437,11 @@ namespace
                 }
                 const int worldFinal=guardActive && haveTrackedNodes
                     ? Halo3ConstrainWorldVolume(destination,renderNodeCount,tag,activeWeaponHandle,
-                        contactGeneration,proposalSerial,nowMs,trackedNodes.data(),false) : 0;
+                        contactGeneration,proposalSerial,nowMs,trackedNodes.data(),false,worldFinalObservation) : 0;
+                if (guardActive && haveTrackedNodes)
+                    Halo3ObserveWorldHandoff(nowMs,proposalSerial,displayedOriginMs,activeWeaponHandle,
+                        worldProposal,worldFinal,renderProof,trackedNodes[0],destination[0],
+                        worldProposalObservation,worldFinalObservation);
                 if (worldFinal && PhysicalContactLengthSquared({
                         destination[0].translation[0]-trackedNodes[0].translation[0],
                         destination[0].translation[1]-trackedNodes[0].translation[1],
