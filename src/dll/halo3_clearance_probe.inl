@@ -77,9 +77,9 @@ void Halo3BindClearanceProbe(uintptr_t base, size_t size)
     constexpr bool kEnableHalo3WorldVolumeExperiment = false;
     const bool worldFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_VOLUME", value, 2) == 1 && value[0] == L'1';
-    // Explicit candidate: an unseeded current cover retains world ownership
-    // and hides until full-cover withdrawal is independently clear.
-    constexpr bool kEnableHalo3WorldPartitionsExperiment = true;
+    // Disabled after 2d04ac7 retained no-seed ownership but exposed a seeded
+    // sword mesh intersection during Guardian withdrawal (audit48 draw1).
+    constexpr bool kEnableHalo3WorldPartitionsExperiment = false;
     const bool partitionsFlag = GetEnvironmentVariableW(
         L"HALOMCCVR_H3_CONTACT_WORLD_PARTITIONS", value, 2) == 1 && value[0] == L'1';
     const DWORD replayPathLength=GetEnvironmentVariableW(L"HALOMCCVR_H3_WORLD_REPLAY_PATH",nullptr,0);
