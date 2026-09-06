@@ -1802,3 +1802,46 @@ Initial Release and both CTests passed; final packaging will compile the helper
 relocation that makes native faults visible in the existing counter. This is
 opt-in partition recovery only. No runtime or headset result is claimed yet;
 no-seed fallback still needs verification if all bounded proposals fail.
+
+6c40f90 Guardian runtime: FAILED. Source
+`6c40f90c66651303e4293f0deee1ef53565f85e1`, package
+`out/candidates/6c40f90-h3-physical-contact-20260906-130226818Z`, installed DLL
+`F2DD1024F8A60C6294EDF83624701F6F85D8C0B2EDC8289D80016E8922E45A5A` independently
+verified. Final Release and both CTests passed. Backup:
+`out/deploy-backups/4dee4da-steam-before-6c40f90-20260906-130227726Z`.
+Steam / SteamVR null / Null Model Number, started13:02:54Z, ended13:06:34Z.
+Result `out/debug-openxr/20260906-130248977Z-controller-contact-result.json`;
+log SHA `67540FF84FB16EF60D54833329E9BDF0B3E7F1AC1CEE383AEA6840803B69B582`.
+
+This spawn was the lower blue-fixture room looking through an angled doorway,
+not the preceding upper-room spawn. Up750/X450, weapon palette selection,
+A450 twice/Up750 placed the sword. W2100 followed by E1500 picked it up;
+screenshot `20260906-130601994Z-depenetration-pickup` confirms the held sword.
+D250 plus controller Z=-0.85 at13:06:14.615Z approached the right angled wall.
+
+The first recorded over-leash event had gap0.32767m at reset28/shape1454.
+The next missing-seed record changed to shape2857 at the SAME reset28, with
+native fields/epochs current. 112 whole-cover rejections ran depenetration:
+0 recovered seeds, 47,920 sphere callbacks, mean574.9us/max878.9us. This proves
+the search ran and was bounded; it does not explain which feature/region/native
+interior test prevented clearance. Do not expand the distance or callback budget
+without capturing and inspecting that actual failing geometry.
+
+22 preserved mesh audits, zero positive paired contacts. Last audit(index21)
+was draw0, raw/submitted inside2/2 and crossings12/12. Caches2968, seeds5,
+frames16785, blocks8, holds207, hidden32, missingSeed335. Gather capacity,
+invalid, planFailures, regionMisses, castInvalid, query exhaustion and faults
+all0. Cover mean6.6us/max95.1; gather mean69.2us/max915.0; solve mean4.4us/
+max93.1; diagnostic audit max3544.3us. These are not ordinary headset latency.
+The harness stopped on penetration before any post-pass hold or withdrawal.
+No video was started: the run never reached visible paired contact evidence.
+
+The failed partition behavior is disabled in its own commit. MCC/SteamVR
+processes are absent and normal SteamVR settings independently match SHA
+`298D6E805F90CADD0BD2564459AD19DAC15DF0634A5D2431F65506A3898C4D44`.
+The next useful step is a bounded capture of the first rejected historical seed,
+full cover, raw and historical transforms, complete gathered native features,
+and per-sphere rejection causes. Replay that exact geometry offline to establish
+why clearance fails before choosing another recovery radius or direction set.
+The renderer's no-seed fallback remains an explicit unresolved failure. No
+accepted pointer advancement and no claim of Forge/Campaign/headset readiness.
